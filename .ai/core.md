@@ -4,7 +4,7 @@
 
 ## Purpose
 
-TinySNES is a port of nand2mario's GBA FPGA core to open-flow and TinyTang. 
+TinyGBA is a port of nand2mario's GBA FPGA core to open-flow and TinyTang. 
 
 ---
 
