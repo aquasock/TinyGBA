@@ -25,6 +25,13 @@ INS_LOC "pll33.PLL_inst" PLL_R[0];
 // pll12 is not built: USB HID is disabled in src/boards/console138k.v, so
 // there is no 12 MHz domain and PLL_R[2] stays free for the placer.
 INS_LOC "pll_hdmi.PLL_inst" PLL_R[3];
+// pll16 carries the GBA main clock.  This placement is load-bearing: a PLL
+// output reaches the clock spine only through a clock-plane wire, and only
+// CLKOUT0 has a pip to one on this device.  PLL_L[0]'s CLKOUT0 owns
+// TLPLL0CLK0; PLL_R[0]'s is already taken by clk50.  Do not move it to a site
+// whose only plane wire is in use, and do not move clk16 back to CLKOUT1.
+// The left-side site costs nothing else here: no pin depends on it.
+INS_LOC "pll16.PLL_inst" PLL_L[0];
 INS_LOC "div5" RIGHTSIDE[4];
 
 IO_LOC "sysclk" V22;

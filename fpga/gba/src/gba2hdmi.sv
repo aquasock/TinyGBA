@@ -6,6 +6,7 @@ module gba2hdmi (
     input clk27,
 	input resetn,
     input clk_pixel,    // TinyGBA: 74.25 MHz, divided in gbatang_top.sv
+    input clk_pixel_x5, // TinyGBA: 371.25 MHz serialiser bit clock (was pll_74 clkout1)
 
     // TinyGBA diagnostics (fpga/gba/diag/).  Tied to zero in production builds.
     input [15:0] dbg_bits,
@@ -68,7 +69,9 @@ localparam int POWERUPCYCLES = $rtoi($ceil( POWERUPNS/CLKPERNS ));
 // through tile-local hops, so the OSER10s had no usable PCLK/FCLK pair and the
 // board produced no signal on three separate images (TinySNES TCL-006).  Both
 // replacement cells are pinned in fpga/gba/tinygba.cst.
-// pll_74 pll74(.clkin(clk27), .clkout0(clk_pixel), .clkout1(clk_5x_pixel));
+// Both clocks are now inputs from gbatang_top.sv: `hclk` (the CLKDIV'd pixel
+// clock) and `hclk5` (the PLL's 371.25 MHz output).  The removed wrapper is
+// `pll_74`, whose two outputs could not both reach usable lanes.
 
 // video stuff
 wire [9:0] cy, frameHeight;
@@ -317,7 +320,7 @@ hdmi #( .VIDEO_ID_CODE(VIDEOID),
         .START_X(0),
         .START_Y(0) )
 
-hdmi( .clk_pixel_x5(clk_5x_pixel), 
+hdmi( .clk_pixel_x5(clk_pixel_x5), 
         .clk_pixel(clk_pixel), 
         .clk_audio(clk_audio),
         .rgb(rgb), 

@@ -27,7 +27,7 @@ create_clock -name clk27 -period 37.037 [get_pins {pll27.PLL_inst/CLKOUT0}]
 
 # GBA main clock, 16.75 MHz.  The GPU samples this clock's phase, and the SDRAM
 # controller needs exactly four of these per SDRAM clock.
-create_clock -name clk16 -period 59.701 [get_pins {pll33.PLL_inst/CLKOUT1}]
+create_clock -name clk16 -period 59.701 [get_pins {pll16.PLL_inst/CLKOUT0}]
 
 # GPU clock, one clk16 in three.
 create_clock -name clk50 -period 19.900 [get_pins {pll33.PLL_inst/CLKOUT0}]

@@ -113,7 +113,17 @@ wire clk16;         // main clock: 16.7Mhz GBA CPU clock
 wire clk50;         // ppu clock:  3 x 16.7Mhz
 wire clk67, clk67_p;// ram clock:  67.2Mhz
 wire hclk;          // 74.25Mhz hdmi 720p pixel clock
-pll_33 pll33(.clkin(clk27), .clkout0(clk50), .clkout1(clk16), .clkout2(clk67), .clkout3(clk67_p));
+// TinyGBA: clk16 needs its own PLL.  A PLL output reaches the global clock
+// spine only through a clock-plane wire, and on this device only CLKOUT0 has
+// a pip to one: CLKOUT1..6 connect no further than the tile-local CLK1/CLK2
+// lanes.  On CLKOUT1 of pll33 clk16 reached none of its 2381 sinks globally
+// and nextpnr fell back to 2381 point-to-point arcs whose clock skew (-5.38 ns
+// at worst, into mem_bios) failed hold on every one of 24 placements.  pll33's
+// own CLKOUT0 plane wire is already taken by clk50, so clk16 gets pll16 on
+// PLL_L[0], the site whose CLKOUT0 owns TLPLL0CLK0.  See fpga/gba/src/pll/pll_16.v.
+pll_33 pll33(.clkin(clk27), .clkout0(clk50), .clkout1(clk16_unused), .clkout2(clk67), .clkout3(clk67_p));
+wire clk16_unused;
+pll_16 pll16(.clkin(clk27), .clkout0(clk16));
 assign O_sdram_clk = clk67_p;
 
 // TinyGBA: HDMI clocks.  One output on the PLL and a CLKDIV for the pixel
@@ -597,7 +607,7 @@ gba2hdmi_ddr3 video (       // DDR3-based framebuffer
 assign led = ~{joy_usb1[2:0], init_calib_complete, overlay, usb_conerr, usb_type};
 `else
 gba2hdmi video (            // BRAM-based framebuffer
-	.clk(clk50), .clk27(clk27), .resetn(resetn), .clk_pixel(hclk),
+	.clk(clk50), .clk27(clk27), .resetn(resetn), .clk_pixel(hclk), .clk_pixel_x5(hclk5),
     .pixel_data(pixel_out_data), .pixel_x(pixel_out_x), .pixel_y(pixel_out_y),
     .pixel_we(pixel_out_we),
     .sound_left(sound_out_left), .sound_right(sound_out_right),

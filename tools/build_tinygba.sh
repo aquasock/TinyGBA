@@ -59,6 +59,7 @@ sources=(
     "$d/pll/pll_27.v"
     "$d/pll/pll_33.v"
     "$d/pll/pll_12.v"
+    "$d/pll/pll_16.v"
     "$d/pll/gowin_pll_hdmi.v"
     "$d/usb_hid_host.v"
     "$d/fb.v"
