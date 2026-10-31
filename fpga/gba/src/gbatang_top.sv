@@ -579,7 +579,41 @@ gba_joypad joypad (
 
 `ifndef VERILATOR
 // wire overlay = ~s1;      // for debug
-wire overlay;
+//
+// TinyGBA: the OSD overlay powers up asserted.  `iosys_bl616`'s overlay_reg is
+// initialised to 1 and is only cleared by command 0x08 with x[0]=0, which the
+// BL616 menu sends.  With nothing driving that command the overlay stays on
+// for ever, and because it owns a 960-pixel-wide window (XSTART_O..XSTOP_O)
+// drawn from overlay_color, it hides whatever is in the framebuffer behind an
+// empty menu's black.  That is what the first video-proof load showed: a
+// locked 720p picture, correctly letterboxed, with the active area exactly
+// 960 px wide and uniformly black.
+//
+// The diagnostic builds exist to read their answer off the screen, so they tie
+// the overlay low.  Production keeps the OSD, because the menu is a real
+// feature there and the BL616 closes it in normal use.  Two nested `ifdef`s
+// rather than one `||` expression: TinySNES found that slang does not evaluate
+// `elsif A || B` as written.
+`ifdef TINYGBA_VIDEO_TEST
+  `define TINYGBA_DIAG_OVERLAY_OFF
+`endif
+`ifdef TINYGBA_SDRAM_TEST
+  `define TINYGBA_DIAG_OVERLAY_OFF
+`endif
+// A production build with the overlay suppressed, for bench work: in one-wire
+// mode nothing drives the BL616 menu, so the OSD never closes and its 960-wide
+// window hides the machine behind an empty menu's black.  Keep the OSD in the
+// shipping configuration and take it out only when the machine itself is what
+// is being looked at.
+`ifdef TINYGBA_OVERLAY_OFF
+  `define TINYGBA_DIAG_OVERLAY_OFF
+`endif
+wire overlay_iosys;
+`ifdef TINYGBA_DIAG_OVERLAY_OFF
+wire overlay = 1'b0;
+`else
+wire overlay = overlay_iosys;
+`endif
 wire [7:0] overlay_x, overlay_y;
 wire [14:0] overlay_color;
 reg [5:0] ddr_prefetch_delay;
@@ -631,7 +665,7 @@ iosys_bl616 #(.CORE_ID(3), .COLOR_LOGO(15'b01111_01100_10101), .FREQ(16_650_000)
     .clk(clk16), .hclk(clk50),      // hclk=clk50: goes to framebuffer_ddr3 for overlay
     .resetn(resetn),
 
-    .overlay(overlay), .overlay_x(overlay_x), .overlay_y(overlay_y), .overlay_color(overlay_color),
+    .overlay(overlay_iosys), .overlay_x(overlay_x), .overlay_y(overlay_y), .overlay_color(overlay_color),
     .core_config(core_config),
     .joy1(joy_btns | joy_usb1 | joy_usb2), .joy2(12'b0),
     .hid1(hid1), .hid2(hid2),

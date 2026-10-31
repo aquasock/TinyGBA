@@ -88,4 +88,58 @@ Field meanings:
     - "TinySNES `.ai/core-reference.md` TCL-006 and its `fpga/snes/src/snes2hdmi.v`, `fpga/snes/src/snestang_top.v`"
   verification: "Observed 2026-10-31: the pack stopped at `IOLOGIC_FCLK` before the fix and completed after it, and the final netlist's serialiser cells are connected. Not yet confirmed on hardware: no image has been loaded."
 
+- record_id: BRD-002
+  kind: BOARD
+  topic_id: BRD
+  title: "The OSD overlay powers up asserted and hides the framebuffer until the BL616 clears it"
+  status: VERIFIED
+  verified_date: 2026-10-31
+  statement: "`iosys_bl616.v` declares `reg overlay_reg = 1;` and drives `overlay` straight from it, so gba2hdmi's overlay input is asserted from configuration onwards and is only cleared by command 0x08 with x[0]=0, which the BL616 menu sends. Nothing in a one-wire bench session sends that command. While asserted, gba2hdmi draws its overlay window -- `XSTART_O` to `XSTOP_O`, which is 960 of the 1280 pixels, centred -- and fills it from `overlay_color`, which is zero until the menu writes it. The result is a locked, correctly letterboxed 720p picture whose active area is exactly 960 pixels of black, whatever the framebuffer contains."
+  consequence: "A black screen at 960 pixels wide is the overlay and says nothing about the video path or the machine; a black screen at 1080 pixels is the video window with an empty framebuffer. The two are distinguishable by width alone, which is the quickest read on the capture card. Diagnostic builds must suppress the overlay to show their own answer, and both `TINYGBA_VIDEO_TEST` and `TINYGBA_SDRAM_TEST` now do through nested ifdefs; `TINYGBA_OVERLAY_OFF` suppresses it in an otherwise production build for bench work. Keeping the OSD in the shipping configuration means a standalone load of the core shows that black window until a menu command arrives."
+  sources:
+    - "This repository, fpga/gba/src/iosys/iosys_bl616.v: `reg overlay_reg = 1;`, `assign overlay = overlay_reg;`, and the 0x08 command handler"
+    - "This repository, fpga/gba/src/gba2hdmi.sv: the `XSTART_O`/`XSTOP_O` window and the `overlay_color` mux"
+    - "Bench captures at /tmp/v2 and /tmp/v3, 2026-10-31, measured by pixel run-length along y=360"
+  verification: "Observed on the board 2026-10-31: the video-proof image before the fix showed black from x=160 to x=1119, exactly 960 pixels, and the same image after the fix showed bars across 1080 pixels from x=100 to x=1179. The production image showed the 960-pixel black window as expected."
+
+- record_id: BRD-003
+  kind: BOARD
+  topic_id: BRD
+  title: "The video path is proven on the board; the SDRAM data path is not, and the machine therefore does not run"
+  status: VERIFIED
+  verified_date: 2026-10-31
+  statement: "With the overlay suppressed, `TINYGBA_VIDEO_TEST` draws eight full-height bars in the order and colours its code specifies across a 1080-pixel active area centred in the letterbox, with the 16x16 top-left marker measuring 72 by 72 pixels at the 4.5 scale. That establishes the PLL and divider topology, all four `INS_LOC` placements, the OSER10 serialiser path and both TMDS pairs on hardware for the first time in this port. `TINYGBA_SDRAM_TEST` reaches `done` -- its status band is green -- but only two of sixteen patterns read back correctly: bars 0 and 1 green, bars 2 to 15 red, the low die failing five of its own eight and the high die failing all eight. The probe writes full 32-bit words with `cpu_be` 4'b1111, so the failure is in the read path and not the write width. The pattern set is walking ones in the low byte followed by multi-bit patterns, which cannot say which bits fail: bits 0 and 4 are known to read back and the rest is unlocalised. A production build with the overlay suppressed draws a uniformly black 1080-pixel active area, so the GBA GPU produces no output, consistent with work RAM and cartridge space living in the SDRAM while only the BIOS is in block RAM."
+  consequence: "The video chain is no longer a suspect in any later failure and the diagnostic images can be trusted to show what they claim. The SDRAM is now the blocking fault for the machine, and it must be re-probed with a pattern set that walks every data bit and every address bit individually so a failure names a lane rather than a bar. Any claim that the machine boots, or that the BIOS, timers, saves or GPU work, is unsupported until the SDRAM reads back correctly."
+  sources:
+    - "Bench captures /tmp/v1, /tmp/v2 and /tmp/v4, 2026-10-31, decoded by pixel run-length and per-bar colour sampling"
+    - "This repository, fpga/gba/diag/sdram_probe.v: the eight-pattern list, `cpu_be <= 4'b1111`, and the 32-bit readback compare"
+  verification: "Observed on the board 2026-10-31 across three separate loads: the video pattern decoded bar by bar, the SDRAM probe decoded bar by bar over nine consecutive frames with no variation between them, and the machine build captured over twelve frames with no non-black pixel in the active area."
+
+- record_id: TCL-005
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "Only two PLL clock-plane wires exist on the GW5AST-138C, so at most two PLL clocks can reach the spine"
+  status: VERIFIED
+  verified_date: 2026-10-31
+  statement: "The GW5AST-138C database carries 24 clock-plane wires named `T[LR]PLL<n>CLK<lane>`, four lanes on each of six left- and right-edge PLL sites, and the DCS tiles consume all 24 as sources. But only two pips in the whole database drive one, and both come from `CLKOUT0` of an edge site: `MPLLCLKOUT0 -> TLPLL0CLK0` on tile type 74 and `MPLLCLKOUT0 -> TRPLL0CLK0` on tile type 77. This design already uses both -- `clk16` through `pll16` at `PLL_L[0]` and `clk50` through `pll33` at `PLL_R[0]` -- so no third PLL output can be given a spine of its own. `clk67` therefore has no route to global clock routing at all in this configuration, and its 255 sinks stay on general routing with 1.2 to 1.9 ns of skew whatever seed is chosen, clean or not."
+  consequence: "`clk67` cannot be fixed the way `clk16` was fixed, and no amount of seed sweeping removes the defect -- it only finds placements where the skew happens not to break hold. Settling it needs either a measured answer on whether `CLKOUT2` can reach a spine, or an architectural change that stops taking the SDRAM clock from a PLL output, or a fanout reduction. Any placement failure on this design should be assumed to be `clk67` until shown otherwise: across seeds 1 to 9 of the video netlist, every failure was this one defect."
+  sources:
+    - "apicula `GW5AST-138C.msgpack.xz`: `tiles[*].pips`, the only two entries naming a `PLL0CLK` wire as destination"
+    - "This repository, fpga/gba/tinygba.cst: `pll33` at `PLL_R[0]`, `pll16` at `PLL_L[0]`"
+    - "This repository, build seeds 1 to 9 of the video netlist, 2026-10-31"
+  verification: "Measured 2026-10-31: `clk16` and `clk50` route on global resources, `clk67` misses dedicated routing on all 255 sinks at every seed, and the only hold violations across three configurations and sixteen placements were `clk67` at -1.2 to -1.9 ns."
+
+- record_id: TCL-006
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A three-bit bar index truncates the eighth video-test bar back to the first"
+  status: VERIFIED
+  verified_date: 2026-10-31
+  statement: "`TINYGBA_VIDEO_TEST`'s colour function declares `reg [2:0] bar;` and computes `bar = x / 8'd27;` for a 240-pixel-wide framebuffer. Source x 216 to 239 divides to 8, which does not fit three bits and truncates to 0, so the last 23 source pixels take the `3'd0` case and draw red. The bars otherwise run red, green, blue, white, yellow, cyan, magenta, grey. At the 4.5 horizontal scale of the 1080-pixel video window, 23 source pixels is 104 display pixels, and the capture shows a 104-pixel red band at the right edge where the grey should continue."
+  consequence: "The picture is otherwise correct and the band is an instrument defect, not a video fault; it should not be read as a colour or addressing error in the core. Widen the index to four bits, or size the bars so the last one never overflows, before drawing any conclusion from the right-hand edge of that pattern."
+  sources:
+    - "This repository, fpga/gba/src/gba2hdmi.sv: the `TINYGBA_VIDEO_TEST` colour function"
+    - "Bench capture /tmp/v1/f05.png, 2026-10-31: run-length along y=400 shows grey 954-1069 then red 1074-1177"
+  verification: "Measured on the board 2026-10-31: the arithmetic predicts a 104-pixel band and the capture measures 104 pixels, and the other seven bars land where the scale predicts."
+
 ---

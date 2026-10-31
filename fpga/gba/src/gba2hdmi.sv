@@ -148,9 +148,17 @@ end
 // GPU, the CPU and the SDRAM, so a black screen means the video path is wrong
 // and says nothing about the machine.
 //
-// The pattern is asymmetric on purpose: a white block in the top-left corner
-// and a red bar on the right edge, so a mirrored or rotated scan reads as such
-// rather than as a different fault.
+// The pattern is asymmetric on purpose, so a mirrored or rotated scan reads as
+// such rather than as a different fault.  What it actually draws, left to
+// right: red, green, blue, white, yellow, cyan, magenta, then grey from x=189
+// to x=239 -- bar 7 and the 216..239 remainder both fall through to `default`,
+// so the right-hand grey band is 51 px against a 27 px bar.  Over that sits a
+// white 16x16 block at the top-left corner only.  A mirrored scan therefore
+// shows the white marker at the top-RIGHT and the wide grey band on the LEFT;
+// a rotated one shows the marker off the top edge.  (An earlier version of
+// this comment claimed a red bar on the right edge; the code has never done
+// that, and the expectation is now written from the code rather than beside
+// it.)
 reg [7:0] vt_x, vt_y;
 
 function [17:0] vt_colour(input [7:0] x, input [7:0] y);
