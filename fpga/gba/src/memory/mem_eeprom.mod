@@ -1,0 +1,24 @@
+-series GW5AST
+-device GW5AST-138
+-device_version B
+-package PBGA484A
+-part_number GW5AST-LV138PG484AC1/I0
+
+
+-mod_name mem_eeprom
+-file_name mem_eeprom
+-path F:/Gowin/dev/gbatang/src/memory/
+-type RAM_DP
+-file_type vlg
+-bram_b true
+-dev_type GW5AST-138B
+-depth_0 65536
+-depth_1 8192
+-width_0 1
+-width_1 8
+-read_mode_0 bypass
+-read_mode_1 bypass
+-write_mode_0 normal
+-write_mode_1 normal
+-speed false
+-reset_mode sync
