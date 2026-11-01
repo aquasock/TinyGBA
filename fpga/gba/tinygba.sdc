@@ -34,7 +34,7 @@ create_clock -name clk50 -period 19.900 [get_pins {pll33.PLL_inst/CLKOUT0}]
 
 # SDRAM clock, one clk16 in four.  O_sdram_clk is this clock's phase-shifted
 # sibling (CLKOUT3), which is not constrained separately: it leaves the FPGA.
-create_clock -name clk67 -period 14.925 [get_pins {pll33.PLL_inst/CLKOUT2}]
+create_clock -name clk67 -period 14.925 [get_pins {pll16.PLL_inst/CLKOUT2}]
 
 # USB HID host clock.
 create_clock -name clk12 -period 83.333 [get_pins {pll12.PLL_inst/CLKOUT0}]

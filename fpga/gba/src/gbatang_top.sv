@@ -113,17 +113,24 @@ wire clk16;         // main clock: 16.7Mhz GBA CPU clock
 wire clk50;         // ppu clock:  3 x 16.7Mhz
 wire clk67, clk67_p;// ram clock:  67.2Mhz
 wire hclk;          // 74.25Mhz hdmi 720p pixel clock
-// TinyGBA: clk16 needs its own PLL.  A PLL output reaches the global clock
-// spine only through a clock-plane wire, and on this device only CLKOUT0 has
-// a pip to one: CLKOUT1..6 connect no further than the tile-local CLK1/CLK2
-// lanes.  On CLKOUT1 of pll33 clk16 reached none of its 2381 sinks globally
-// and nextpnr fell back to 2381 point-to-point arcs whose clock skew (-5.38 ns
-// at worst, into mem_bios) failed hold on every one of 24 placements.  pll33's
-// own CLKOUT0 plane wire is already taken by clk50, so clk16 gets pll16 on
-// PLL_L[0], the site whose CLKOUT0 owns TLPLL0CLK0.  See fpga/gba/src/pll/pll_16.v.
-pll_33 pll33(.clkin(clk27), .clkout0(clk50), .clkout1(clk16_unused), .clkout2(clk67), .clkout3(clk67_p));
-wire clk16_unused;
-pll_16 pll16(.clkin(clk27), .clkout0(clk16));
+// TinyGBA: clk16 and clk67 share pll16 on PLL_L[0].  A PLL output reaches the
+// global clock spine only through a clock-plane wire (`T[LR]PLL<n>CLK<lane>`),
+// and the lane number follows the output number: CLKOUT0 uses lane 0, CLKOUT2
+// uses lane 2.  clk16 was on pll33's CLKOUT1, which has no plane wire at all,
+// so it reached none of its 2381 sinks globally and nextpnr fell back to 2381
+// point-to-point arcs whose -5.38 ns of skew failed hold on all 24 placements
+// tried; clk67 on CLKOUT2 had the same defect at 255 sinks and 1.2 to 1.9 ns,
+// and cost several clean seeds on every netlist change.
+//
+// Both now sit on one PLL because they share a VCO: 1809 = 108 x 16.75 =
+// 27 x 67, so CLKOUT0 divides to 16.75 MHz and CLKOUT2 to 67.00 MHz from the
+// same loop.  clk50 keeps pll33, which owns the other plane wire, and pll33's
+// second and third outputs are left unconnected on purpose.  See
+// fpga/gba/src/pll/pll_16.v and .ai/core-reference.md TCL-001.
+wire clk16_unused, clk67_unused, clk67p_unused;
+pll_33 pll33(.clkin(clk27), .clkout0(clk50), .clkout1(clk16_unused),
+             .clkout2(clk67_unused), .clkout3(clk67p_unused));
+pll_16 pll16(.clkin(clk27), .clkout0(clk16), .clkout2(clk67), .clkout3(clk67_p));
 assign O_sdram_clk = clk67_p;
 
 // TinyGBA: HDMI clocks.  One output on the PLL and a CLKDIV for the pixel

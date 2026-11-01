@@ -107,3 +107,35 @@ The next cycle should settle `clk67` before anything else, because it is the com
 - User Test: NOT RUN
 
 ---
+
+## 4 COMMIT Unreleased 2026-10-31T17:18:15-07:00
+
+#### Coming From:
+
+Unreleased e4e9859
+
+#### Purpose:
+
+Settle `clk67`, the one clock still reaching its sinks on general routing and the likeliest cause of both the failed SDRAM readback and the absent machine picture, by measuring what a PLL's second output can reach rather than by sweeping more seeds.
+
+#### Outcome:
+
+`clk67` is fixed, and the fix was a missing database entry rather than a design compromise. The question was whether a PLL's `CLKOUT2` can reach the clock plane at all, since apicula's database carried only two pips into the 24-wire plane and both came from `CLKOUT0`. Two vendor builds answered it. The first enabled `CLKOUT0` and `CLKOUT2` on a `PLL` at `PLL_L[0]`, each clocking a fourteen-bit register bank so both had to be clock-routed, and the unpacked bitstream showed `(54,93) SPINE8 <= TLPLL0CLK0` and `(54,93) SPINE10 <= TLPLL0CLK2` in the same build. The second was the control: `CLKOUT0` disabled and only `CLKOUT2` enabled, which still produced `SPINE8 <= TLPLL0CLK2` driving 48 `GB00` sinks. So `CLKOUT2` does reach the plane, on lane 2, and the lane number follows the output number. apicula simply had no pip to say so, which is why `clk67` fell back to general routing on all 255 of its sinks with 1.2 to 1.9 ns of skew and cost several clean seeds on every netlist change. The pip was added to `_gw5a_pll_clk_wires` as `(0, 'CLKOUT2') -> 'TLPLL0CLK2'`, the fork's chipdb was regenerated with `python3 -m apicula.chipdb_builder GW5AST-138C` under `GOWINHOME`, and nextpnr-himbaechel was rebuilt with `~/tools/rebuild-nextpnr.sh`, which exists because the architecture is generated at make time and the option spelling is easy to get wrong. The regenerated database was diffed against the previous one before use: exactly one pip added, none removed, no other tile field changed, and the only node change is that `TLPLL0CLK2` now merges the PLL tile wire at `(27,1)` with the bridge wire at `(54,93)`, which is precisely what the code's own comment says the mapping is for. On the design, `clk67` and its phase-shifted off-chip sibling `clk67_p` moved from `pll33`'s `CLKOUT2` and `CLKOUT3` to the same outputs of `pll16` at `PLL_L[0]`, which is possible because `clk16` and `clk67` share a VCO: 1809 MHz is 108 times 16.75 and 27 times 67, so one loop divides to both. `clk67_p` keeps the 16/7 fine-phase shift `pll_33` gave it, and `pll33` now drives only `clk50`, its other outputs left unconnected on purpose. The result is categorical where the old behaviour was seed-dependent: across seeds 1 to 8 every placement now routes `clk67` on global resources with zero failed dedicated routes and zero hold violations, against three clean seeds of six before, and `clk67`'s Fmax rose to 125 to 141 MHz against a 67 MHz constraint. The production, video-proof, SDRAM-probe and overlay-free machine images were all rebuilt at seed 1 with zero hold violations and every clock passing, and all four now report both `clk16` and `clk67` on global resources. The apicula fork was committed as `495661a`, which also carries the previously uncommitted FVCO 1809 MHz measurement from entry 3's work. Nothing was deployed: the Tang was not connected to, at the user's instruction, so whether the `clk67` fix repairs the SDRAM readback and the absent picture is not known and must not be assumed. The syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, and validated this entry as entry 4 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of four against the 100-entry limit.
+
+#### Next Steps:
+
+Load the rebuilt images in the order the diagnostics were designed for, once the user releases the board: the video proof first, whose result should be unchanged from entry 3 and is only a control for the rebuild; then the SDRAM probe, which is the real question, because the readback failure of entry 3 was measured while `clk67` was on general routing with more than a nanosecond of skew across the SDRAM controller's own registers, and if the data path now reads back correctly the SDRAM fault was the clock all along; and then the overlay-free machine image, where any picture at all would be the first evidence this port has produced of the GBA itself running. If the SDRAM still fails with `clk67` clean, the next step is the bit-level probe entry 3's Next Steps specified, since the current pattern set cannot name which data lane fails and bits 0 and 4 are the only two known to read back. The `reg [2:0] bar` truncation in the video pattern is still unfixed and still makes the right-hand band red instead of grey; it is harmless but should be corrected before the pattern is used as a reference again. `README.md` remains a single heading and documents neither the build nor the deploy, which is a real gap for anyone picking this up cold.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/pll/pll_16.v
+- fpga/gba/tinygba.sdc
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
