@@ -96,6 +96,7 @@ localparam [1:0] PORT = 2'd1;   // cpu_rdata[1]; any non-zero port will do
 
 reg [1:0]  state;
 reg [16:0] settle;
+reg        rd_settle;   // one clock between cpu_ready and the data
 reg [1:0]  phase;      // 0 write low die, 1 write high die, 2 read low, 3 read high
 reg [3:0]  idx;        // word index within the phase, 0-7
 reg        is_read_r;
@@ -144,6 +145,7 @@ always @(posedge clk) begin
         cpu_port  <= PORT;
         result    <= 16'd0;
         done      <= 1'b0;
+        rd_settle <= 1'b0;
     end else begin
         case (state)
         S_SETTLE: begin
@@ -165,7 +167,26 @@ always @(posedge clk) begin
         S_WAIT: begin
             // Hold the request until the controller takes it.  A read's data is
             // in cpu_rdata[cpu_port] from the ready cycle.
-            if (cpu_ready) begin
+            // `cpu_ready` marks the cycle BEFORE the data, not the cycle the
+            // data is on.  gba_memory.sv documents a 32-bit SDRAM read as
+            //
+            //   sdram  |rd_lo| wait|rd_hi|ready| data
+            //   ready                        |  1  |
+            //
+            // so for a two-halfword access cpu_rdata at the ready cycle holds
+            // only the low halfword and the PREVIOUS high halfword.  Sampling
+            // there made eight of the sixteen patterns report a fault that did
+            // not exist -- every pattern whose high halfword was stale failed --
+            // and the pattern of results is exactly what that predicts, which is
+            // how the mistake was identified rather than guessed.
+            // Two steps, not one: `cpu_ready` in the first, the data in the
+            // second.  Taking the sample on the ready cycle itself is one clock
+            // early, and the second step must not depend on ready still being
+            // high -- it is a registered pulse and is gone by then.
+            if (~rd_settle) begin
+                if (cpu_ready) rd_settle <= 1'b1;
+            end else begin
+                rd_settle <= 1'b0;
                 cpu_rd <= 1'b0;
                 cpu_wr <= 1'b0;
                 if (is_read_r) begin

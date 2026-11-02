@@ -171,18 +171,32 @@ module snes_sdram_model #(
         // at the standard CAS point; that mismatch shows up as ZZZZ rather than
         // as a wrong value, and it hides the fault being investigated behind an
         // artefact of the model.
-        if (cs && (command == CMD_RD || command == CMD_WR || command == CMD_ACT ||
-                   command == CMD_PRE  || command == CMD_MRS || command == CMD_REF)) begin
-            dq_oen <= 1'b1;             // a command ends the previous read's drive
+        // A read's data becomes valid `cas_latency` clocks after the command and
+        // stays valid until the next READ, which is what a real part does.  The
+        // controller here issues its READ in the CAS slot and samples in its DAT
+        // slot, three clocks later rather than at the CL=2 point a standard part
+        // would use; driving for exactly `cas_latency` clocks therefore put Z on
+        // the bus at the moment of the sample and produced ZZZZ rather than a
+        // wrong value.  Holding to the next READ models the part and leaves the
+        // controller's choice of sample point to the controller.
+        if (cs && command == CMD_RD) begin
+            dq_oen <= 1'b1;             // a new READ replaces the previous data
         end else if (cas_latency >= 3'd1 && cas_latency <= 3'd4 &&
                      rd_valid_pipe[cas_latency-1]) begin
             if (dqm_pipe[cas_latency-1] == 2'b11) begin
                 dq_oen <= 1'b1;
             end else begin
                 dq_oen <= 1'b0;
-                dq_out <= {dqm_pipe[cas_latency-1][1] ? 8'hzz : rd_pipe[cas_latency-1][15:8],
-                           dqm_pipe[cas_latency-1][0] ? 8'hzz : rd_pipe[cas_latency-1][7:0]};
             end
+        end else if (cs && (command == CMD_WR)) begin
+            dq_oen <= 1'b1;             // the controller drives DQ for a write
+        end
+
+        // Separate the data register from the enable so the value does not have
+        // to survive in rd_pipe until the enable is withdrawn.
+        if (cas_latency >= 3'd1 && cas_latency <= 3'd4 && rd_valid_pipe[cas_latency-1]) begin
+            dq_out <= {dqm_pipe[cas_latency-1][1] ? 8'hzz : rd_pipe[cas_latency-1][15:8],
+                       dqm_pipe[cas_latency-1][0] ? 8'hzz : rd_pipe[cas_latency-1][7:0]};
         end
     end
 

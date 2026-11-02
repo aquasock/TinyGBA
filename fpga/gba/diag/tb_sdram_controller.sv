@@ -117,7 +117,19 @@ module tb_sdram_controller;
             cpu_rd   <= 1'b1;
             @(posedge clk);
             while (!cpu_ready) @(posedge clk);
+            // gba_memory.sv documents the 32-bit read as
+            //   sdram  |rd_lo| wait|rd_hi|ready| data
+            //   ready                        |  1  |
+            // so `cpu_ready` marks the cycle BEFORE the data: sampling on the
+            // same edge returns the low halfword with the high half still
+            // unmasked, which reads back as xxxxffff and looks exactly like a
+            // controller fault.  One clock of wait, then take it.
+            @(posedge clk);
             data = cpu_rdata[1];
+            if ($test$plusargs("trace"))
+                $display("  read  [%06X] cyc=%b port0=%b hi=%b ds=%b -> %08X",
+                         addr, dut.cycle, dut.port[0], dut.addr_latch[0][1],
+                         dut.ds_latch[0], data);
             cpu_rd   <= 1'b0;
             repeat (4) @(posedge clk);
         end
