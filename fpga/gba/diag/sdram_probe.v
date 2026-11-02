@@ -32,6 +32,24 @@
 // the diagnostic video pattern draws as sixteen bars: green is a bit that read
 // back correctly, red is one that did not.
 //
+// Two modes, because a pass/fail bit per pattern cannot say why a pattern failed.
+//
+//   TINYGBA_SDRAM_TEST (default)  the occupancy test above: eight patterns per
+//                                 die, one pass/fail bit each.
+//   TINYGBA_SDRAM_LANES           a data-lane readout.  Writes $FFFF_FFFF to one
+//                                 word with all four byte enables, reads the word
+//                                 back, and puts the sixteen bits of the result
+//                                 straight into `result`, so each bar is a DATA
+//                                 BIT rather than a verdict: green is a lane that
+//                                 returned 1, red a lane that returned 0.
+//
+// The lane mode exists because the occupancy test reported eight green bits and
+// named nothing.  Reading the pattern table against the observed bars shows the
+// split is per byte -- every pattern whose non-zero bytes are confined to byte 0
+// passed, every other pattern failed -- which means DQ[15:8] is not returning its
+// value, and only a raw readback can separate "the controller masked it" from
+// "the wire never carried it".
+//
 // Only built under TINYGBA_SDRAM_TEST, where it owns the SDRAM CPU port and the
 // machine is held in reset.  It drives the same requester-side contract as
 // gba_memory: hold the request until cpu_ready, then take the data from
@@ -105,7 +123,11 @@ wire low_side  = (phase == 2'd0) || (phase == 2'd2);
 wire is_read   = phase[1];
 wire [23:0] base       = low_side ? LOW_BASE : HIGH_BASE;
 wire [23:0] word_addr  = base + {20'd0, idx};
+`ifdef TINYGBA_SDRAM_LANES
+wire [31:0] write_data = 32'hFFFF_FFFF;
+`else
 wire [31:0] write_data = low_side ? pattern(idx) : pattern_hi(idx);
+`endif
 
 always @(posedge clk) begin
     if (~resetn) begin
@@ -147,8 +169,15 @@ always @(posedge clk) begin
                 cpu_rd <= 1'b0;
                 cpu_wr <= 1'b0;
                 if (is_read_r) begin
+`ifdef TINYGBA_SDRAM_LANES
+                    // Raw readback: bars are data bits, not verdicts.  Written
+                    // $FFFF_FFFF with be=1111 and read back, so a lane that is
+                    // masked by DQM or never driven shows as red.
+                    result <= cpu_rdata[PORT][15:0];
+`else
                     if (low_side) result[idx]     <= (cpu_rdata[PORT] === pattern(idx));
                     else          result[8 + idx] <= (cpu_rdata[PORT] === pattern_hi(idx));
+`endif
                 end
                 state <= S_NEXT;
             end
@@ -160,6 +189,16 @@ always @(posedge clk) begin
                 state <= S_REQ;
             end else begin
                 idx <= 4'd0;
+`ifdef TINYGBA_SDRAM_LANES
+                // one word, written then read: phases 0 -> 2 -> done
+                if (phase == 2'd2) begin
+                    done  <= 1'b1;
+                    state <= S_NEXT;    // park; result is final
+                end else begin
+                    phase <= 2'd2;
+                    state <= S_REQ;
+                end
+`else
                 if (phase == 2'd3) begin
                     done  <= 1'b1;
                     state <= S_NEXT;    // park; result is final
@@ -167,6 +206,7 @@ always @(posedge clk) begin
                     phase <= phase + 1'b1;
                     state <= S_REQ;
                 end
+`endif
             end
         end
 

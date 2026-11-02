@@ -275,7 +275,7 @@ always @(posedge clk) begin
                         if (hi) 
                              cpu_rdata[port[0]] <= {dq_in, cpu_rdata[port[0]][15:0]};
                         else    
-                             cpu_rdata[port[0]] <= {cpu_rdata[port[0]][31:15], dq_in};
+                             cpu_rdata[port[0]] <= {cpu_rdata[port[0]][31:16], dq_in};
                     endcase
 
                 if (f_mode == MODE_ID & addr_latch[0] == 26'h204_0000) begin
