@@ -129,15 +129,17 @@ block-scoped registers — rather than a design change. See `THIRD_PARTY.md`.
 ## Known gaps
 
 - No cartridge has been run on the board.
-- **No machine image builds cleanly at present.** The `TINYGBA_OVERLAY_OFF`
-  machine configuration fails its `clk67` Fmax gate at every seed tried — 33.6 to
-  36.0 MHz against 67.0 over six seeds — on a 26-stage, ~30 ns path from the
-  SDRAM readback registers through the memory module's read muxes and back into
-  the controller. The same tree without that define passes at 171 MHz at the same
-  seed, and the tree as it stood before this cycle's changes fails the same way,
-  so the cause is neither this cycle's edits nor a single bad seed. Until it is
-  understood, the test cartridge has nothing to run on; the `TINYGBA_SDRAM_TEST`
-  and production configurations do build clean.
+- **The machine image builds, but its timing is judged rather than proven.**
+  Its `clk67` path from the SDRAM readback through the CPU and back measures
+  29.77 ns, which exceeds one 67 MHz cycle and sits inside the four cycles
+  upstream GBATang's `gbatang.sdc` allows for exactly that path. nextpnr cannot
+  express a multicycle path — it implements no `set_multicycle_path` and its
+  `set_false_path` is a no-op — so it refused the build. `tools/timing_gate.py`
+  now applies the four documented allowances, prints each one with the upstream
+  line it comes from, and gates the hold count and the cross-clock paths that
+  the Fmax report never sees. The image is correct against the design's own
+  contract and unproven on silicon: only a cartridge on the board can confirm
+  the allowance. `build/prod` still has hold violations and is not buildable.
 - `tools/run_diag_sim.sh` cannot see faults in `sdram_gba.v`: it compiles
   `sdram_sim.v`, a logic-level stand-in, so the controller is never simulated.
   `fpga/gba/diag/sdram_model.v` and `tb_sdram_controller.sv` are the start of

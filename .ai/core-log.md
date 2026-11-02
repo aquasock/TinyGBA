@@ -219,3 +219,35 @@ Settle the `clk67` failure in the `TINYGBA_OVERLAY_OFF` configuration before any
 - User Test: NOT RUN
 
 ---
+
+## 7 COMMIT Unreleased 2026-11-02T09:45:53-07:00
+
+#### Coming From:
+
+Unreleased 0363af6
+
+#### Purpose:
+
+Explain why the `TINYGBA_OVERLAY_OFF` machine configuration failed its `clk67` Fmax gate at every seed, which entry 6 left open and named as the only thing between this tree and a cartridge on the board.
+
+#### Outcome:
+
+The configuration was never broken and the gate was measuring the wrong thing. nextpnr-himbaechel's SDC parser implements exactly six commands -- `get_ports`, `get_cells`, `get_nets`, `get_pins`, `create_clock` and `set_false_path` -- refuses anything else with `Unsupported SDC command`, has no `set_multicycle_path` at all, and logs `does not do anything(yet)` and returns without effect for `set_false_path`. Every path is therefore timed as one cycle. Upstream GBATang's `gbatang.sdc`, which this port replaced with a file that drops every relaxation, heads one constraint with the comment `# sdram.cpu_dout through the CPU back to sdram: 4 cycles` and relaxes `clk16`-to-`clk67` and `clk67`-to-`clk16` by four and `clk16`-to-`clk50` by three. Those allowances are correct for the design rather than a workaround: one `clk16` period is exactly four `clk67` periods, so a path that leaves an SDRAM register, crosses logic clocked at `clk16` and returns to a `clk67` register has 59.70 ns of budget, not 14.92. The failing path is that one exactly -- `cpu_mem_rdata_DFFRE_Q_34` to `sdram.SDRAM_BA_DFFRE_Q`, 29.77 ns, which nextpnr reported as 33.59 MHz against 67.00 and refused. Six seeds failing at 33.6 to 36.0 was not seed sensitivity and not a change: the three controls that would have implicated one all passed, the tree before this cycle's edits giving 38.76 MHz at seed 5, the same tree without the define giving 171.26 MHz with a 5.84 ns same-domain path, and the Oct 31 netlist re-routed at seed 5 giving 154.01 MHz. The combinational depth into `sdram.SDRAM_BA_DFFRE_Q_D` is 57 in both configurations, so the logic was never restructured; what differs is only which path is worst. That matters more than the fix, because it means the six failing seeds and the passing ones were the same design measured two ways, and a single-cycle analysis is wrong in both directions at once: it also never reports the cross-clock paths, so `--timing-allow-fail` would have let a slow `clk16`-to-`clk67` path through with no measurement at all. `tools/timing_gate.py` now judges the build instead of nextpnr, and it is deliberately narrow: every path is held to a single cycle except the four documented pairs, the readback allowance requires both endpoints -- the path must start at `cpu_mem_rdata` and end in `sdram.` -- so an unrelated slow path cannot borrow it, the hold count is gated because nextpnr prints it only when it is non-zero, and every relaxation applied is printed with the upstream line it came from. Five checks stand behind it: the machine configuration passes with one printed relaxation, the same tree without the define passes with none, the SDRAM-probe build at seed 5 passes with none, `build/prod` with its one hold violation fails on hold, and two mutations of the machine build's `timing.json` -- moving the 29.77 ns path's source to an unrelated register, and lengthening the `clk16`-to-`clk67` path past 59.70 ns -- both fail as they must. nextpnr is now always run with `--timing-allow-fail` so that it writes `timing.json` and the routed netlist for the gate to read; it must not be the judge, and this cycle showed both ways it errs. Two records were added to `.ai/core-reference.md`, TCL-009 on the SDC command set and the multicycle contract and BRD-005 on the failure being an analysis artefact, and `README.md`'s known-gaps entry now says the machine image builds but its timing is judged rather than proven. The machine image was then built end to end at seed 5 with zero hold violations: `build/c6_machine_ok/tinygba.fs`, SHA-256 `2ebaaf33b338f39df0fbfdee0cf4dfe8b072a73a828713adcd05f9c476363ad7`, the only relaxation applied being the documented readback one, so a cartridge now has an image to run on for the first time. Nothing was deployed and the Tang was not connected to, at the user's instruction. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 6 were not rewritten and that the two new records carry unique ids and the canonical field order, and validated this entry as entry 7 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of seven against the 100-entry limit.
+
+#### Next Steps:
+
+Put a cartridge on the board, which is now finally possible and is the only thing that can confirm the lesson: load `build/c6_machine_ok/tinygba.fs` one-wire, stream `tools/make_gba_test_rom.py`'s cartridge with `tools/load_gba_rom.py`, and read the screen. A green field with a blinking white square means the CPU fetched through the ROM path, ran, and wrote VRAM and both work RAMs, and that the four-cycle readback allowance holds on silicon; red with yellow columns names the failing check by column; a frozen picture means the CPU wedged after the checks; a black 1080-pixel field means nothing ran or the framebuffer never reached the video window, which `01_video` separates. Do this before rebuilding `02_sdram`, because a booting machine answers the memory question more directly than sixteen bars, and entry 5's sample-point conclusion still needs a `clk67`-on-the-plane image before it is a hardware result. If the machine does not run, the readback allowance is the first suspect and the instrument is the same `timing_gate.py` with `--allow-hold` absent plus a narrowed allowance that requires the endpoints to be tighter, not a wider one. Two things remain over-constrained and should be settled before the next timing conclusion is drawn from this design: `build/prod` still fails on one hold violation and so production is not buildable at any seed tried, and the SDC still declares the four clocks flat with `create_clock` because the parser cannot name clocks, so the `clk16`-to-`clk50` three-cycle allowance upstream makes is not applied and those paths are held to one cycle of `clk16`, which is conservative rather than wrong. Do not treat a passing timing gate as evidence the machine runs, and do not sweep more seeds for a configuration that failed: check which path is worst and whether the contract relaxes it before concluding anything about a seed.
+
+#### Files Modified:
+
+- README.md
+- tools/build_tinygba.sh
+- tools/timing_gate.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

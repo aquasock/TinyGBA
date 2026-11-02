@@ -44,8 +44,14 @@ device=GW5AST-LV138PG484AC1/I0
 family=GW5AST-138C
 seed="${TINYGBA_SEED:-1}"
 defines="${TINYGBA_DEFINES:-}"
-timing_fail=""
-[[ "${TINYGBA_ALLOW_HOLD:-0}" == 1 ]] && timing_fail="--timing-allow-fail"
+# nextpnr is always allowed to finish with violations, so that it writes
+# timing.json and the routed netlist for the gate below to judge.  nextpnr must
+# not be the judge: it analyses every path as a single cycle and cannot express
+# the multicycle paths this design was written to, so its verdict is wrong in
+# both directions -- it fails paths that meet the contract and never looks at
+# the cross-clock paths at all.  tools/timing_gate.py applies the documented
+# allowances and is the gate; TINYGBA_ALLOW_HOLD only downgrades its hold check.
+timing_fail="--timing-allow-fail"
 
 [[ -f "$suite/environment" ]] || { echo "missing open toolchain: $suite" >&2; exit 2; }
 [[ -x "$nextpnr" ]] || { echo "missing nextpnr-himbaechel fork: $nextpnr" >&2; exit 2; }
@@ -246,20 +252,19 @@ if [[ $plane -ne 0 ]]; then
 fi
 
 # --------------------------------------------------------------- 4. timing gate
-# Fmax only.  nextpnr's hold violations are reported separately and are not a
-# gate here; when the design is proven on hardware this should become a refusal,
-# the way TinyNES and TinyTang refuse unclean seeds.
+# Judged by tools/timing_gate.py, not by nextpnr.  That tool holds every path to
+# a single cycle except the four that upstream GBATang's gbatang.sdc relaxes to
+# four, and prints each relaxation it applies with the upstream line it came
+# from.  It also gates the hold count and the cross-clock clk16<->clk67 paths,
+# neither of which appears in the Fmax report.
 echo "=== 4. timing gate ==="
-"$suite/py3bin/python3" - "$out" <<'PY'
-import json, pathlib, sys
-out = pathlib.Path(sys.argv[1])
-t = json.loads((out / "timing.json").read_text())["fmax"]
-for name, v in sorted(t.items()):
-    print(f"  {name}: constraint {v['constraint']:.3f} MHz, achieved {v['achieved']:.3f} MHz")
-bad = [n for n, v in t.items() if v["achieved"] < v["constraint"]]
-if bad:
-    raise SystemExit(f"timing not met on: {', '.join(bad)}")
-PY
+holdflag=""
+[[ "${TINYGBA_ALLOW_HOLD:-0}" == 1 ]] && holdflag="--allow-hold"
+gate=0
+"$suite/py3bin/python3" "$root/tools/timing_gate.py" "$out" $holdflag \
+    >"$out/timing-gate.log" 2>&1 || gate=$?
+cat "$out/timing-gate.log"
+[[ $gate -eq 0 ]] || { echo "timing gate failed; see $out/timing-gate.log" >&2; exit 1; }
 
 echo "=== 5. bitstream ==="
 "$suite/py3bin/python3" -m apycula.gowin_pack \

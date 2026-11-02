@@ -185,3 +185,32 @@ Field meanings:
   verification: "Measured 2026-11-02 from the routed netlists themselves rather than from build timestamps: the four deployed digests were resolved to their build directories, and each netlist's clock routes were parsed for bridge pips. The `clk67` fix of core-log entry 4 was confirmed present in the post-fix builds (`clk67` Fmax 125 to 141 MHz then, 208 to 256 MHz now) and absent from every deployed image."
 
 ---
+- record_id: TCL-009
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "nextpnr cannot express GBATang's multicycle paths, so its timing verdict is wrong in both directions"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "nextpnr-himbaechel's SDC parser implements exactly six commands -- `get_ports`, `get_cells`, `get_nets`, `get_pins`, `create_clock` and `set_false_path` -- and rejects anything else with `Unsupported SDC command`. `set_multicycle_path` is not implemented at all, and `set_false_path` logs `set_false_path from: X, to: Y does not do anything(yet)` and returns without changing the analysis. Every path is therefore timed as a single cycle. Upstream GBATang's `gbatang.sdc` depends on the opposite: its comment `# sdram.cpu_dout through the CPU back to sdram: 4 cycles` heads `set_multicycle_path 4 -setup -end -from [get_pins {sdram/cpu_rdata*/*}] -to [get_clocks {clk67}]`, and it relaxes `clk16`-to-`clk67` and `clk67`-to-`clk16` by four and `clk16`-to-`clk50` by three. Those allowances are correct for the design and not a hack: one `clk16` period is exactly four `clk67` periods, so a path that leaves an SDRAM register, crosses logic clocked at `clk16` and returns to a `clk67` register has four `clk67` cycles of budget, 59.70 ns, not 14.92 ns."
+  consequence: "A single-cycle analysis can fail a design that meets its own contract, and it can also pass one that does not: cross-clock paths never appear in the Fmax report, so `--timing-allow-fail` lets a slow `clk16`-to-`clk67` path through with no measurement at all. Measured on this design 2026-11-02: the worst `clk67`-to-`clk67` path in the `TINYGBA_OVERLAY_OFF` machine configuration is 29.77 ns from `cpu_mem_rdata_DFFRE_Q_34` to `sdram.SDRAM_BA_DFFRE_Q`, which is exactly upstream's documented readback case and clears 59.70 ns by a factor of two, while the same build's cross-domain paths are 40.13 and 39.84 ns, also inside 59.70. nextpnr reported 33.59 MHz against 67.00 and refused the build. `tools/timing_gate.py` now judges the build instead: it holds every path to a single cycle except the four documented pairs, requires both endpoints of the readback allowance so an unrelated slow path cannot borrow it, gates the hold count, and prints every relaxation it applies with the upstream line it came from."
+  sources:
+    - "nextpnr fork `common/kernel/sdc.cc`: the `evaluate` command dispatch and `cmd_set_false_path`'s no-op warning, read 2026-11-02"
+    - "tangcore `gbatang/src/gbatang.sdc` at commit `77fd0714`, the constraint file this port replaced"
+    - "This repository, `tools/timing_gate.py` and `build/c6_machine_ok/timing-gate.log`"
+  verification: "Measured 2026-11-02. The gate was checked against five builds: the machine configuration it was written for passes with one printed relaxation; the same tree without the define passes with none; the SDRAM-probe build at seed 5 passes with none; `build/prod`, which has one hold violation, fails on hold; and two mutation tests on a copy of the machine build's `timing.json` -- moving the 29.77 ns path's source to an unrelated register, and lengthening the `clk16`-to-`clk67` path past 59.70 ns -- both fail as they must. Not yet confirmed on hardware: no image has been loaded."
+
+- record_id: BRD-005
+  kind: BOARD
+  topic_id: BRD
+  title: "The machine configuration's timing failure was the analysis, not the design"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "The `TINYGBA_OVERLAY_OFF` machine configuration failed nextpnr's Fmax gate on `clk67` at all six seeds tried, 33.6 to 36.0 MHz against 67.00, and the failure survived every control that would have implicated a change: the tree as it stood before the cycle's edits, synthesised fresh and routed at seed 5, gave 38.76 MHz; the same tree without the define gave 171.26 MHz at the same seed with a 5.84 ns `clk67`-to-`clk67` path; and the Oct 31 netlist re-routed at seed 5 gave 154.01 MHz. The logic was not restructured either -- the combinational depth into `sdram.SDRAM_BA_DFFRE_Q_D` is 57 in both configurations, and `mem.rom_data` is depth 11 against 12. What differs is only which same-domain path is worst: without the define, `clk67`-to-`clk67` is 5.84 ns and the 39.66 ns worst path is `clk67`-to-`clk16`, which never enters the Fmax figure; with the define, the readback path `cpu_mem_rdata` -> `sdram.SDRAM_BA` becomes the worst at 29.77 ns and does enter it. That path is the one upstream GBATang's `gbatang.sdc` documents as a four-cycle path (TCL-009)."
+  consequence: "The configuration was never broken and the six failing seeds were not bad seeds. The design meets its own contract, and the gate that refused it was measuring every path as a single cycle because nextpnr cannot express multicycle paths. The concrete consequence for the next cycle is that a machine image now exists to put a cartridge on: `build/c6_machine_ok/tinygba.fs`, SHA-256 `2ebaaf33b338f39df0fbfdee0cf4dfe8b072a73a828713adcd05f9c476363ad7`, seed 5, zero hold violations, and the only relaxation applied is the documented readback one. This does not make the design fast enough on silicon -- it makes the measurement correct. A hardware reading from it is the only thing that can confirm the allowance is sound in practise."
+  sources:
+    - "This repository, `build/c6_machine_ok/timing-gate.log` and `build/c6_machine_ok/nextpnr.log`"
+    - "This repository, `build/c6_msweep/s1` through `s6` and the controls at `/tmp/keepab/ab_machine_s5`, `/tmp/ab2/ndef_s5` and `/tmp/ab2/nml_s5`"
+    - "tangcore `gbatang/src/gbatang.sdc` at `77fd0714`"
+  verification: "Measured 2026-11-02 by full builds: six seeds of the failing configuration, one unmodified-tree control, one without-the-define control and one re-routed Oct 31 netlist, plus a full end-to-end build of the machine image with the corrected gate that reached a bitstream. Not yet confirmed on hardware: the image has not been loaded."
+
+---
