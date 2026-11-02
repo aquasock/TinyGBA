@@ -151,6 +151,11 @@ reg [7:0] st_x, st_y;
 function [17:0] st_colour(input [7:0] x, input [7:0] y);
     if (y < 8'd8)
         st_colour = dbg_done ? {6'h00, 6'h3f, 6'h00} : {6'h00, 6'h00, 6'h3f};
+    // IDENTITY mapping: the leftmost bar is bit 0 and the rightmost is bit 15.
+    // An earlier version reversed this so multi-bit values would read left to
+    // right, and every decode taken through it was then read backwards -- a
+    // real address came out bit-reversed and looked like a plausible wrong one.
+    // Identity is duller and cannot be misread: bar i is bit i.
     else if (x < 8'd232)
         st_colour = dbg_bits[x / 8'd15] ? {6'h00, 6'h3f, 6'h00} : {6'h3f, 6'h00, 6'h00};
     else

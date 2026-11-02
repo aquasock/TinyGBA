@@ -227,4 +227,32 @@ Field meanings:
     - "This repository, `fpga/gba/src/gba2hdmi.sv`: the `TINYGBA_SDRAM_TEST` colour function and its `x < 8'd232` bar region"
   verification: "Observed on the board 2026-11-02 after a fresh load onto a rebooted console, with the image rebuilt from the current tree so that `clk67` sits on `SPINE27/TOP2` and both gates pass. The first flash attempt in the same session did not take and showed the machine's picture; the reload showed the probe's own."
 
+- record_id: BRD-007
+  kind: BOARD
+  topic_id: BRD
+  title: "The machine runs the official BIOS, halts once, and never enables the interrupt that would release it"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "Measured on the board with `TINYGBA_STATUS_TEST` and the official GBA BIOS supplied by the operator (`boot.rom`, SHA-256 `fd2547724b505f487e6dcb29ec2ecff3af35a841a77ab2e85fd87350abd36570`, kept out of this repository), with a logo-bearing test cartridge streamed at the core's UART. The probe word reads `0x016E` under field map `a089dde1`: the GPU scanline counter advances, a VBlank period arrives, an HBlank period arrives, the CPU is halted, a halt has been seen exactly once since reset, halt has never gone low again, the CPU has never fetched any address at or above 2 MB, and the DISPSTAT V-Blank IRQ enable is clear. The halt address was latched separately and read `rom_addr[13:2]` index `0x0D1`, byte address `0x344`, which disassembles in the official BIOS to `e5cc3301 strb r3, [ip, #769]` with `ip` = `0x04000000`, i.e. the write to `HALTCNT` at `0x04000301`. Three of these are independent instruments agreeing: a live DISPSTAT status flag, a sticky fetch-region OR, and a latched halt address."
+  consequence: "The display path, the SDRAM, the clock plan and the GPU raster are all excluded from the machine's failure, and the fault is one register write that never happens: `halt` clears on any `IRPFlags` bit, `IRPFlags[0]` is set by `IRP_VBlank`, and `IRP_VBlank` is gated by `DISPSTAT`'s V-Blank IRQ enable, which only the CPU can write. A CPU that halts before writing it can never be released, which is a closed loop rather than a hang. The next instrument is to latch `gb_bus_adr` and `gb_bus_din` at the first write to `0x04000004`, which separates 'the write never executes' from 'the write executes and does not reach the GPU'. Do not re-test memory, raster or clocks; all three are measured. Note the sample-versus-latch caveat: the IRQ-enable bit is read live at one instant per frame, so a transient enable would be missed, though a permanently halted CPU makes that unlikely."
+  sources:
+    - "This repository, `build/c6_final/tinygba.fs` (SHA-256 `e615e69e8cb6da27a0120992297cb00f5fb9b3e5c256f47602667e3bdad9cde0`) and `build/c6_final/clock-plane.log`, `timing-gate.log`"
+    - "`tools/probe_map.py` field map `a089dde1`, which generated both the RTL packing and the decode"
+    - "Official GBA BIOS at `/run/media/vash/MiSTer_Data/games/GBA/boot.rom`, disassembled with the ARM GNU toolchain's `objdump -b binary -m armv4t`"
+  verification: "Measured on the board 2026-11-02 across three separate builds of the probe, with `halt_entries` and the halt address stable between them. The halt address was cross-checked by disassembly rather than assumed. Not yet measured: whether the BIOS writes `0x04000004` at all."
+
+- record_id: TCL-010
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A diagnostic probe's field order must be generated from one list, because a width check cannot catch a wrong order"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "A probe that packs several fields into one bus and a host script that decodes them are two independent statements of the same layout, and they drifted repeatedly in this family of projects: the sibling SNES port mis-stated a field position in four consecutive cycles (its core-log entries 60 to 63), and this project made the same class of error three times in one session -- a reversed bar order that bit-reversed a displayed address, a field read from the wrong bit index, and a multi-byte count read MSB-first from an LSB-first field. Every one produced a plausible number rather than an error, and each was caught only because some other field had a known expected value. An elaboration-time width assertion catches a wrong total but cannot catch a wrong order. The fix is one declarative field list that generates both halves: `tools/probe_map.py` emits `fpga/gba/src/probe_bits.vh` (bit offsets, widths and the packing macro) and decodes captures from the same list, and `tools/build_tinygba.sh` refuses a build whose include does not match the list. The width guard measures `$bits` of the packing expression rather than restating the generator's arithmetic, and it was verified by comparing against a deliberately wrong constant and watching elaboration fail with `unknown module` -- slang rejects `$error` and yosys drops a blackboxed module silently, so an unknown module is the only reliable elaboration-time failure on this flow."
+  consequence: "Any diagnostic that shows more than one field must generate its packing and its decoder from one list before a reading is taken. A generated decoder still cannot be trusted against a capture from a different layout, because two layouts may use the same bar for different fields -- which happened here when bar 3 changed from the VBlank IRQ enable to the HBlank flag between builds -- so the list also carries a short id, emitted into the RTL as `PROBE_MAP_ID` and printed by the decoder. Decode by tool, never by hand, and record the map id with any hardware result."
+  sources:
+    - "This repository, `tools/probe_map.py` and the generated `fpga/gba/src/probe_bits.vh`"
+    - "TinySNES `.ai/core-log.md` entries 60 to 63, which record four consecutive field-position errors and the correction that inverted entry 62's conclusion"
+    - "Elaboration behaviour measured 2026-11-02 in `/tmp/memtest`: `$bits` resolves under `read_slang`, and an instantiated unknown module is a hard error"
+  verification: "Measured 2026-11-02. The generated decoder reproduced a hand decode on the same capture; the width guard was verified to fail a build by deliberately mismatching the bus width; and the first hardware reading taken through the generated path (`word 0x016E`) agreed with three independent instruments."
+
 ---

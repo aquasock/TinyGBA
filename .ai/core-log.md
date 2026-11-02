@@ -283,3 +283,39 @@ Load `build/c6_status/tinygba.fs` and read the six sticky bits, because SDRAM is
 - User Test: PASS
 
 ---
+
+## 9 COMMIT Unreleased 2026-11-02T14:03:08-07:00
+
+#### Coming From:
+
+Unreleased a69a20a
+
+#### Purpose:
+
+Put the long-dormant machine on the board at last, find why it draws nothing, and replace the hand-built probe whose readings had already been mis-decoded three times with one generated from a single field list.
+
+#### Outcome:
+
+The machine runs the BIOS and stops on a halt it can never be woken from, and the answer was reached only after this session's instruments were made trustworthy. Three findings stand, each confirmed by more than one instrument. SDRAM is good: the corrected probe drew a green status band and sixteen green bars with only its own grey margin, which is 64 MiB with both dies and all sixteen patterns, and that supersedes both earlier probe readings because both came from images whose `clk67` crossed no clock-plane bridge pip. The GPU raster is alive: `DISPSTAT`'s V-Blank and H-Blank flags both arrive and the scanline counter advances, so the display timing is not the fault -- this refuted the cycle's own opening prediction and is why the probe moved from the IRQ outputs to the status flags, since `IRP_VBlank` and `IRP_HBlank` are gated by IRQ-enable bits the CPU must write and a CPU that never gets that far guarantees them low. And the CPU executes the official BIOS and stops at a real halt: the latched fetch address decoded to `0x344`, which disassembles in the official image to `strb r3, [ip, #769]` with `ip` = `0x04000000`, the write to `HALTCNT`, and the probe reads one halt entry, never cleared, with the V-Blank IRQ enable clear. That closes into a single missing write rather than a dead subsystem: `halt` clears when any `IRPFlags` bit sets, `IRPFlags[0]` needs `IRP_VBlank`, and `IRP_VBlank` needs the `DISPSTAT` enable that only the CPU can write. The machine is not broken in four places; it halts one instruction too early to ever be released. Two operational results matter for the next session. The official BIOS was wired in without entering the repository, through a `TINYGBA_BIOS_HEX` build define that takes a quoted absolute path, with the image converted to a hex file under the ignored `build/` directory; the in-tree default stays the open-source Cult-of-GBA image. And a logo-bearing test cartridge was generated with `--logo-from` splicing the 156-byte logo out of a local retail image, because the official BIOS validates the logo and hangs on a cartridge that lacks it, which would have looked exactly like a machine fault. The silent-load failure recurred three more times, once showing the previous bitstream's picture after a flash of a different one, and each time the correct response was a reload rather than an investigation; the probe image writes its bars from its own raster and cannot legitimately draw the machine's black field, which is what made it identifiable. The larger result of the session is instrument discipline. Five of this project's own readings were wrong in this session before being caught -- a reversed bar order that bit-reversed a displayed address, a halt latch that required `halt` and `rom_en` in the same cycle and so could never fire, IRQ-gated probe bits that were provably constant under synthesis, a live signal labelled as latched, and a multi-byte count read MSB-first from an LSB-first field -- and every one produced a plausible number rather than an error. The sibling SNES project's correction of its entry 62 showed the same class recurring there four times, so the fix applied here is structural: `tools/probe_map.py` holds one declarative field list and generates both the RTL packing, as `fpga/gba/src/probe_bits.vh`, and the host decoder, and `tools/build_tinygba.sh` refuses a build whose include does not match the list. The guard measures `$bits` of the packing expression rather than restating the generator's own arithmetic, and it was verified by deliberately mismatching the bus width and watching elaboration fail with `unknown module`, which is the only reliable elaboration-time failure on this flow since slang rejects `$error` and yosys drops a blackboxed module silently. An earlier version of that guard compared a constant against itself and could never have fired. The list also carries a short id, emitted as `PROBE_MAP_ID` and printed by the decoder, because a generated decoder cannot be trusted against a capture from a different layout: bar 3 changed meaning between two builds in this session. Two records were added, BRD-007 for the halt finding and TCL-010 for the generating rule, and `README.md` now says the machine runs the BIOS and halts rather than that it was never booted. Nothing was deployed after the readout was taken. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 8 were not rewritten and that the two new records carry unique ids and the canonical field order, and validated this entry as entry 9 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of nine against the 100-entry limit.
+
+#### Next Steps:
+
+Latch `gb_bus_adr` and `gb_bus_din` at the first write to `0x04000004` and read whether the BIOS writes `DISPSTAT`'s V-Blank IRQ enable at all, because that single question separates the two remaining explanations and everything else is measured: if no write to that address ever occurs, the BIOS halts before reaching the instruction that enables it, and the next step is to find which branch it took instead, with the halt-address latch already built and its trigger now known to work; if a write occurs with bit 3 clear, the BIOS is enabling a different source and the suspects become the interrupt master enable at `0x04000208` and the interrupt enable word at `0x04000200`; and if the write occurs with bit 3 set and `DISPSTAT[3]` is still clear, the write is not reaching `gba_gpu_timing` and the fault is in that decode path. Add the field to `tools/probe_map.py` and regenerate rather than hand-editing the packing, and check whether `REG_DISPSTAT_V_Blank_IRQ_Enable` is driven at all in the netlist first, because the sibling project's `PAL` and `GSU_TURBO` faults were both an undriven term folded to a constant by `synth_gowin` and that class has now cost two projects several cycles. Do not re-measure SDRAM, the raster, the clock plane or the timing contract; all four are settled and recorded. Do not decode a probe frame by hand, and do not trust a capture without checking that its map id matches the build it came from. Treat any flash that shows the previous bitstream's picture as a reload, not a result, and prefer `tools/probe_map.py --decode` over reading bars from a screenshot.
+
+#### Files Modified:
+
+- README.md
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/probe_bits.vh
+- tools/build_tinygba.sh
+- tools/probe_map.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

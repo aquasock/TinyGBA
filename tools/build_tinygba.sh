@@ -142,6 +142,16 @@ for f in "${sources[@]}" "${hdmi_slang[@]}"; do
     [[ -f "$f" ]] || { echo "missing source: $f" >&2; exit 2; }
 done
 
+# --------------------------------------------------------------- 0. probe map
+# The diagnostic probe's packing is generated from one declarative field list by
+# tools/probe_map.py, and its host decoder is generated from that same list.  A
+# stale include would silently pack bars in an order the decoder does not expect,
+# which is the failure mode that cost the sibling project four cycles.  Refuse a
+# build whose include does not match the list.
+echo "=== 0. probe field map ==="
+"$suite/py3bin/python3" "$root/tools/probe_map.py" --check \
+    || { echo "probe_bits.vh is stale; run tools/probe_map.py --emit-verilog" >&2; exit 1; }
+
 # --------------------------------------------------------------- 1. synthesis
 if [[ ! -f "$out/tinygba.json" || "${TINYGBA_FORCE_SYNTH:-0}" == 1 ]]; then
 echo "=== 1. synthesis ==="

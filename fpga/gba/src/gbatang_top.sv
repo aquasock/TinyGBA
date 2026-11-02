@@ -285,30 +285,134 @@ assign cpu_mem_port  = mem_port;
 //   bit 3  `loader_do_valid` rose  -- cartridge bytes reached the loader at all
 //   bit 4  `pixel_out_we` asserted -- the GPU drew a pixel
 //   bit 5  `halt` asserted         -- the CPU executed a HALT-like stall
-//   bits 6..15  rom_addr[27:18]    -- live, where the CPU is fetching from
+//   bits 6..15  st_region         -- sticky OR of rom_addr[27:18]: every 256 KB
+//                                    region the CPU has fetched from since reset
 //
 // Bits 0..5 are sticky; the top ten are a live view and move, so read them as a
 // region rather than a number.  The status band turns green once `gbaon` is high,
 // which separates "still loading" from "running and failing".
-reg [5:0]  st_bits;
-reg [15:0] st_dbg;
+wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
+                            //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
+                            //  flag, both set unconditionally on arrival.
+(* keep *) reg [5:0]  st_bits;
+(* keep *) reg [2:0]  st_gpu;
+(* keep *) reg [9:0]  st_region;
+// Interrupt-path history.  The CPU halts on a HALTCNT write and `halt` only
+// clears when some bit of IRPFlags is set, so a permanent halt means the
+// interrupt never arrived.  These separate the possible reasons:
+//   st_irq[0]  IRP_VBlank ever asserted
+//   st_irq[1]  the GPU's VBlank IRQ enable was ever set (the CPU must write it)
+//   st_irq[2]  cpu_IRP ever asserted
+//   st_irq[3]  halt ever went low again after being seen high
+(* keep *) reg [3:0]  st_irq;
+(* keep *) reg [7:0]  st_halt_edges;
+(* keep *) reg [15:0] st_dbg;
 wire       st_armed = resetn;
+
+// Where the CPU stopped.  The sticky status bits say the CPU never reached the
+// cartridge, but not where it went instead, and "halted in low memory" covers
+// every address from the reset vector to the sound driver.  This latches the
+// last address the CPU fetched before `halt` rose, which names the instruction
+// that stalled the machine: a BIOS wait loop and a mis-executing reset path look
+// identical on every other instrument built so far.
+//
+// The address is latched from `last_fetch`, not from `rom_addr` directly,
+// because the store that writes HALTCNT reaches the interrupt module a cycle or
+// two after the fetch that decoded it, and `rom_addr` has moved on by then.
+(* keep *) reg [27:0] last_fetch;
+(* keep *) reg [11:0] st_halt_word;      // rom_addr[13:2] at the last fetch before halt
+(* keep *) reg        st_halt_valid;
+(* keep *) reg        st_halt_r;
+wire       st_halt_rise = halt & ~st_halt_r;
+
+always @(posedge clk16) begin
+    st_halt_r <= halt;
+    if (~st_armed) begin
+        last_fetch     <= 28'd0;
+        st_halt_word   <= 12'd0;
+        st_halt_valid  <= 1'b0;
+    end else begin
+        if (rom_en)
+            last_fetch <= rom_addr;
+        // Latch on the halt alone.  Requiring `rom_en` on the same cycle was
+        // wrong: `halt` is a registered output of gba_interrupts and `rom_en` is
+        // a per-cycle strobe, so the two practically never coincide and the
+        // latch could never fire -- measured 2026-11-02, `st_halt_valid` stayed
+        // low on hardware.  Instead capture the most recent fetch at the moment
+        // halt rises, and keep refreshing it for as long as halt stays high so a
+        // halt that persists ends up holding the last address the CPU asked for.
+        if (st_halt_rise | halt) begin
+            st_halt_word  <= last_fetch[13:2];
+            st_halt_valid <= 1'b1;
+        end
+    end
+end
 
 always @(posedge clk16) begin
     if (~st_armed) begin
-        st_bits <= 6'b000000;
+        st_bits       <= 6'b000000;
+        st_gpu        <= 3'b000;
+        st_region     <= 10'b0000000000;
+        st_irq        <= 4'b0000;
+        st_halt_edges <= 8'd0;
     end else begin
+        if (IRP_VBlank)          st_irq[0] <= 1'b1;
+        if (dispstat_dbg[3])     st_irq[1] <= 1'b1;
+        if (cpu_IRP)             st_irq[2] <= 1'b1;
+        if (st_halt_valid & ~halt) st_irq[3] <= 1'b1;
+        if (st_halt_rise) begin
+            if (st_halt_edges != 8'hFF) st_halt_edges <= st_halt_edges + 8'd1;
+        end
+        // Which 256 KB region the CPU has EVER fetched from, as a sticky OR.
+        // A live view of these bits cannot answer the question: every BIOS
+        // address is below 0x40000, so rom_addr[27:18] reads zero throughout a
+        // correctly running BIOS and a stalled one alike, and the display only
+        // samples one instant per pixel.  Sticky OR makes "did the CPU ever
+        // reach the cartridge at 0x08000000" a fact that survives the frame.
+        // Cartridge fetches set bit 25, which is bar 13.
+        st_region <= st_region | rom_addr[27:18];
         if (gbaon)                    st_bits[0] <= 1'b1;
         if (rom_en)                   st_bits[1] <= 1'b1;
         if (cpu_mem_ready)            st_bits[2] <= 1'b1;
         if (loader_do_valid)          st_bits[3] <= 1'b1;
         if (pixel_out_we)             st_bits[4] <= 1'b1;
         if (halt)                     st_bits[5] <= 1'b1;
+        // GPU timing history, taken from DISPSTAT rather than from the interrupt
+        // outputs.  `IRP_VBlank` and `IRP_HBlank` are gated by their IRQ-enable
+        // bits, which only the CPU can set, so a CPU that never gets that far
+        // guarantees they stay low and says nothing about the GPU.  The status
+        // flags beside them are set unconditionally, so these three answer the
+        // question the IRQ lines cannot: is the raster running at all?
+        //   st_gpu[0]  a VBlank period has arrived
+        //   st_gpu[1]  an HBlank period has arrived
+        //   st_gpu[2]  the scanline counter has advanced past line 1
+        if (dispstat_dbg[0])          st_gpu[0] <= 1'b1;
+        if (dispstat_dbg[1])          st_gpu[1] <= 1'b1;
+        if (|dispstat_dbg[23:16])     st_gpu[2] <= 1'b1;
     end
 end
 
-always @(posedge clk16)
-    st_dbg <= {rom_addr[27:18], st_bits};
+// The display layout is NOT written here.  It is generated from one declarative
+// field list by tools/probe_map.py, into probe_bits.vh beside this file, and the
+// host-side decoder is generated from that same list.  Four consecutive cycles
+// on the sibling SNES project mis-stated a field position and each produced a
+// plausible number rather than an error; this project then made the same class
+// of mistake three times in one session.  Generating both halves from one list
+// makes a wrong ORDER impossible rather than merely unlikely, which a width
+// check alone cannot do.
+//
+//   bar i is bit i, leftmost bar is bit 0
+//   tools/probe_map.py --list       prints every field and its bit range
+//   tools/probe_map.py --decode f   decodes a capture using the same list
+//
+// `TINYGBA_PROBE_ASSIGN` also carries an elaboration-time guard that measures
+// `$bits` of the packing expression, so a field whose width changes stops the
+// build here.
+wire st_cart_seen = (st_region[9:6] != 4'b0000);   // rom_addr[27:24] non-zero
+`include "probe_bits.vh"
+always @(posedge clk16) begin
+    `TINYGBA_PROBE_ASSIGN
+end
 
 assign dbg_bits = st_dbg;
 assign dbg_done = gbaon;
@@ -395,7 +499,7 @@ gba_gpu #(.FCLK_SPEED(3)) gpu (
     .PALETTE_OAM_addr(palette_oam_addr), .PALETTE_OAM_datain(palette_oam_din), .PALETTE_OAM_dataout(palette_oam_dout), 
     .PALETTE_OAM_we(palette_oam_we), 
 
-    .DISPSTAT_debug()
+    .DISPSTAT_debug(dispstat_dbg)
 );
 
 

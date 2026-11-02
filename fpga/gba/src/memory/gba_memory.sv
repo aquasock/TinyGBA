@@ -682,8 +682,29 @@ wire sel_gamepak= (bram_addr[27:26] == 2'b10 | bram_addr[27:24] == 4'hC);       
 wire sel_cartram= bram_addr[27:25] == 3'b111;                    // 64KB of cartridge RAM, mirrored to region E and F
 
 // BIOS:        0:000000 - 0:003FFF (16KB)
+//
+// The image is the open-source Cult-of-GBA BIOS vendored beside this file.  A
+// build may substitute its own by defining TINYGBA_BIOS_HEX to a quoted path:
+//
+//   TINYGBA_DEFINES='-DTINYGBA_BIOS_HEX="/abs/path/bios.hex"'
+//
+// The front end resolves a relative path against THIS FILE's directory rather
+// than the process's working directory -- measured 2026-11-02 by running the
+// same source from two directories -- so a relative path here works and an
+// external one must be absolute.  A path that does not resolve is a hard
+// elaboration error ("failed to open file"), not a silent zero-filled memory,
+// so a build that succeeds has loaded something.
+//
+// This exists so the machine can be exercised against a BIOS the operator
+// supplies, without that image entering the repository: an official GBA BIOS is
+// Nintendo's copyrighted work and must not be committed here.  The vendored
+// Cult-of-GBA image carries no such restriction and stays the default.
 reg [31:0] mem_bios [0:4095];
+`ifdef TINYGBA_BIOS_HEX
+initial $readmemh(`TINYGBA_BIOS_HEX, mem_bios);
+`else
 initial $readmemh("gba_bios_cultofgba.hex", mem_bios);
+`endif
 always @(posedge clk) 
     if (ce) begin
         rdata_bios <= mem_bios[bram_addr[13:2]];

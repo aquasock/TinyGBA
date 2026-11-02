@@ -17,8 +17,12 @@ cartridge has run on the board, so no game has produced a picture.
   bars and a green status band: 64 MiB, both dies, all sixteen patterns. Two
   earlier readings of that probe were taken on images whose `clk67` crossed no
   clock-plane pip at all and are superseded. See `core-reference.md` BRD-006.
-- **The machine: never booted.** `04_machine` exists and has not been loaded with
-  a cartridge.
+- **The machine: runs the BIOS, halts, and never wakes.** The CPU executes the
+  official BIOS, reaches the halt write at `0x344`, and stays halted — so it
+  never fetches the cartridge and never sets the VBlank IRQ enable that would
+  release it. The GPU raster is alive (VBlank and HBlank both fire), so this is a
+  single missing register write, not a dead display path. No retail title has
+  produced a picture.
 
 ## Build
 
@@ -64,7 +68,16 @@ timing report and both have shipped an image that was wrong:
 | `TINYGBA_SDRAM_TEST` | sixteen bars, one per probe pattern; green = read back correctly |
 | `TINYGBA_SDRAM_TEST` + `TINYGBA_SDRAM_LANES` | the low halfword's sixteen data bits, green = that lane returned 1 |
 | `TINYGBA_OVERLAY_OFF` | production machine with the OSD suppressed — use this in one-wire mode |
-| `TINYGBA_STATUS_TEST` | sixteen sticky status bits — did the loader release the CPU, did the CPU fetch, did the controller answer, did the GPU draw |
+| `TINYGBA_STATUS_TEST` | sixteen probe bits: fetch region, raster, halt state and interrupt enables |
+
+The `TINYGBA_STATUS_TEST` bar layout is **generated**, not hand-written. One field
+list in `tools/probe_map.py` produces both the RTL packing
+(`fpga/gba/src/probe_bits.vh`) and the host decoder, and the build refuses a
+stale include. Four consecutive cycles on the sibling SNES project mis-stated a
+field position and each produced a plausible number rather than an error; this
+project then repeated that class three times in one session. Decode a capture
+with `tools/probe_map.py --decode frame.png` and never by hand — the tool
+prints the map id, and a capture only decodes under the map that built it.
 
 The OSD powers up asserted and its 960-pixel window hides the framebuffer behind
 an empty menu's black. In two-wire mode the BL616 menu closes it; in one-wire
