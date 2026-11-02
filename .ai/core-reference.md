@@ -213,4 +213,18 @@ Field meanings:
     - "tangcore `gbatang/src/gbatang.sdc` at `77fd0714`"
   verification: "Measured 2026-11-02 by full builds: six seeds of the failing configuration, one unmodified-tree control, one without-the-define control and one re-routed Oct 31 netlist, plus a full end-to-end build of the machine image with the corrected gate that reached a bitstream. Not yet confirmed on hardware: the image has not been loaded."
 
+- record_id: BRD-006
+  kind: BOARD
+  topic_id: BRD
+  title: "The board's SDRAM is fully good: 64 MiB, both dies, all sixteen probe patterns"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "The `TINYGBA_SDRAM_TEST` image built at seed 5, SHA-256 `aa3455c066a75bada619fbd380151f624a94057cb288877ff0b9b642161e591f`, draws a green status band and sixteen green bars, with the probe's own grey margin beyond x=232 as the only non-green area. That is the probe's full pass: `done` has been reached and every one of the sixteen patterns read back correctly, eight on the low die and eight on the high. The grey block at the right edge is the display's `x >= 232` margin, not a failed bar. Two earlier readings are superseded. Core-log entry 3 read two green and fourteen red, and entry 5 read eight red on the high die and attributed it to the probe sampling a cycle before the data arrived; both were taken from images whose `clk67` crossed no clock-plane bridge pip at all (BRD-004), and neither had the corrected probe on the board. An attempted flash of this same image earlier in the session produced a screen identical to the machine image, which was the silent-load failure of BRD-003 rather than a result: the probe writes its bars from its own raster and cannot be influenced by the GPU, the CPU or the cartridge, so it cannot legitimately show the machine's black field."
+  consequence: "SDRAM is out of the machine's failure path entirely. Work RAM, cartridge space and the two-die single-CS question are all settled: the module gives the full 64 MiB and the die select works, so no cartridge size is excluded and no memory fault can explain a machine that does not run. Any future diagnosis of the black framebuffer must look at the boot path instead -- whether the loader released the CPU, whether the CPU fetched, and whether the GPU ever wrote a pixel -- and must not re-test the memory. It also means a `TINYGBA_SDRAM_TEST` flash that shows the previous image's picture is a failed load, not a probe failure, and the correct response is to reload before drawing any conclusion."
+  sources:
+    - "This repository, `build/c6_sweep/s5/tinygba.fs` and its `build.log`, `clock-plane.log` and `timing-gate.log`"
+    - "Board capture reported by the operator 2026-11-02: green band, sixteen green bars, grey margin"
+    - "This repository, `fpga/gba/src/gba2hdmi.sv`: the `TINYGBA_SDRAM_TEST` colour function and its `x < 8'd232` bar region"
+  verification: "Observed on the board 2026-11-02 after a fresh load onto a rebooted console, with the image rebuilt from the current tree so that `clk67` sits on `SPINE27/TOP2` and both gates pass. The first flash attempt in the same session did not take and showed the machine's picture; the reload showed the probe's own."
+
 ---

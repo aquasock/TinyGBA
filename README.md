@@ -13,10 +13,10 @@ cartridge has run on the board, so no game has produced a picture.
   orientation marker at the top left and the wide grey band on the right. That
   exercises the PLL and divider topology, the clock placements in `tinygba.cst`,
   the OSER10 serialiser path and the TMDS pair.
-- **SDRAM: sound, as far as it has been tested.** The first probe reported the
-  high halfword of a 32-bit access failing; that was the probe sampling one clock
-  before the data arrives, not the memory. The corrected probe has not yet run on
-  the board — its place and route failed at seed 1.
+- **SDRAM: verified good on the board.** The corrected probe reads sixteen green
+  bars and a green status band: 64 MiB, both dies, all sixteen patterns. Two
+  earlier readings of that probe were taken on images whose `clk67` crossed no
+  clock-plane pip at all and are superseded. See `core-reference.md` BRD-006.
 - **The machine: never booted.** `04_machine` exists and has not been loaded with
   a cartridge.
 
@@ -64,6 +64,7 @@ timing report and both have shipped an image that was wrong:
 | `TINYGBA_SDRAM_TEST` | sixteen bars, one per probe pattern; green = read back correctly |
 | `TINYGBA_SDRAM_TEST` + `TINYGBA_SDRAM_LANES` | the low halfword's sixteen data bits, green = that lane returned 1 |
 | `TINYGBA_OVERLAY_OFF` | production machine with the OSD suppressed — use this in one-wire mode |
+| `TINYGBA_STATUS_TEST` | sixteen sticky status bits — did the loader release the CPU, did the CPU fetch, did the controller answer, did the GPU draw |
 
 The OSD powers up asserted and its 960-pixel window hides the framebuffer behind
 an empty menu's black. In two-wire mode the BL616 menu closes it; in one-wire

@@ -138,6 +138,36 @@ always @(posedge clk) begin
     mem_portA_addr  <= pt_y * 240 + pt_x;
     mem_portA_wdata <= pt_colour(pt_x, pt_y);
 end
+`elsif TINYGBA_STATUS_TEST
+// TinyGBA: sticky status readout, selected with -DTINYGBA_STATUS_TEST.  Sixteen
+// bars, bit 0 on the left, green where the bit is set.  Bits 0..5 are sticky and
+// never clear, so they answer "did this ever happen since reset"; bits 6..15 are
+// rom_addr[27:18] live, so they say which region the CPU is fetching from now.
+// The band across the top turns green once `gbaon` is high, which separates a
+// machine still loading from one that is running and failing.  See the comment at
+// the probe in gbatang_top.sv for the bit meanings.
+reg [7:0] st_x, st_y;
+
+function [17:0] st_colour(input [7:0] x, input [7:0] y);
+    if (y < 8'd8)
+        st_colour = dbg_done ? {6'h00, 6'h3f, 6'h00} : {6'h00, 6'h00, 6'h3f};
+    else if (x < 8'd232)
+        st_colour = dbg_bits[x / 8'd15] ? {6'h00, 6'h3f, 6'h00} : {6'h3f, 6'h00, 6'h00};
+    else
+        st_colour = {6'h20, 6'h20, 6'h20};
+endfunction
+
+always @(posedge clk) begin
+    if (st_x == 8'd239) begin
+        st_x <= 8'd0;
+        st_y <= (st_y == 8'd159) ? 8'd0 : st_y + 8'd1;
+    end else begin
+        st_x <= st_x + 8'd1;
+    end
+    mem_portA_we    <= 1'b1;
+    mem_portA_addr  <= st_y * 240 + st_x;
+    mem_portA_wdata <= st_colour(st_x, st_y);
+end
 `elsif TINYGBA_VIDEO_TEST
 // TinyGBA: video-path proof, selected with TINYGBA_DEFINES=-DTINYGBA_VIDEO_TEST.
 // Nothing in this port has produced a picture yet, and the SDRAM probe's answer

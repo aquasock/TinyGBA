@@ -230,6 +230,10 @@ always @(posedge clk16) begin           // reset logic
     end
 end
 
+wire [7:0] pixel_out_x /* verilator public */, pixel_out_y /* verilator public */;
+wire [17:0] pixel_out_data /* verilator public */;
+wire pixel_out_we /* verilator public */;
+
 `ifdef TINYGBA_SDRAM_TEST
 // TinyGBA: the occupancy probe owns the SDRAM CPU port.  The memory controller
 // keeps running but its requests go nowhere, which is harmless here: the probe
@@ -263,8 +267,55 @@ assign cpu_mem_rd    = mem_rd;
 assign cpu_mem_wr    = mem_wr;
 assign cpu_mem_be    = mem_be;
 assign cpu_mem_port  = mem_port;
+
+`ifdef TINYGBA_STATUS_TEST
+// TinyGBA: sticky status readout.  The machine has never drawn anything, and a
+// black picture cannot say which of four quite different things failed, so this
+// build latches whether each one has EVER happened since reset and draws the
+// answer where the video path -- already proven -- can show it.  Every bit is
+// latched on the first occurrence and never cleared, because a snapshot cannot
+// tell "never happened" from "happened and finished"; TinySNES paid for that
+// lesson twice, and one of its probes reported all-set because the bits were
+// never armed against their own reset value.  Each bit is therefore held low
+// while `resetn` is low, and only then allowed to set.
+//
+//   bit 0  `gbaon` rose            -- the loader finished and released the machine
+//   bit 1  `rom_en` asserted       -- the CPU issued a cartridge fetch
+//   bit 2  `cpu_mem_ready` rose    -- the SDRAM controller answered a request
+//   bit 3  `loader_do_valid` rose  -- cartridge bytes reached the loader at all
+//   bit 4  `pixel_out_we` asserted -- the GPU drew a pixel
+//   bit 5  `halt` asserted         -- the CPU executed a HALT-like stall
+//   bits 6..15  rom_addr[27:18]    -- live, where the CPU is fetching from
+//
+// Bits 0..5 are sticky; the top ten are a live view and move, so read them as a
+// region rather than a number.  The status band turns green once `gbaon` is high,
+// which separates "still loading" from "running and failing".
+reg [5:0]  st_bits;
+reg [15:0] st_dbg;
+wire       st_armed = resetn;
+
+always @(posedge clk16) begin
+    if (~st_armed) begin
+        st_bits <= 6'b000000;
+    end else begin
+        if (gbaon)                    st_bits[0] <= 1'b1;
+        if (rom_en)                   st_bits[1] <= 1'b1;
+        if (cpu_mem_ready)            st_bits[2] <= 1'b1;
+        if (loader_do_valid)          st_bits[3] <= 1'b1;
+        if (pixel_out_we)             st_bits[4] <= 1'b1;
+        if (halt)                     st_bits[5] <= 1'b1;
+    end
+end
+
+always @(posedge clk16)
+    st_dbg <= {rom_addr[27:18], st_bits};
+
+assign dbg_bits = st_dbg;
+assign dbg_done = gbaon;
+`else
 assign dbg_bits      = 16'h0000;
 assign dbg_done      = 1'b0;
+`endif
 `endif
 
 `ifdef VERILATOR
@@ -275,9 +326,9 @@ assign gba_on = gbaon;
 // GPU
 ////////////////////////////
 
-wire [7:0] pixel_out_x /* verilator public */, pixel_out_y /* verilator public */;
-wire [17:0] pixel_out_data /* verilator public */;
-wire pixel_out_we /* verilator public */;
+// The GPU's pixel-stream declarations live above the CPU/memory mux, because the
+// status probe reads `pixel_out_we` and a use before its declaration is a
+// hazard the build only tolerates by flag.
 
 wire [proc_buswidth-1:0] gb_bus_din;        // CPU bus
 wire [proc_buswidth-1:0] gb_bus_dout;
@@ -613,6 +664,9 @@ gba_joypad joypad (
 // shipping configuration and take it out only when the machine itself is what
 // is being looked at.
 `ifdef TINYGBA_OVERLAY_OFF
+  `define TINYGBA_DIAG_OVERLAY_OFF
+`endif
+`ifdef TINYGBA_STATUS_TEST
   `define TINYGBA_DIAG_OVERLAY_OFF
 `endif
 wire overlay_iosys;

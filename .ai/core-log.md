@@ -251,3 +251,35 @@ Put a cartridge on the board, which is now finally possible and is the only thin
 - User Test: NOT RUN
 
 ---
+
+## 8 COMMIT Unreleased 2026-11-02T10:12:00-07:00
+
+#### Coming From:
+
+Unreleased 2ee5b8a
+
+#### Purpose:
+
+Put the machine image and the corrected SDRAM probe on the board for the first time since the timing gate was corrected, and find out whether the black machine picture is a memory fault.
+
+#### Outcome:
+
+The SDRAM is good and the machine still does not boot, which is the most useful pair of answers this project has had. The machine image `build/c6_machine_ok/tinygba.fs` drew a black field 1080 pixels wide flanked by the grey pillarbox bars, with HDMI synced: by the two widths recorded for this core that is the video window with an empty framebuffer, not the 960-pixel OSD window, and the OSD was independently ruled out rather than assumed absent -- the machine netlist has no `iosys.disp.menu_mem` and no overlay net at all, because `TINYGBA_OVERLAY_OFF` ties `overlay` to `1'b0` in logic and synthesis deletes the whole block, against 98 OSD and menu nets in the same tree built without that define. The cartridge was streamed with `tools/load_gba_rom.py` and the core accepted 4096 bytes in 0.6 s with no error, so the picture is a machine that is not running rather than a stream that failed. The first attempt at the SDRAM probe then showed the same black field, which cannot be that bitstream: the probe writes its sixteen bars from its own raster and takes no input from the GPU, the CPU or the cartridge, so an identical picture meant the load had not taken. That is the fourth recorded occurrence of the silent-load failure in BRD-003 and the second in this session, and it is now recorded in BRD-006 as the way to read that image: reload before concluding anything. Reloaded onto a rebooted console, the probe drew a green status band and sixteen green bars with only its own grey margin beyond x=232, which is its full pass: 64 MiB, both dies, all sixteen patterns read back. That settles the SDRAM, the two-die single-CS question and every memory hypothesis, and it supersedes both earlier readings -- entry 3's two green and fourteen red, and entry 5's eight-red high die -- because both were taken from images whose `clk67` crossed no clock-plane bridge pip (BRD-004) and neither had the corrected probe on the board. The working instrument for the remaining fault is now a sticky status probe, `TINYGBA_STATUS_TEST`, added this cycle and built at seed 5 as `build/c6_status/tinygba.fs`, SHA-256 `87fba5cff2863adfd94f20fc755bac5da0028e4becd6c3c0a4c9e939b87b390b`, zero hold violations and the same single documented relaxation. It latches six facts that never clear -- whether `gbaon` rose, whether `rom_en` ever asserted, whether `cpu_mem_ready` ever rose, whether `loader_do_valid` ever rose, whether the GPU ever wrote a pixel, and whether `halt` asserted -- and draws them as sixteen bars beside a live `rom_addr[27:18]`, with the band green once `gbaon` is high. Its bits are held low while `resetn` is low and only then allowed to set, which is the trap TinySNES hit when two of its history bits were unarmed and self-set at reset. It has not been on the board. Two things were checked offline and one hypothesis was withdrawn. The controller testbench `fpga/gba/diag/tb_sdram_controller.sv` still reports `xxxxffff` and then `zzzz`, and the trace shows `dq` as `Z` at the controller's sample slot, so it remains unable to see the controller as hardware sees it -- the same limitation entry 5 recorded, still open, and it is now explicitly not an authority. And an inspection of the status netlist initially read the sticky bits' data input as `joypad.reg_dout` and their enables as unrelated signals, which looked like a miscompiled probe; tracing the drivers showed bit 1515 is driven by a `VCC` cell, so it is constant 1 exactly as written, and the netname attached to it was a stale alias. That is the third time in two cycles that reading netnames rather than drivers produced a wrong conclusion, and it is why `tools/gatelevel_report.py` reads drivers. Nothing was deployed as the cycle closed and the Tang was handed back to the operator. BRD-006 was added to `.ai/core-reference.md`, `README.md`'s status now records the SDRAM as verified, and the diagnostic table gained `TINYGBA_STATUS_TEST`. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 7 were not rewritten and that BRD-006 carries a unique id and the canonical field order, and validated this entry as entry 8 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of eight against the 100-entry limit.
+
+#### Next Steps:
+
+Load `build/c6_status/tinygba.fs` and read the six sticky bits, because SDRAM is now exonerated and the remaining fault is a chain of four links that this build separates in one picture: a green band means `gbaon` rose and the loader released the machine, bit 1 means the CPU issued a cartridge fetch, bit 2 means the controller answered a request, bit 3 means cartridge bytes reached the loader at all, bit 4 means the GPU drew a pixel, and bit 5 means the CPU took a halt. Read the band first, then the low six bars left to right, and read the top ten as the region `rom_addr` is in rather than as a number. The most likely reading, and the one to look for, is a green band with bit 3 clear, which would mean the bytes never reached the loader even though the stream reported success -- that would put the fault in the `0x07` loader write path rather than in the CPU, and the next instrument is a counter of loader writes shown beside the same bits. If bit 3 is set and bit 1 is clear, the cartridge is in memory and the CPU is not fetching it, which points at `gbaon` and the reset sequencer rather than at memory. Do not re-test the SDRAM: it is verified and a fifth memory test would add nothing. Do not trust the controller testbench until its DQ drive window is aligned with the controller's own sample slot, and do not read any netlist by netname -- trace drivers, because a stale alias has now produced three wrong conclusions in two cycles. The production configuration still fails on hold and remains unbuildable, which should be settled by finding the path rather than by sweeping seeds.
+
+#### Files Modified:
+
+- README.md
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gba2hdmi.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
