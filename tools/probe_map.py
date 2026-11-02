@@ -50,16 +50,24 @@ FIELDS = [
     dict(name="hblank_arrived", width=1, value="st_gpu[1]",
          doc="an HBlank period has arrived (DISPSTAT flag)"),
     dict(name="vblank_irq_en", width=1, value="dispstat_dbg[3]",
-         doc="DISPSTAT V-Blank IRQ enable, LIVE -- the CPU must write it, and "
-             "it is the one gate that makes IRP_VBlank assert"),
+         doc="DISPSTAT V-Blank IRQ enable, LIVE -- the one gate that makes "
+             "IRP_VBlank assert and so the one thing that can release halt"),
     dict(name="halt_live", width=1, value="halt",
          doc="the CPU is halted right now"),
     dict(name="halt_seen", width=1, value="st_halt_valid",
          doc="a halt has been observed since reset"),
     dict(name="halt_cleared", width=1, value="st_irq[3]",
          doc="halt has gone low again after being seen high"),
-    dict(name="halt_entries", width=8, value="st_halt_edges",
-         doc="how many times the CPU has entered a halt, saturating at 255"),
+    dict(name="dispstat_written", width=1, value="st_reg[0]",
+         doc="the CPU ever wrote 0x04000004 (DISPSTAT) at all"),
+    dict(name="dispstat_en_written", width=1, value="st_reg[1]",
+         doc="a DISPSTAT write carried din[3], the V-Blank IRQ enable"),
+    dict(name="ie_written", width=1, value="st_reg[2]",
+         doc="the CPU ever wrote 0x04000200 (IE)"),
+    dict(name="ime_written", width=1, value="st_reg[3]",
+         doc="the CPU ever wrote 0x04000208 (IME)"),
+    dict(name="halt_entries", width=4, value="st_halt_edges",
+         doc="how many times the CPU has entered a halt, saturating at 15"),
 ]
 
 def map_id():

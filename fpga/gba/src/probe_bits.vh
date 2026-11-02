@@ -13,18 +13,26 @@ localparam PROBE_VBLANK_ARRIVED_WIDTH = 1;   // bits 2: a VBlank period has arri
 localparam PROBE_HBLANK_ARRIVED_LSB = 3;
 localparam PROBE_HBLANK_ARRIVED_WIDTH = 1;   // bits 3: an HBlank period has arrived (DISPSTAT flag)
 localparam PROBE_VBLANK_IRQ_EN_LSB = 4;
-localparam PROBE_VBLANK_IRQ_EN_WIDTH = 1;   // bits 4: DISPSTAT V-Blank IRQ enable, LIVE -- the CPU must write it, and it is the one gate that makes IRP_VBlank assert
+localparam PROBE_VBLANK_IRQ_EN_WIDTH = 1;   // bits 4: DISPSTAT V-Blank IRQ enable, LIVE -- the one gate that makes IRP_VBlank assert and so the one thing that can release halt
 localparam PROBE_HALT_LIVE_LSB = 5;
 localparam PROBE_HALT_LIVE_WIDTH = 1;   // bits 5: the CPU is halted right now
 localparam PROBE_HALT_SEEN_LSB = 6;
 localparam PROBE_HALT_SEEN_WIDTH = 1;   // bits 6: a halt has been observed since reset
 localparam PROBE_HALT_CLEARED_LSB = 7;
 localparam PROBE_HALT_CLEARED_WIDTH = 1;   // bits 7: halt has gone low again after being seen high
-localparam PROBE_HALT_ENTRIES_LSB = 8;
-localparam PROBE_HALT_ENTRIES_WIDTH = 8;   // bits 15:8: how many times the CPU has entered a halt, saturating at 255
+localparam PROBE_DISPSTAT_WRITTEN_LSB = 8;
+localparam PROBE_DISPSTAT_WRITTEN_WIDTH = 1;   // bits 8: the CPU ever wrote 0x04000004 (DISPSTAT) at all
+localparam PROBE_DISPSTAT_EN_WRITTEN_LSB = 9;
+localparam PROBE_DISPSTAT_EN_WRITTEN_WIDTH = 1;   // bits 9: a DISPSTAT write carried din[3], the V-Blank IRQ enable
+localparam PROBE_IE_WRITTEN_LSB = 10;
+localparam PROBE_IE_WRITTEN_WIDTH = 1;   // bits 10: the CPU ever wrote 0x04000200 (IE)
+localparam PROBE_IME_WRITTEN_LSB = 11;
+localparam PROBE_IME_WRITTEN_WIDTH = 1;   // bits 11: the CPU ever wrote 0x04000208 (IME)
+localparam PROBE_HALT_ENTRIES_LSB = 12;
+localparam PROBE_HALT_ENTRIES_WIDTH = 4;   // bits 15:12: how many times the CPU has entered a halt, saturating at 15
 
 localparam PROBE_BUS_WIDTH = 16;
-localparam PROBE_MAP_ID = 32'ha089dde1;   // decode captures with the map that built them
+localparam PROBE_MAP_ID = 32'h1dce3f01;   // decode captures with the map that built them
 // The guard MEASURES the packing expression rather than restating the
 // generator's own arithmetic.  `$bits` of the concatenation is compared
 // against the bus width, so if any source expression ever changes width
@@ -32,7 +40,7 @@ localparam PROBE_MAP_ID = 32'ha089dde1;   // decode captures with the map that b
 // here instead of shipping a readout that has to be decoded around.
 // Verified 2026-11-02 by comparing against a deliberately wrong constant
 // and watching elaboration fail with `unknown module`.
-localparam PROBE_PACK_WIDTH = $bits({ st_halt_edges, st_irq[3], st_halt_valid, halt, dispstat_dbg[3], st_gpu[1], st_gpu[0], st_gpu[2], st_cart_seen });
+localparam PROBE_PACK_WIDTH = $bits({ st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, halt, dispstat_dbg[3], st_gpu[1], st_gpu[0], st_gpu[2], st_cart_seen });
 generate
   if (PROBE_PACK_WIDTH != PROBE_BUS_WIDTH) begin : probe_width_error
     // Deliberately undefined module: slang rejects $error, yosys drops a
@@ -42,4 +50,4 @@ generate
 endgenerate
 
 `define TINYGBA_PROBE_ASSIGN \
-    st_dbg <= { st_halt_edges, st_irq[3], st_halt_valid, halt, dispstat_dbg[3], st_gpu[1], st_gpu[0], st_gpu[2], st_cart_seen };
+    st_dbg <= { st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, halt, dispstat_dbg[3], st_gpu[1], st_gpu[0], st_gpu[2], st_cart_seen };

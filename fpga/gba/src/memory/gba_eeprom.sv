@@ -180,7 +180,14 @@ always @(posedge clk) begin
                 if (off == 6'd63) begin
                     state <= IDLE;
 `ifdef VERILATOR
-                    $display("Data read: %h", mem[addr*64 +: 64]);
+                    // TinyGBA: this references `mem`, whose declarations are
+                    // commented out at lines 83-98 of this file.  It is dead debug
+                    // code that only compiles under VERILATOR, and it stops the
+                    // upstream Verilator harness from building at all -- which is
+                    // itself evidence that harness has not been run against this
+                    // revision.  Kept as a comment rather than repaired, because
+                    // there is no array left to print.
+                    // $display("Data read: %h", mem[addr*64 +: 64]);
 `endif
                 end
             end
@@ -192,7 +199,9 @@ always @(posedge clk) begin
                 if (off == 6'd63) begin
                     state <= WR_ZERO;
 `ifdef VERILATOR
-                    $display("Data written: %h", mem[addr*64 +: 64]);
+                    // TinyGBA: same as the read case above -- `mem` has no
+                    // declaration left to print.
+                    // $display("Data written: %h", mem[addr*64 +: 64]);
 `endif
                 end
             end

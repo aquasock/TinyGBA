@@ -84,6 +84,33 @@ an empty menu's black. In two-wire mode the BL616 menu closes it; in one-wire
 mode nothing does, so a production build **without** `TINYGBA_OVERLAY_OFF` will
 look black and that is not a machine fault.
 
+### Simulation
+
+The core runs under Verilator with SDL video, FST tracing and audio capture:
+
+```
+tools/sim/build_gba_sim.sh build          # verilate and compile
+tools/sim/build_gba_sim.sh run game.gba   # SDL window; -s N limits steps
+```
+
+This is the only way to ask a question about *correctness* rather than about
+state. Every hardware result in this project before it came from a 16-bit strip
+on a capture card, and the sibling SNES project reached the same impasse and
+concluded the board had to be replaced by a bench for these questions.
+
+The harness is upstream's `verilator/sim_main.cpp`, which this port had never
+carried. It needed three repairs to build at all, which is evidence it had not
+been run against this revision: two `ifdef VERILATOR` `$display` statements in
+`gba_eeprom.sv` index an array whose declaration is commented out in that same
+file, `linebuffer.v` and `mem_eeprom.v` are missing from the upstream source
+list, and `mem_eeprom.v` still needs the `MUX2`, `DFFRE` and `DPB` primitives,
+carried in `tools/sim/gowin_cells_sim.v`.
+
+The simulation clocks `clk50:clk16` at exactly 3:1 from one counter, which
+matches the board's 50.25:16.75 MHz. That makes it a fair reference for logic
+and an unfair one for anything that depends on how two clock domains relate,
+since on the board `clk16` and `clk50` come from different PLLs.
+
 ### Test cartridge
 
 `tools/make_gba_test_rom.py` writes a self-checking cartridge, so the first

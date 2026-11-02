@@ -13,6 +13,15 @@ is in this tree, and no external checkout is involved in a build.
   `src/` verbatim except for the files listed below, each change marked in place
   with a `TinyGBA:` comment.
 
+- **GBATang's Verilator harness** — `tools/sim/sim_main.cpp` is upstream's
+  `verilator/sim_main.cpp` at the same commit, GPL-3.0, carried unmodified. It
+  gives the core an SDL window, an FST trace and a WAV-quality audio capture,
+  which is the only way this project can ask a question about correctness rather
+  than about state. `tools/sim/gowin_cells_sim.v` extracts just `MUX2`, `DFFRE`
+  and `DPB` from oss-cad-suite's Gowin cell library with `specify` blocks removed,
+  because `memory/mem_eeprom.v` still instantiates those three under `VERILATOR`.
+  Both are wired up by `tools/sim/build_gba_sim.sh`, which is this project's own.
+
 - **hdl-util/hdmi** — `fpga/gba/src/hdmi/`, the HDMI transmitter, by Sameer Puri,
   MIT, carried as `fpga/gba/src/hdmi/LICENSE-MIT`. These ten files are **not**
   GBATang's copies: they are TinyTang's (`fpga/desktop/hdmi/`), because

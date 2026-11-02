@@ -319,3 +319,39 @@ Latch `gb_bus_adr` and `gb_bus_din` at the first write to `0x04000004` and read 
 - User Test: PASS
 
 ---
+
+## 10 COMMIT Unreleased 2026-11-02T15:04:12-07:00
+
+#### Coming From:
+
+Unreleased 2fbfef6
+
+#### Purpose:
+
+Build the core under Verilator so it can be asked whether it is correct rather than only what state it is in, after six hardware cycles produced one word per flash.
+
+#### Outcome:
+
+The core simulates for the first time in this port's history, and it boots and renders, which makes the hardware failure a divergence rather than a mystery. Upstream GBATang ships a complete Verilator harness at `verilator/sim_main.cpp` with an SDL window, FST tracing and audio capture, and this port had never carried it, so every result on record had come from a 16-pixel bar strip on a capture card with nothing to compare against. The harness needed three repairs before it built, and each is evidence it had never been run against this revision: `memory/gba_eeprom.sv` carries two `ifdef VERILATOR` `$display` statements that index `mem`, an array whose declaration is commented out in the same file at lines 83 to 98, so the vendor's own simulation build cannot elaborate; upstream's source list omits `gpu/linebuffer.v` and `memory/mem_eeprom.v`, both of which are instantiated unconditionally; and `mem_eeprom.v` still instantiates `MUX2`, `DFFRE` and `DPB` under `VERILATOR`, which only the vendor cell library defines, so `tools/sim/gowin_cells_sim.v` carries exactly those three with `specify` blocks removed. With those fixed, `tools/sim/build_gba_sim.sh` verilates, compiles and runs, and the simulation renders frames, writes audio and plays the Cult-of-GBA BIOS visibly. The decisive comparison is that the official BIOS, which halts on the board at the `HALTCNT` write and never wakes, **boots and renders eleven frames in simulation** with the same cartridge. So the RTL is not the fault: something the simulation does not model is. The simulation clocks `clk50:clk16` at exactly 3:1 from a single counter, which matches the board's 50.25:16.75 MHz, so it is a fair reference for logic and an unfair one for anything depending on how two clock domains relate -- and on the board `clk16` and `clk50` come from different PLLs, `pll16` and `pll33`, while in simulation they come from one counter. That difference is now the leading candidate and was not testable before this cycle. Two smaller findings came with it. `dispstat_dbg` was declared inside the probe `ifdef` and therefore used unconnected outside it, which this project's own synthesis builds silently tolerated as an implicit net and Verilator refused; it is now declared unconditionally. And a comment line beginning `// Verilator` is parsed as a pragma directive and fails elaboration, which is worth knowing before writing RTL comments. The user also reports that nand2mario's focus was the 60K board with the 138K secondary, and that a slow CPU could show up in audio before it shows up in display, since the GBA's CPU drives audio directly; that is recorded as a lead rather than acted on, because the simulation now gives a way to measure cycles per frame directly. Nothing was deployed. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 9 were not rewritten, and validated this entry as entry 10 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of ten against the 100-entry limit.
+
+#### Next Steps:
+
+Find what differs between the simulation and the board, because the simulation is now a reference and the question has changed shape: the official BIOS boots in simulation and halts on hardware, so the fault is in something the model does not reproduce. Work the difference list in order of how much each can affect the halt. First the clock relationship: in simulation `clk16` and `clk50` are one counter at an exact 3:1 ratio with fixed phase, while on the board they are `pll16` and `pll33` with no guaranteed phase, and `gba_gpu_timing` takes its register writes from `mclk` while running its state machine on `fclk` -- so instrument the register path across that boundary before assuming the DISPSTAT write that the probe saw on the bus actually lands in the register. Second the SDRAM: the simulation substitutes `sdram_sim.v`, a zero-latency array, for the real controller, so any behaviour that depends on `cpu_mem_ready` arriving late is invisible there. Third, memory waitstates: measure `clk16` cycles spent with `cpu_en` low as a fraction of total in simulation, then compare against what the hardware probe implies, because a CPU that stalls far more than real hardware would explain both a slow boot and the slow audio the user reports, and the GBA's CPU drives audio directly. Do not rebuild and reflash the same netlist hoping for a different result, and do not add more probe fields until the simulation has been used to answer one of those three questions -- the simulation costs minutes and exposes every signal, while a hardware probe costs a build and a flash for one word. Keep the harness's limits in view whenever using it to explain a board result: it has no SDRAM controller, no HDMI, no BL616 link and no PLL phase relationship, so it can prove logic wrong and cannot prove a board right.
+
+#### Files Modified:
+
+- README.md
+- THIRD_PARTY.md
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/gba_eeprom.sv
+- tools/sim/build_gba_sim.sh
+- tools/sim/gowin_cells_sim.v
+- tools/sim/sim_main.cpp
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: N/A
+
+---

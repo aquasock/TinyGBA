@@ -234,6 +234,16 @@ wire [7:0] pixel_out_x /* verilator public */, pixel_out_y /* verilator public *
 wire [17:0] pixel_out_data /* verilator public */;
 wire pixel_out_we /* verilator public */;
 
+// Declared unconditionally: the GPU's DISPSTAT_debug output is connected in both
+// the simulation build and the synthesis build, and an earlier version declared
+// this inside the probe `ifdef`, which left the port connection referring to an
+// implicitly-created net in every build without that define.
+// (Note: a line beginning `// Verilator` is parsed as a pragma directive, so
+// that word is kept out of the start of a comment.)
+wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
+                            //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
+                            //  flag, both set unconditionally on arrival.
+
 `ifdef TINYGBA_SDRAM_TEST
 // TinyGBA: the occupancy probe owns the SDRAM CPU port.  The memory controller
 // keeps running but its requests go nowhere, which is harmless here: the probe
@@ -291,9 +301,6 @@ assign cpu_mem_port  = mem_port;
 // Bits 0..5 are sticky; the top ten are a live view and move, so read them as a
 // region rather than a number.  The status band turns green once `gbaon` is high,
 // which separates "still loading" from "running and failing".
-wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
-                            //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
-                            //  flag, both set unconditionally on arrival.
 (* keep *) reg [5:0]  st_bits;
 (* keep *) reg [2:0]  st_gpu;
 (* keep *) reg [9:0]  st_region;
@@ -305,7 +312,22 @@ wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
 //   st_irq[2]  cpu_IRP ever asserted
 //   st_irq[3]  halt ever went low again after being seen high
 (* keep *) reg [3:0]  st_irq;
-(* keep *) reg [7:0]  st_halt_edges;
+(* keep *) reg [3:0]  st_halt_edges;
+// Did the CPU ever WRITE the registers that could release the halt?
+//
+// The machine halts at the HALTCNT write and never wakes, and `halt` only clears
+// when an IRPFlags bit sets, which needs a source the CPU has enabled.  These
+// four say whether the writes that would do it ever happened at all, which
+// separates "the BIOS halts before reaching them" from "it writes them and they
+// do not take".  Addresses are offsets from 0x04000000, the same numbering
+// HALTCNT.Adr uses (`28'h300`), so DISPSTAT is `28'h004`.
+//   st_reg[0]  a write to 0x04000004 (DISPSTAT) occurred
+//   st_reg[1]  ...and one of them carried din[3], the V-Blank IRQ enable
+//   st_reg[2]  a write to 0x04000200 (IE) occurred
+//   st_reg[3]  a write to 0x04000208 (IME) occurred
+(* keep *) reg [3:0]  st_reg;
+wire st_wr = gb_bus_ena & ~gb_bus_rnw;
+wire st_wr_dispstat = st_wr & (gb_bus_adr == 28'h004);
 (* keep *) reg [15:0] st_dbg;
 wire       st_armed = resetn;
 
@@ -354,14 +376,19 @@ always @(posedge clk16) begin
         st_gpu        <= 3'b000;
         st_region     <= 10'b0000000000;
         st_irq        <= 4'b0000;
-        st_halt_edges <= 8'd0;
+        st_halt_edges <= 4'd0;
+        st_reg        <= 4'b0000;
     end else begin
+        if (st_wr_dispstat)                 st_reg[0] <= 1'b1;
+        if (st_wr_dispstat & gb_bus_din[3]) st_reg[1] <= 1'b1;
+        if (st_wr & (gb_bus_adr == 28'h200)) st_reg[2] <= 1'b1;
+        if (st_wr & (gb_bus_adr == 28'h208)) st_reg[3] <= 1'b1;
         if (IRP_VBlank)          st_irq[0] <= 1'b1;
         if (dispstat_dbg[3])     st_irq[1] <= 1'b1;
         if (cpu_IRP)             st_irq[2] <= 1'b1;
         if (st_halt_valid & ~halt) st_irq[3] <= 1'b1;
         if (st_halt_rise) begin
-            if (st_halt_edges != 8'hFF) st_halt_edges <= st_halt_edges + 8'd1;
+            if (st_halt_edges != 4'hF) st_halt_edges <= st_halt_edges + 4'd1;
         end
         // Which 256 KB region the CPU has EVER fetched from, as a sticky OR.
         // A live view of these bits cannot answer the question: every BIOS

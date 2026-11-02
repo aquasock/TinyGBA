@@ -215,6 +215,31 @@ fi
 [[ "$stage" == synth ]] && { echo "stopping after synthesis"; exit 0; }
 
 # --------------------------------------------------------------- 2. place and route
+# `pack` means "pack the routed netlist that is already here", not "place and
+# route again".  There was no early exit for it, so TINYGBA_STAGE=pack fell
+# through and re-ran nextpnr, OVERWRITING tinygba-routed.json, timing.json and
+# clock-plane.log before packing.  nextpnr does not reproduce a placement from an
+# unchanged netlist and seed, so the bitstream that shipped would have been a
+# different placement from the one whose gates had just passed -- and a seed that
+# gated clean could fail the re-run.  Every image this project has deployed was
+# built with TINYGBA_STAGE=all, so no result on record is affected; the trap is
+# that the stage name promises the opposite of what it did.  Reported by the
+# sibling SNES project, which hit exactly this on its GSU probe.  The gate logs
+# are kept and re-printed so `pack` still reports what the placement passed,
+# which is the thing that was lost before: a packed image whose gates were run on
+# some other placement.
+if [[ "$stage" == pack ]]; then
+    for f in tinygba-routed.json timing.json clock-plane.log; do
+        [[ -f "$out/$f" ]] || {
+            echo "no $f in $out; run TINYGBA_STAGE=pnr first" >&2
+            exit 2
+        }
+    done
+    echo "=== 2. placement and routing (reused, not re-run) ==="
+    echo "    $out/tinygba-routed.json"
+    echo "    gates that passed on THIS placement:"
+    sed 's/^/      /' "$out/timing-gate.log" | grep -E 'pass|ALLOWED|hold  :|Meets' || true
+else
 echo "=== 2. placement and routing ==="
 "$nextpnr" \
     --json "$out/tinygba.json" \
@@ -275,6 +300,8 @@ gate=0
     >"$out/timing-gate.log" 2>&1 || gate=$?
 cat "$out/timing-gate.log"
 [[ $gate -eq 0 ]] || { echo "timing gate failed; see $out/timing-gate.log" >&2; exit 1; }
+
+fi   # end of the non-pack branch: the gates above ran on the routed netlist
 
 echo "=== 5. bitstream ==="
 "$suite/py3bin/python3" -m apycula.gowin_pack \
