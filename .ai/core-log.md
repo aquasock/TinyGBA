@@ -355,3 +355,38 @@ Find what differs between the simulation and the board, because the simulation i
 - User Test: N/A
 
 ---
+
+## 11 COMMIT Unreleased 2026-11-02T16:13:36-07:00
+
+#### Coming From:
+
+Unreleased 565c8b5
+
+#### Purpose:
+
+Find why the board halts where the simulation does not, and build the gate that would have caught it without a session of hardware work.
+
+#### Outcome:
+
+The whole machine failure was one undriven wire, and the project now has a build gate that detects the class. `gb_bus_rst` is an output of `gba_memory` that every `eProcReg_gba` instance reads as `if (gb_bus_rst) Dout_buffer <= register.def;`, and it is assigned nowhere -- in this tree or in upstream GBATang at `77fd0714`, where the vendor flow must simply tie it low. Measured on this flow with a minimal reproducer: `synth_gowin` folds such a wire to constant 1, makes the reset branch unconditional, deletes the write branch, and leaves the register driven by a single GND cell. At scale that removed roughly 4,500 flip-flops from a 9,100-register design -- every MMIO register in the machine -- while the design went on to elaborate, place, route, pass Fmax, pass the hold check and pack a bitstream. The two counts are the measurement: 4,631 registers with the wire undriven, 9,100 with `assign gb_bus_rst = 1'b0;`, from otherwise identical sources, block RAM unchanged. That single fact explains every hardware reading in entries 8 to 10 without exception: the probe saw writes to `0x04000004` carrying `din[3]`, to `0x04000200` and to `0x04000208`, while the live `DISPSTAT` V-Blank IRQ enable stayed 0, because no register existed to hold it; `IRP_VBlank` could therefore never assert, `IRPFlags` could never set, and `halt` could never clear, which is why the CPU stayed stopped on the `HALTCNT` write at `0x344` that the address latch had already named. The GPU raster and the SDRAM were never implicated and remain verified. The reason the simulation disagreed is now precise rather than mysterious: Verilator treats an undriven wire as 0, so the model contained the registers the bitstream did not, and the fold is exactly the difference between them -- which means no simulation of this design could ever have found this fault. The gate is `tools/synth_parity.py`: it compares a netlist's flip-flop and block-RAM population against a recorded baseline for its configuration, fails on a loss beyond ten percent, and prints the `used but has no driver` wires synthesis reported, grouped by instance. It was tested against the two builds this cycle produced -- the pre-fix netlist fails at 49.1 percent loss and the fixed one passes at 0.0 -- and all three exit codes were exercised, including the `2` that reports a missing baseline rather than passing silently. Recording a baseline from a build whose correctness is known is deliberate: absolute comparison between RTL and netlist does not work on this design, because techmapping expands one RTL register into several cells and the netlist then legitimately carries more than the source implies, which was measured at 7,435 against 9,100 and would have made a direct comparison meaningless. The gate is wired into `tools/build_tinygba.sh` as stage 1b, keyed on the configuration's `TINYGBA_*` define names with `TINYGBA_BIOS_HEX` excluded, because that define selects which bytes are loaded into the BIOS block RAM and changes no logic. Three smaller things came with it. The harness exited its step budget by falling through into the SDL event loop and spinning at 100 percent of a core with the window frozen, which reads on screen as a hang or as someone having paused it; it now exits with a message and idles with `SDL_Delay` when paused. Frame dumping was added to the harness, `-p PREFIX -pe N`, writing PPMs straight from the framebuffer, because capturing the SDL window depends on the window being findable and unoccluded and the first attempt grabbed the entire desktop instead. And the simulation was confirmed to render a retail cartridge through the official BIOS, reaching the Game Boy Advance boot logo, with the CPU spending only 2.2 percent of cycles waiting on memory and 76.4 percent halted in the BIOS's own idle loop. The fixed image was built and gated but not deployed: `build/c6_fixed/tinygba.fs`, SHA-256 `5cfea671aa842c4169ceed0a5fa4b675b066744b64a215c80202185875b194d3`, seed 5, zero hold violations, one documented multicycle relaxation, clock plane clean. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 10 were not rewritten and that the two new records carry unique ids and the canonical field order, and validated this entry as entry 11 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of eleven against the 100-entry limit.
+
+#### Next Steps:
+
+Deploy `build/c6_fixed/tinygba.fs` with the status probe and the logo-bearing cartridge, and expect `vblank_irq_en` to assert and `halt_cleared` to set -- which would be the first time the BIOS has ever passed its boot halt on this port, and the first hardware evidence that the fix is real rather than merely synthesised. Read it with `tools/probe_map.py --decode` and check the map id matches, not by eye. If `halt_cleared` sets and `cart_fetched` goes high, the machine is running and the remaining work is retail-game compatibility in the simulator, which is where the effort belongs now: every question about correctness is minutes there against a build and a flash here, and the user's plan to perfect the simulator first and spot-check hardware periodically is the right shape for this project once the gate above closes the one gap the simulator structurally cannot. Re-take every register-dependent measurement from entries 8 to 10 on the fixed build before relying on it, because all of them describe a machine whose registers were absent; the measurements that do not involve MMIO writes -- SDRAM contents, raster flags, the halt address, fetch-region history -- stand as recorded. Record baselines for the production and SDRAM-test configurations once each has been boot-tested, since a baseline from an unverified build certifies nothing. Do not treat a passing parity gate as proof the design is correct: it catches a loss of registers, not a wrong one. Do not revert the `gb_bus_rst` assignment to match upstream, and if upstream is ever updated, check whether the vendor tool still ties the wire low before assuming it.
+
+#### Files Modified:
+
+- README.md
+- fpga/gba/src/memory/gba_memory.sv
+- tools/build_tinygba.sh
+- tools/sim/sim_main.cpp
+- tools/synth_parity.py
+- tools/synth_baseline.json
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: N/A
+
+---

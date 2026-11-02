@@ -40,6 +40,29 @@ Pixel screenbuffer[H_RES * V_RES];
 
 long long max_sim_time = 0LL;
 
+// CPU stall instrumentation.  The user reports that audio sounds slow on the
+// board, and the GBA's CPU drives audio directly, so a CPU that spends most of
+// its cycles waiting on memory would present as slow audio long before a
+// display that is driven by its own raster would show anything at all.  These
+// count clk16 cycles and the cycles where `cpu_en` is low -- `cpu_en` is the
+// memory controller's "ready" and the CPU's clock enable is `cpu_en & ~halt`, so
+// a low `cpu_en` is a cycle the CPU did not advance.  Reported at exit as a duty
+// cycle, which is the number to compare against hardware.
+unsigned long long cpu_clk_cycles = 0;   // clk16 posedges after gba_on
+unsigned long long cpu_stall_cycles = 0; // ...of which cpu_en was low
+unsigned long long cpu_halt_cycles = 0;  // ...of which halt was set
+unsigned long long rom_req_cycles = 0;   // ...of which rom_en was asserted
+
+// Frame dumping.  Capturing the SDL window with an external tool depends on the
+// window being findable and unoccluded, which it is not when another process owns
+// the display -- the first attempt at this project grabbed the whole desktop.  A
+// direct dump of the same screenbuffer the texture is built from is deterministic,
+// needs no X server cooperation, and can be decoded like any other frame capture.
+const char *dump_prefix = NULL;   // -p PREFIX: write PREFIX_frameNNNN.ppm
+int dump_every = 0;               // -pe N: dump every Nth frame (0 = off)
+int dump_first = 0;               // -pf N: start dumping at frame N
+int dump_last = INT_MAX;          // -pl N: stop dumping after frame N
+
 bool trace_toggle;				// -t or "t" key
 bool trace_loading;				// -tl option
 long long start_trace_time;		// -tt option
@@ -56,6 +79,9 @@ void usage()
 	printf("  -s T   stop simulation at time T\n");
 	printf("  -m     print all memory writes (after BIOS initialization)");
 	printf("  -f     print flash related memory accesses\n");
+	printf("  -p P   write frames as PPM: PREFIX_frameNNNN.ppm\n");
+	printf("  -pe N  dump every Nth frame (default every frame when -p given)\n");
+	printf("  -pf N  first frame to dump      -pl N  last frame to dump\n");
 }
 
 void help() {
@@ -263,6 +289,22 @@ uint8_t cpu_en_r, ram_be_r, ram_cen_r, ram_wen_r;
 uint32_t ram_addr_r;
 int bgn = 0;			// BG number to show in tilemap window
 
+// Write the 240x160 framebuffer as a binary PPM.  PPM rather than PNG so this
+// needs no library, and every tool reads it.
+static void dump_frame(const char *prefix, int n)
+{
+	char path[512];
+	snprintf(path, sizeof(path), "%s_frame%04d.ppm", prefix, n);
+	FILE *f = fopen(path, "wb");
+	if (!f) { printf("cannot write %s\n", path); return; }
+	fprintf(f, "P6\n%d %d\n255\n", H_RES, V_RES);
+	for (int i = 0; i < H_RES * V_RES; i++) {
+		unsigned char rgb[3] = { screenbuffer[i].r, screenbuffer[i].g, screenbuffer[i].b };
+		fwrite(rgb, 1, 3, f);
+	}
+	fclose(f);
+}
+
 int main(int argc, char **argv, char **env)
 {
 	Verilated::commandArgs(argc, argv);
@@ -314,6 +356,18 @@ int main(int argc, char **argv, char **env)
 			memlog_en = true;
 			printf("Printing memory log\n");
 		} 
+		else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+			dump_prefix = argv[++i];
+		}
+		else if (strcmp(argv[i], "-pe") == 0 && i + 1 < argc) {
+			dump_every = atoi(argv[++i]);
+		}
+		else if (strcmp(argv[i], "-pf") == 0 && i + 1 < argc) {
+			dump_first = atoi(argv[++i]);
+		}
+		else if (strcmp(argv[i], "-pl") == 0 && i + 1 < argc) {
+			dump_last = atoi(argv[++i]);
+		}
 		else if (strcmp(argv[i], "-f") == 0) {
 			flashlog_en = true;
 			printf("Printing flash log\n");
@@ -401,6 +455,14 @@ int main(int argc, char **argv, char **env)
 		if (sim_on && max_sim_time > 0 && sim_time >= max_sim_time) {
 			printf("Simulation time is up: sim_time=%" PRIu64 "\n", sim_time);
 			sim_on = false;
+			// Exit rather than idle.  The loop below only advances sim_time while
+			// sim_on is true, so falling through left the process spinning at
+			// 100% of a core with the window frozen: frames and audio stop
+			// because the simulation stopped, but nothing says so on screen, and
+			// it reads as a hang or as someone having paused it.  A run that has
+			// spent its step budget is finished; say so and leave.
+			done = true;
+			break;
 		}
 
 		if (sim_on) {
@@ -442,6 +504,13 @@ int main(int argc, char **argv, char **env)
 				
 				if (cpu_en_r & ram_cen_r & ~ram_wen_r & (ram_addr_r >> 25 == 7) & flashlog_en) {		// region E and F
 					memlog("Read flash", ram_addr_r, gba->ram_rdata, ram_be_r, false);
+				}
+				// stall accounting, taken at the same edge the memory logs use
+				if (top->gba_on) {
+					cpu_clk_cycles++;
+					if (!gba->cpu_en) cpu_stall_cycles++;
+					if (gba->halt)    cpu_halt_cycles++;
+					if (gba->rom_en)  rom_req_cycles++;
 				}
 				cpu_en_r = gba->cpu_en;
 				ram_addr_r = gba->ram_addr;
@@ -494,6 +563,12 @@ int main(int argc, char **argv, char **env)
 					if (frame_count % 5 == 0 || m_trace)
 						printf("Frame #%d\n", frame_count);
 
+					if (dump_prefix && frame_count >= dump_first && frame_count <= dump_last) {
+						int every = dump_every > 0 ? dump_every : 1;
+						if (frame_count % every == 0)
+							dump_frame(dump_prefix, frame_count);
+					}
+
 					if (showFrameCount) {
 						SDL_SetWindowTitle(sdl_window, ("GBATang Sim - frame " + to_string(frame_count) + 
 											(trace_toggle ? " tracing" : "")).c_str());
@@ -505,6 +580,9 @@ int main(int argc, char **argv, char **env)
 			else
 				frame_updated = false;
 		}
+
+		if (!sim_on)
+			SDL_Delay(20);   // paused or finished: do not burn a core while idle
 
 		if (cnt % 100 == 0)
 		{
@@ -617,6 +695,20 @@ int main(int argc, char **argv, char **env)
 	double duration = ((double)(end_ticks - start_ticks)) / SDL_GetPerformanceFrequency();
 	double fps = (double)frame_count / duration;
 	printf("Frames per second: %.1f. Total frames=%d\n", fps, frame_count);
+
+	// The CPU stall duty cycle: what fraction of clk16 cycles the CPU did not
+	// advance, and how much of that was a halt rather than memory wait.
+	if (cpu_clk_cycles) {
+		printf("CPU: %llu clk16 cycles after gba_on\n", cpu_clk_cycles);
+		printf("     stalled (cpu_en low): %llu (%.1f%%)\n", cpu_stall_cycles,
+		       100.0 * (double)cpu_stall_cycles / (double)cpu_clk_cycles);
+		printf("     of which halted:      %llu (%.1f%%)\n", cpu_halt_cycles,
+		       100.0 * (double)cpu_halt_cycles / (double)cpu_clk_cycles);
+		printf("     rom_en asserted:      %llu (%.1f%%)\n", rom_req_cycles,
+		       100.0 * (double)rom_req_cycles / (double)cpu_clk_cycles);
+	} else {
+		printf("CPU: no post-boot cycles observed -- gba_on never went high\n");
+	}
 
 	SDL_DestroyTexture(sdl_texture);
 	SDL_DestroyRenderer(sdl_renderer);

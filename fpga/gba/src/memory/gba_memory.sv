@@ -115,6 +115,20 @@ module gba_memory (
     output              gb_bus_done, 
     output      [1:0]   gb_bus_acc,
     output      [3:0]   gb_bus_be,
+    // TinyGBA: `gb_bus_rst` is declared and consumed but assigned by nothing,
+    // in this tree or in upstream GBATang at 77fd0714.  Every register in the
+    // design takes it as `if (gb_bus_rst) Dout_buffer <= register.def;`, so an
+    // undriven value decides whether MMIO writes land at all.  Gowin EDA ties an
+    // undriven wire low, so on that flow the writes work; measured 2026-11-02,
+    // this flow's `synth_gowin` folds it to constant 1 instead, which makes the
+    // reset branch win permanently and deletes the write branch from every
+    // register.  A minimal reproduction of that shape collapsed a whole 8-bit
+    // register to a GND-driven output.  The consequence is total: no MMIO write
+    // takes effect, so the BIOS's DISPSTAT V-Blank IRQ enable can never be set,
+    // IRP_VBlank can never fire, and a CPU halted on HALTCNT can never be woken.
+    // Driving it low restores the vendor semantics, which is the only behaviour
+    // the design has ever been validated against -- and the one the Verilator
+    // model exhibits, since an undriven wire is 0 there.
     output              gb_bus_rst,
 
     // SDRAM interface
@@ -735,6 +749,7 @@ assign gb_bus_ena = sel_io & bram_valid;
 assign gb_bus_rnw = ~bram_wr;    // 0 is write
 assign gb_bus_acc = bram_wr ? be2size(bram_be) : 2'b10;              // default to 32-bit
 assign gb_bus_be = bram_be;
+assign gb_bus_rst = 1'b0;       // TinyGBA: see the port comment; upstream leaves it undriven
 
 reg [31:0] bram_wdata16;    // 16-bit write data (palette, VRAM, OAM)
 reg [3:0]  bram_be16;       // 16-bit write byte enable for palette and vram_lo

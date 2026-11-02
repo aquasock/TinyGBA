@@ -255,4 +255,32 @@ Field meanings:
     - "Elaboration behaviour measured 2026-11-02 in `/tmp/memtest`: `$bits` resolves under `read_slang`, and an instantiated unknown module is a hard error"
   verification: "Measured 2026-11-02. The generated decoder reproduced a hand decode on the same capture; the width guard was verified to fail a build by deliberately mismatching the bus width; and the first hardware reading taken through the generated path (`word 0x016E`) agreed with three independent instruments."
 
+- record_id: TCL-011
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "`synth_gowin` folds an undriven wire used in a condition to constant 1, and deletes the logic behind it"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "A wire that is read but never assigned does not become 0 under this flow's `synth_gowin`.  Measured 2026-11-02 with a minimal reproducer: `wire gb_bus_rst;` used as `if (gb_bus_rst) q <= 0; else if (en) q <= din;` folds the wire to constant 1, makes the reset branch unconditional, and the synthesiser deletes the write branch, leaving `q` driven by a single GND cell.  The full design behaved the same way at scale: `gba_memory`'s `gb_bus_rst` output is read by every `eProcReg_gba` instance as `if (gb_bus_rst) Dout_buffer <= register.def;` and is assigned nowhere, in this tree or in upstream GBATang at `77fd0714`, so the vendor flow must tie it low.  With it undriven this flow produced 4,631 flip-flops; with `assign gb_bus_rst = 1'b0;` the same source produced 9,100.  Roughly 4,500 registers -- every MMIO register in the machine -- had been deleted, and the design still elaborated, placed, routed, passed Fmax, passed the hold check and packed a bitstream.  `yosys` does warn `Wire ... is used but has no driver`, and those warnings are the only signal the flow gives."
+  consequence: "A design ported from Gowin EDA cannot assume an undriven wire is 0.  Any wire that appears in a condition must be driven explicitly before the open flow will reproduce vendor behaviour, and the way to find them is the `has no driver` warning set rather than reading the RTL.  This is the third instance of the class in this project family: TinySNES lost two cycles to the same fold on an undriven `PAL` register and again on `GSU_TURBO`.  Crucially, no simulation can detect this: Verilator treats an undriven wire as 0, so the model behaves correctly while the bitstream does not, and the fold *is* the difference between them.  Use `tools/synth_parity.py` to compare a netlist's register population against a recorded baseline, and treat a large loss as this fault until proved otherwise."
+  sources:
+    - "Minimal reproducer at `/tmp/memtest/rst.v`, 2026-11-02: `read_slang` then `synth_gowin -family gw5a`, output `q` driven by GND"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv` and `fpga/gba/src/common/eprocreg_gba.sv:41`"
+    - "tangcore `gbatang/src/` at `77fd0714`: `grep -rnE 'gb_bus_rst *[<=]'` finds no assignment"
+  verification: "Measured 2026-11-02.  Full syntheses of the same source, differing only in the added `assign gb_bus_rst = 1'b0;`: 4,631 flip-flops before, 9,100 after, with block RAM unchanged at 66 DPB instances in both.  The Verilator model boots a retail cartridge both before and after the fix, since it already treated the wire as 0."
+
+- record_id: BRD-008
+  kind: BOARD
+  topic_id: BRD
+  title: "The machine's halt was every MMIO register being deleted by synthesis, not an interrupt fault"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "The reason the board halted in the BIOS and never woke is that `gb_bus_rst` (TCL-011) folded high, so no MMIO register could hold a value the CPU wrote.  This explains every hardware reading in core-log entries 8 to 10 without exception: the probe saw writes to `0x04000004` carrying `din[3]`, to `0x04000200` and to `0x04000208`, while the live `DISPSTAT` V-Blank IRQ enable stayed 0, because the register that would hold it did not exist in the netlist.  `IRP_VBlank` therefore could never assert, `IRPFlags` could never set, `halt` could never clear, and the CPU stayed halted on the `HALTCNT` write at `0x344` that the halt-address latch identified.  The GPU raster was never at fault: VBlank and HBlank status flags and the scanline counter are set unconditionally by `mclk`-domain and `fclk`-domain logic and were measured working.  The SDRAM was never at fault: sixteen green bars.  The distinguishing evidence is that the same RTL boots a retail cartridge in Verilator, where an undriven wire is 0 and the registers therefore work."
+  consequence: "Every hardware measurement taken before this fix describes a machine whose registers were all absent, and conclusions drawn from register-dependent observations -- the DISPSTAT enable, IE, IME, and anything read back from an MMIO address -- must be re-taken on a build that contains them.  Conversely the measurements that do not involve MMIO writes stand: SDRAM contents, the raster flags, the halt address, and the fetch-region history.  The immediate next step is to build and run the fixed design on the board with the status probe, expecting `vblank_irq_en` to assert and `halt_cleared` to set, which would be the first time the BIOS has ever proceeded past its boot halt on this port."
+  sources:
+    - "This repository, core-log entries 8, 9 and 10: the probe readings, the halt address `0x344`, and the simulation comparison"
+    - "This repository, `build/c6_fixed/tinygba.fs`, SHA-256 `5cfea671aa842c4169ceed0a5fa4b675b066744b64a215c80202185875b194d3`, the first machine build containing all 9,100 registers"
+    - "`tools/synth_parity.py` and `tools/synth_baseline.json`, which make the register population a build gate"
+  verification: "Measured 2026-11-02 by synthesis: 4,631 registers without the fix and 9,100 with it, both from identical sources otherwise, and the defect reproduced in isolation.  Not yet confirmed on hardware: the fixed image has been built and gated but not deployed."
+
 ---

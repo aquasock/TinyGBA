@@ -17,12 +17,14 @@ cartridge has run on the board, so no game has produced a picture.
   bars and a green status band: 64 MiB, both dies, all sixteen patterns. Two
   earlier readings of that probe were taken on images whose `clk67` crossed no
   clock-plane pip at all and are superseded. See `core-reference.md` BRD-006.
-- **The machine: runs the BIOS, halts, and never wakes.** The CPU executes the
-  official BIOS, reaches the halt write at `0x344`, and stays halted — so it
-  never fetches the cartridge and never sets the VBlank IRQ enable that would
-  release it. The GPU raster is alive (VBlank and HBlank both fire), so this is a
-  single missing register write, not a dead display path. No retail title has
-  produced a picture.
+- **The machine: the halt's cause is found, the fix is built, and the board has
+  not seen it.** The CPU halted in the BIOS at the `HALTCNT` write because an
+  undriven `gb_bus_rst` folded to constant 1 under `synth_gowin`, which made
+  every MMIO register's write path dead code and deleted about 4,500 flip-flops
+  from a 9,100-register design. The design still built, passed timing and packed.
+  Driving the wire to `1'b0` — the vendor's own behaviour — restores the
+  registers. See `core-reference.md` TCL-011 and BRD-008. The fixed image is
+  built and gated; no retail title has yet produced a picture on the board.
 
 ## Build
 
@@ -83,6 +85,23 @@ The OSD powers up asserted and its 960-pixel window hides the framebuffer behind
 an empty menu's black. In two-wire mode the BL616 menu closes it; in one-wire
 mode nothing does, so a production build **without** `TINYGBA_OVERLAY_OFF` will
 look black and that is not a machine fault.
+
+### Register-parity gate
+
+`tools/synth_parity.py` compares a netlist's register population against a
+recorded baseline for its configuration, and fails the build on a large loss.
+
+```
+tools/synth_parity.py build/x/tinygba.json --key TINYGBA_STATUS_TEST
+tools/synth_parity.py build/x/tinygba.json --key NAME --update-baseline
+```
+
+It exists because a netlist can lose most of its registers and still build, pass
+timing and pack — which is exactly what happened here, and what no simulation can
+detect, since a simulation sees the signal rather than its absence. It also
+reports every `used but has no driver` wire that synthesis found, grouped by
+instance, because an undriven wire that gates a conditional is the cause of this
+class.
 
 ### Simulation
 

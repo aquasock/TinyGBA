@@ -214,6 +214,43 @@ fi
 
 [[ "$stage" == synth ]] && { echo "stopping after synthesis"; exit 0; }
 
+# ---------------------------------------------------- 1b. register-parity gate
+# A netlist can lose most of its registers and still build, pass timing and pack:
+# on 2026-11-02 an undriven `gb_bus_rst` folded high, deleted every MMIO
+# register's write path, and removed about 4,500 flip-flops from a 9,100-register
+# design.  Nothing in the flow noticed, and no simulation can, because the
+# simulation sees the signal rather than its absence.  This compares the netlist
+# against a recorded baseline for the configuration.
+#
+# It runs only when a netlist has just been synthesised or was already present,
+# and only when a baseline entry exists for $cfg -- a configuration with no
+# baseline is reported and skipped rather than silently passing.  Record one with:
+#   tools/synth_parity.py $out/tinygba.json --key $cfg --update-baseline
+# Key on the configuration's TINYGBA_ define NAMES only: a full defines string
+# carries absolute paths and would make every baseline entry unique.  The define
+# set is what changes the design's structure; a path only changes which BIOS
+# bytes are loaded, not how many registers exist.
+# TINYGBA_BIOS_HEX is excluded deliberately: it selects which image is loaded
+# into the BIOS block RAM and changes no logic, so a different BIOS must not read
+# as a different design.
+cfg=$(printf '%s' "${TINYGBA_DEFINES:-}" | grep -oE -- '-DTINYGBA_[A-Z0-9_]+' \
+      | sed 's/^-D//' | grep -v '^TINYGBA_BIOS_HEX$' | sort -u | paste -sd'+' -)
+cfg="${cfg:-default}"
+echo "=== 1b. register-parity gate (config: $cfg) ==="
+parity=0
+"$suite/py3bin/python3" "$root/tools/synth_parity.py" "$out/tinygba.json" \
+    --key "$cfg" --synth-log "$out/synth.err" \
+    >"$out/parity.log" 2>&1 || parity=$?
+sed 's/^/  /' "$out/parity.log"
+if [[ $parity -eq 2 ]]; then
+    echo "  (no baseline for this configuration; recorded counts are in $out/parity.log)"
+    echo "  record one with: tools/synth_parity.py $out/tinygba.json --key $cfg --update-baseline"
+elif [[ $parity -ne 0 ]]; then
+    echo "register-parity gate failed; see $out/parity.log" >&2
+    exit 1
+fi
+
+
 # --------------------------------------------------------------- 2. place and route
 # `pack` means "pack the routed netlist that is already here", not "place and
 # route again".  There was no early exit for it, so TINYGBA_STAGE=pack fell
