@@ -237,6 +237,11 @@ always @(posedge clk) begin
             end
             if (cycle[T_RP+T_RC+T_RC+T_MRD]) begin
                 if (!setup_ncs) begin
+                    // TinyGBA: upstream writes this with a blocking assignment in a
+                    // clocked block.  `cycle` is a one-hot shift register, so no read of
+                    // `setup_ncs` at lines 222-235 can fall on the same cycle as this
+                    // write and see the new value early; the two forms are therefore
+                    // equivalent here.  Non-blocking matches the rest of the block.
                     setup_ncs <= 1;             // setup the other chip
                     cycle <= 1; 
                 end else begin
@@ -272,6 +277,15 @@ always @(posedge clk) begin
                     4'b0011, 4'b1100: 
                              cpu_rdata[port[0]] <= {2{dq_in}};
                     default: 
+                        // TinyGBA: the `hi` term below was `[31:15]` upstream, which makes
+                        // the concatenation 33 bits wide; truncating it to the 32-bit
+                        // destination drops the old bit 31 and shifts the retained high
+                        // halfword down by one bit.  Every 32-bit read with a masked low
+                        // byte lane therefore returned a corrupted upper halfword.  This
+                        // is the only functional change this port makes to the
+                        // controller, and it is load-bearing: it is the path the SDRAM
+                        // probe's high-die comparison reads (core-log entry 5).  Do not
+                        // revert it to match upstream without first reading TCL-007.
                         if (hi) 
                              cpu_rdata[port[0]] <= {dq_in, cpu_rdata[port[0]][15:0]};
                         else    

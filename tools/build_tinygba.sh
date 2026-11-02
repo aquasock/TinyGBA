@@ -15,6 +15,13 @@
 #                     still runs.  Off by default: nothing about this port is
 #                     hardware-proven yet, so an unclean placement should stop
 #                     the build rather than ship.
+#   TINYGBA_CLOCK_PLANE_STRICT 1 makes the clock-plane gate fail on a clock whose
+#                     bridge pip this board has never measured, not only on one
+#                     measured dead or left on general routing.  Off by default
+#                     because most of this design currently sits on unmeasured
+#                     pips; the report is written either way, to
+#                     $out/clock-plane.log, so a hardware result can be
+#                     attributed to the placement that produced it.
 #   NEXTPNR_HIMBAECHEL, APICULA_FORK, OSS_CAD_SUITE, PYDEPS  see TinyNES/TinyTang
 #
 # Layout follows TinySNES: fpga/gba/ holds every source, no upstream checkout or
@@ -212,11 +219,37 @@ echo "routed: $out/tinygba-routed.json"
 
 [[ "$stage" == pnr ]] && { echo "stopping after place and route"; exit 0; }
 
-# --------------------------------------------------------------- 3. timing gate
+# ------------------------------------------------------- 3. clock-plane gate
+# A clock reaches the global network through a bridge pip, and the pips are not
+# interchangeable: some clock every flip-flop behind them and some clock none.
+# Which one a clock gets is decided by the placer and appears in neither the
+# timing report nor the hold check, so it needs its own gate.  TinySNES recorded
+# two hold-clean builds of identical source passing Fmax where one booted and the
+# other never ran, differing only in the master clock's spine (its BRD-005), and
+# this project had no equivalent check.  Dead pips and clocks left on general
+# routing fail the build; pips nobody has measured are reported, and only fail
+# under TINYGBA_CLOCK_PLANE_STRICT=1, because most of this design currently sits
+# on paths this board has not measured either way.
+echo "=== 3. clock-plane gate ==="
+strict=""
+[[ "${TINYGBA_CLOCK_PLANE_STRICT:-0}" == 1 ]] && strict="--strict"
+# `set -o pipefail` would abort the script on a failing report before the message
+# below could print, so the pipeline's status is captured explicitly instead.
+plane=0
+# shellcheck disable=SC2086
+"$suite/py3bin/python3" "$root/tools/clock_plane_report.py" \
+    "$out/tinygba-routed.json" $strict >"$out/clock-plane.log" 2>&1 || plane=$?
+cat "$out/clock-plane.log"
+if [[ $plane -ne 0 ]]; then
+    echo "clock-plane gate failed (exit $plane); see $out/clock-plane.log" >&2
+    exit 1
+fi
+
+# --------------------------------------------------------------- 4. timing gate
 # Fmax only.  nextpnr's hold violations are reported separately and are not a
 # gate here; when the design is proven on hardware this should become a refusal,
 # the way TinyNES and TinyTang refuse unclean seeds.
-echo "=== 3. timing gate ==="
+echo "=== 4. timing gate ==="
 "$suite/py3bin/python3" - "$out" <<'PY'
 import json, pathlib, sys
 out = pathlib.Path(sys.argv[1])
@@ -228,7 +261,7 @@ if bad:
     raise SystemExit(f"timing not met on: {', '.join(bad)}")
 PY
 
-echo "=== 4. bitstream ==="
+echo "=== 5. bitstream ==="
 "$suite/py3bin/python3" -m apycula.gowin_pack \
     -d "$family" \
     -o "$out/tinygba.fs" \

@@ -36,10 +36,25 @@ TINYGBA_BUILD_DIR=build/diag \
 | `TINYGBA_SEED` | placement seed; the router is seed-sensitive and will fail to converge on some |
 | `TINYGBA_DEFINES` | preprocessor defines for a diagnostic build |
 | `TINYGBA_ALLOW_HOLD` | `1` lets an unclean placement through; the Fmax gate still runs |
+| `TINYGBA_CLOCK_PLANE_STRICT` | `1` makes the clock-plane gate refuse a clock on a pip this board has never measured |
 
 A build that fails in place and route with a few thousand nets unrouted is the
 known seed sensitivity, not a broken change — retry with another seed, or use
 `tools/sweep_tinygba_seeds.sh`.
+
+Two gates run between routing and packing, because neither is visible in the
+timing report and both have shipped an image that was wrong:
+
+- **`tools/clock_plane_report.py`** reads the routed netlist and reports which
+  clock-plane bridge pip each clock takes. A clock on a pip measured as clocking
+  nothing, or on no pip at all (general routing), fails the build. It writes
+  `$out/clock-plane.log`. What it cannot yet do is require a measured-good path:
+  `clk16` lands on `*/TOP3` pips at every seed tried, and this board has never
+  measured those. `TINYGBA_CLOCK_PLANE_STRICT=1` turns that into a refusal.
+- **`tools/gatelevel_report.py`** reads the synthesised netlist and reports, per
+  named net, whether it exists and whether every bit has a driver. Use it before
+  trusting any hardware reading from a build, and `--compare` two netlists to see
+  what a change did to the fetch path.
 
 ### Diagnostic builds
 
@@ -54,6 +69,25 @@ The OSD powers up asserted and its 960-pixel window hides the framebuffer behind
 an empty menu's black. In two-wire mode the BL616 menu closes it; in one-wire
 mode nothing does, so a production build **without** `TINYGBA_OVERLAY_OFF` will
 look black and that is not a machine fault.
+
+### Test cartridge
+
+`tools/make_gba_test_rom.py` writes a self-checking cartridge, so the first
+cartridge put on the board is a discriminator rather than an experiment:
+
+```
+tools/make_gba_test_rom.py -o build/test/test.gba
+```
+
+It forces blank, checks three constants at three cartridge offsets, writes and
+reads back IWRAM, EWRAM and VRAM including two individual byte lanes, then draws
+mode 3 — **green** if every check passed, **red** with one yellow full-height
+column per failed check if any did not — and blinks a white square so a capture
+can tell a running CPU from one that wedged. It enables no interrupt and writes
+no `WAITCNT`, so a pass says nothing about either. Needs `arm-none-eabi-as`; set
+`ARM_TOOLCHAIN` to its bin directory if it is not on `PATH`. The logo region is
+zero-filled because this core's BIOS is Cult-of-GBA built with `NO_LOGO`, which
+branches straight to `0x08000000` without validating it.
 
 ## Deploy (one-wire)
 
@@ -95,6 +129,15 @@ block-scoped registers — rather than a design change. See `THIRD_PARTY.md`.
 ## Known gaps
 
 - No cartridge has been run on the board.
+- **No machine image builds cleanly at present.** The `TINYGBA_OVERLAY_OFF`
+  machine configuration fails its `clk67` Fmax gate at every seed tried — 33.6 to
+  36.0 MHz against 67.0 over six seeds — on a 26-stage, ~30 ns path from the
+  SDRAM readback registers through the memory module's read muxes and back into
+  the controller. The same tree without that define passes at 171 MHz at the same
+  seed, and the tree as it stood before this cycle's changes fails the same way,
+  so the cause is neither this cycle's edits nor a single bad seed. Until it is
+  understood, the test cartridge has nothing to run on; the `TINYGBA_SDRAM_TEST`
+  and production configurations do build clean.
 - `tools/run_diag_sim.sh` cannot see faults in `sdram_gba.v`: it compiles
   `sdram_sim.v`, a logic-level stand-in, so the controller is never simulated.
   `fpga/gba/diag/sdram_model.v` and `tb_sdram_controller.sv` are the start of

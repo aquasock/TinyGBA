@@ -56,25 +56,44 @@
 // uncomment this to print memory debug messages in Verilator
 // `define DEBUG
 
+// TinyGBA: the `syn_keep` marks on this port list were written in Gowin's
+// comment-attribute syntax (`/* synthesis syn_keep=1 */`), which this flow's
+// slang front end does not parse, so they were inert and the synthesiser was
+// free to merge these signals into surrounding logic.  They are now written
+// as attributes, which read_slang and yosys both honour.
+//
+// Measured before converting, 2026-11-02, on this exact flow: across five
+// identically shaped nets with four attribute spellings and one plain,
+// `(* keep *)` survived and the other three spellings were deleted, and the
+// cone behind a kept but otherwise unused port stayed in the netlist.
+// Measured after: all thirteen fetch-path names that tools/gatelevel_report.py
+// checks survive, where nine of them were previously lost to renaming.
+//
+// This is not a fix for the machine.  Converting the marks changes no logic:
+// the netlist has the same 4734 flip-flops and the same 322 undriven wires
+// before and after, and the cell count moves a few percent because ABC sees a
+// different optimisation boundary.  The value is that the fetch path can be
+// audited by name in the netlist at all, which is how the sibling SNES project
+// found the undriven register that cost it five cycles.
 module gba_memory (
     input               clk,
     input               resetn,
     input               ce,
 
     // CPU interface
-    input               rom_en    /* xxsynthesis syn_keep=1 */,
-    input      [31:0]   rom_addr  /* xxsynthesis syn_keep=1 */,       // PC address, word aligned for ARM mode, half-word aligned for thumb mode
+    (* keep *) input               rom_en,
+    (* keep *) input      [31:0]   rom_addr,       // PC address, word aligned for ARM mode, half-word aligned for thumb mode
     input               thumb,          // 1: thumb (16-bit) mode for this rom load
-    output reg [31:0]   rom_data  /* xsynthesis syn_keep=1 */,
+    (* keep *) output reg [31:0]   rom_data,
 
-    input               ram_cen   /* xsynthesis syn_keep=1 */,        // cpu ram interface, also used for DMA
-    input               ram_wen   /* xsynthesis syn_keep=1 */,
-    input      [31:0]   ram_addr  /* xsynthesis syn_keep=1 */,       // last two bits ignored because we have ram_be
-    input      [31:0]   ram_wdata /* xsynthesis syn_keep=1 */,
-    input       [3:0]   ram_be    /* xsynthesis syn_keep=1 */,
-    output reg [31:0]   ram_rdata /* xsynthesis syn_keep=1 */,
+    (* keep *) input               ram_cen,        // cpu ram interface, also used for DMA
+    (* keep *) input               ram_wen,
+    (* keep *) input      [31:0]   ram_addr,       // last two bits ignored because we have ram_be
+    (* keep *) input      [31:0]   ram_wdata,
+    (* keep *) input       [3:0]   ram_be,
+    (* keep *) output reg [31:0]   ram_rdata,
 
-    output reg          cpu_en    /* xsynthesis syn_keep=1 */,         // rom_data and ram_rdata is available NEXT cycle and there's no ongoing DMA
+    (* keep *) output reg          cpu_en,         // rom_data and ram_rdata is available NEXT cycle and there's no ongoing DMA
 
     // DMA interface
     input               dma_on,         // DMA is accessing memory, save state and pause CPU
@@ -88,9 +107,9 @@ module gba_memory (
     input      [16:0]   dma_eepromcount,    // for eeprom address length detection
 
     // MMIO register bus to various components
-    output     [31:0]   gb_bus_din  /* xsynthesis syn_keep=1 */, 
-    input      [31:0]   gb_bus_dout /* xsynthesis syn_keep=1 */, 
-    output     [27:0]   gb_bus_adr  /* xsynthesis syn_keep=1 */, 
+    (* keep *) output     [31:0]   gb_bus_din, 
+    (* keep *) input      [31:0]   gb_bus_dout, 
+    (* keep *) output     [27:0]   gb_bus_adr, 
     output              gb_bus_rnw, 
     output              gb_bus_ena, 
     output              gb_bus_done, 
@@ -117,9 +136,9 @@ module gba_memory (
     input       [7:0]   eeprom_wdata,
 
     // Loader interface
-    input       [2:0]   loading      /* xsynthesis syn_keep=1 */,     // 0: off, 1: ROM, 2: Cart RAM, 3: Config, 4: BIOS
-    input       [7:0]   loader_data  /* xsynthesis syn_keep=1 */, 
-    input               loader_valid /* xsynthesis syn_keep=1 */,
+    (* keep *) input       [2:0]   loading,     // 0: off, 1: ROM, 2: Cart RAM, 3: Config, 4: BIOS
+    (* keep *) input       [7:0]   loader_data, 
+    (* keep *) input               loader_valid,
     output reg          gbaon,          // GBA is turned on after loading goes from none-zero to zero
     output reg  [2:0]   config_backup_type,   // 0: no backup, 1: 512Kbit, 2: 1Mbit, 3: SRAM, 4: EEPROM
 

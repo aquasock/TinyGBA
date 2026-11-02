@@ -143,3 +143,45 @@ Field meanings:
   verification: "Measured on the board 2026-10-31: the arithmetic predicts a 104-pixel band and the capture measures 104 pixels, and the other seven bars land where the scale predicts."
 
 ---
+- record_id: TCL-007
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "This flow honours `(* keep *)` and ignores all three Gowin comment-attribute spellings"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "Gowin EDA marks a net or port as must-keep with an attribute written inside a comment: `/* synthesis syn_keep=1 */`, `/* synthesis keep */`, or the variant `/* xxsynthesis syn_keep=1 */` that GBATang uses on `gba_memory.sv`'s CPU port list. `read_slang --std 1800-2017` does not parse any of the three, so they arrive at the netlist as ordinary comments. Measured on this flow 2026-11-02 with five identically shaped nets in one module, four carrying an attribute and one plain: after `read_slang` then `synth_gowin -family gw5a`, only the `(* keep *)` net and its whole adder cone survived; the three comment-attribute nets and the plain net were all deleted. The attribute also has to precede the declaration -- `input a (* keep *)` is a syntax error under slang and fails elaboration with `port 'a' does not exist`, so the form is `(* keep *) input a`. A keep on a port whose value no one consumes restores that port's entire driving cone: measured on a two-output module where only one output reached the top level, the kept port kept twelve named nets and the unkept one kept none."
+  consequence: "Every Gowin comment attribute in the vendored tree is inert, so the synthesiser was free to restructure the signals they were written to protect. Counted 2026-11-02: 113 `synthesis syn_keep=1`, 2 `syn_preserve` and 2 `xxsynthesis` occurrences across 14 files, of which the ones on `gba_memory.sv`'s port list sit on the machine's instruction-fetch path. Converting them to `(* keep *)` is a change of auditability, not of behaviour: the netlist has the same 4734 flip-flops and the same 322 undriven wires before and after, and the cell count moves a few percent because ABC sees a different optimisation boundary. Do not describe the conversion as a fix for a fault. The remaining 99 comment attributes outside `gba_memory.sv` are still inert and are recorded as an open item rather than converted in the same cycle."
+  sources:
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv` before and after the conversion, and its comment recording the measurement"
+    - "`tools/gatelevel_report.py`, added this cycle, which reports per named net whether it exists and whether every bit has a driver"
+    - "Test modules at /tmp/keeptest and /tmp/keepport, 2026-11-02, run through `read_slang --std 1800-2017 --single-unit` plus `synth_gowin -family gw5a`"
+  verification: "Measured 2026-11-02 on this flow. Two full syntheses of the design, one from the tree as committed and one from a copy with only `gba_memory.sv` changed: `tools/gatelevel_report.py` reports 0 of 13 fetch-path names present in the first and 13 of 13 present and fully driven in the second, at honest widths. The logic is unchanged between them, by the flip-flop count, the undriven-wire set and the warning output."
+
+- record_id: TCL-008
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "nextpnr prints its hold-violation count only when it is non-zero, so a clean build has no such line"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "nextpnr-himbaechel prints `Info: N Hold/min time violations (showing 10 worst paths):` followed by `ERROR: Hold/min time violation for clock '<name>':` only when N is greater than zero. A build with no hold violation contains no line matching `[0-9]+ Hold/min time violations` anywhere in its log. Measured across the logs in this repository 2026-11-02: `build/prod/nextpnr.log` carries `Info: 1 Hold/min time violations`, and `build/p67s2`, `build/p67s3`, `build/n_machine` and all five seeds of the 2026-11-02 sweep carry no match at all. The sweep helper `tools/sweep_tinygba_seeds.sh` records `hold=$(grep -oE '[0-9]+ Hold/min time violations' ...)` and then prints `${hold:-0}`, which is correct, but a reader taking the absence of the line as a missing measurement would be wrong."
+  consequence: "A clean placement has no hold line, so a build gate that greps for the line and refuses on a match is sound, and one that requires the line to be present would refuse every clean seed. State the convention in any new tool rather than leaving it to be rediscovered: absence of the line means zero violations, and the Fmax report is the only timing output guaranteed to be present."
+  sources:
+    - "This repository, `build/prod/nextpnr.log` (one violation) against `build/n_machine`, `build/p67s2`, `build/p67s3` and `build/c6_sweep/s3` through `s8` (none)"
+    - "`tools/sweep_tinygba_seeds.sh`: the `hold=$(grep ...)` expression and its `${hold:-0}` default"
+  verification: "Read from the logs in this repository 2026-11-02, by grepping every nextpnr log present for `Hold/min time violations` and confirming the only match belongs to a log that also carries the matching `ERROR: Hold/min time violation` line."
+
+- record_id: BRD-004
+  kind: BOARD
+  topic_id: BRD
+  title: "A clock can pass the hold check and the Fmax gate while crossing no clock-plane bridge pip at all"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "A routed netlist records each clock net's route in `netnames[<clock>].attributes.ROUTING`, and a clock that reaches the global network carries pips of the form `SPINE<n>/CBRIDGEOUT_<half><k>` in that string. A clock routed point to point to its sinks carries none. Measured 2026-11-02 on the routed netlists of the four images staged in `build/deploy`: `clk16`, `clk50` and `hclk` cross bridge pips in all four, and `clk67` crosses none in any of them -- the exact condition that `clk67`'s fix in core-log entry 4 removed, still present in every image this project has flashed. Both the hold check and the Fmax gate passed on all four. The mechanism is that a clock on general routing is still checked for hold against its own skew and still reports an Fmax, so neither gate can see that the clock never entered the global network. On the post-fix tree built 2026-11-02, all five clean seeds place `clk67` on `SPINE27/TOP2` and `clk67` reports 208 to 256 MHz against a 67 MHz constraint; `clk16` lands on `SPINE{1,2,18,20,26,28}/TOP3`, which this board has never measured, with 15 failed dedicated routes at every seed, and the log reads `'clk16' net was routed using global resources partially` rather than `only`."
+  consequence: "A hold-clean build that passes Fmax is not evidence that its clocks reached the global network, so a deploy decision taken on those two gates alone can ship an image whose clock is on general routing. `tools/clock_plane_report.py` now reads this out of the routed netlist and `tools/build_tinygba.sh` fails on a dead pip or on a required clock crossing no pip. The gate cannot yet require a measured-good path, because `clk16` sits on unmeasured pips at every seed tried; that is recorded rather than rounded off, and `TINYGBA_CLOCK_PLANE_STRICT=1` makes it refuse. The `TOP2` pips that drew the verified video picture (core-log entry 5) are the only ones this project has measured for `clk16`, and no build since has used them."
+  sources:
+    - "`tools/clock_plane_report.py`, added this cycle, and `build/deploy/SHA256SUMS` matched to `build/*/tinygba.fs` by digest to find each deployed image's routed netlist"
+    - "This repository, `build/vsweep_5/`, `build/psweep_2/`, `build/machine_s5/` and `build/diag_sdram_s2/` routed netlists, all four matching a deployed digest"
+    - "This repository, `build/c6_sweep/s3` through `s8` clock-plane logs and nextpnr logs, 2026-11-02"
+  verification: "Measured 2026-11-02 from the routed netlists themselves rather than from build timestamps: the four deployed digests were resolved to their build directories, and each netlist's clock routes were parsed for bridge pips. The `clk67` fix of core-log entry 4 was confirmed present in the post-fix builds (`clk67` Fmax 125 to 141 MHz then, 208 to 256 MHz now) and absent from every deployed image."
+
+---
