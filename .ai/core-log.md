@@ -139,3 +139,46 @@ Load the rebuilt images in the order the diagnostics were designed for, once the
 - User Test: NOT RUN
 
 ---
+## 5 COMMIT Unreleased 2026-11-02T00:18:29-07:00
+
+#### Coming From:
+
+Unreleased 1bc4149
+
+#### Purpose:
+
+Put the rebuilt images on the board for the first time, and find out whether clean `clk67` routing repairs the SDRAM readback.
+
+#### Outcome:
+
+The video path works and the SDRAM was never broken. Both results are hardware readings from the Tang Console 138K, deployed one-wire with `openFPGALoader -b tangconsole` from the oss-cad-suite copy.
+
+`01_video` draws eight vertical bars — red, green, blue, white, yellow, cyan, magenta, grey — with the 16x16 white orientation marker at the top LEFT and the wide grey band on the right, in the correct orientation and correctly letterboxed. That is the first picture this port has ever produced, and it proves the whole video chain on this board: the PLL and divider topology, the four clock placements in `tinygba.cst`, the OSER10 serialiser path and the TMDS pair. It also validates entry 4's `clk67` clock-plane fix in the only way that counts.
+
+`02_sdram` then reported two green bars and six red on the low die, all red on the high die. Read against the probe's own pattern table, that fits one explanation: the low halfword of a 32-bit access reads back and the high halfword does not. It is not the memory. `gba_memory.sv` documents a 32-bit SDRAM read as `sdram |rd_lo| wait|rd_hi|ready| data` with `cpu_ready` in the cycle BEFORE the data, so at the ready cycle `cpu_rdata` holds the low halfword just captured beside the PREVIOUS high halfword, and `sdram_probe.v` took its comparison there. Assuming the stale high halfword is whatever the previous pattern wrote predicts all eight bars exactly, including that bars 0 and 1 pass and the other six fail — which is what hardware showed. The fix is two steps in `S_WAIT`: latch on `cpu_ready`, take the data on the following clock, and do not re-test `cpu_ready` in the second step because it is a registered pulse and is gone by then. `sdram_gba.v` is unchanged.
+
+Three instrument faults were found and corrected on the way, and all three had already produced a confident wrong reading. A first lane-mode probe wrote `0xFFFFFFFF` and displayed `cpu_rdata[15:0]` — all sixteen bits green, and it could not have failed for any input, because 0xFF is the one byte a dead, floating or stuck-high lane all produce. The probe sampled one clock early, above. And the first attempt at the sample-point fix latched on `cpu_ready` and then waited for `cpu_ready` to still be high, which never happens.
+
+The bench could not have caught any of this, and that is the finding worth carrying forward. `tools/run_diag_sim.sh` compiles `sdram_sim.v`, a logic-level stand-in that takes `cpu_be` and array-indexes memory, so `sdram_gba.v` — the controller — is never compiled by any testbench and no bug inside it can fail a run. Its PASS lines are true and say nothing about the controller. `fpga/gba/diag/sdram_model.v` and `tb_sdram_controller.sv` were started to close that gap: the model sits at the pins, decodes ACT/READ/WRITE/PRE/MRS/REF off `nCS`/`nRAS`/`nCAS`/`nWE`, honours DQM on write and on read, and holds read data until the next READ as a real part does. It reproduces the controller's own readback but its timing is not yet faithful enough to be an authority, and it is committed as work in progress rather than as a reference. Two things it needed before it could see anything: the controller samples at its own rotate slot rather than at the CL=2 point, so a part that drives for `cas_latency` clocks gives ZZZZ; and `sdram_gba` relies on the device powering its RV-port register to zero — it is only ever cleared, never initialised, and with no reset term iverilog leaves it X, which propagates into `nCS` and `nWE` until the controller issues no read or write at all. That is the same shape as the undriven `PAL` that cost TinySNES two days.
+
+The corrected probe did not reach the board. Place and route ran 26 minutes and 241,000 iterations without converging, oscillating around 8,000 unrouted nets rather than trending down, and failed. The lane-probe build of nearly the same netlist completed the whole flow in 14 minutes, so this is the seed sensitivity the project already records rather than a property of the change. Nothing is lost: the fix is committed and the netlist is reproducible.
+
+#### Next Steps:
+
+Rebuild the corrected `TINYGBA_SDRAM_TEST` image with a different placement seed or through `tools/sweep_tinygba_seeds.sh`, which exists for exactly this, and read the sixteen bars. Sixteen green means the SDRAM is 32 MiB and sound and the two red-die questions are settled; eight green then eight red means the single-CS die select does not work and the module gives 32 MiB, which the GBA can live with for every cartridge that fits. Then `04_machine` with a real cartridge — `tools/load_gba_rom.py` streams one over the core's own UART and is validated against a retail image (Nintendo logo, header byte `$B2`, complement check), sending no header prefix because the GBA core has no 64-byte header handshake and the cartridge header is simply the first bytes of the stream. It has never been run against a live core. Bear in mind when reading the result that `TINYGBA_OVERLAY_OFF` exists because the OSD powers up asserted and its 960-pixel window hides the framebuffer behind an empty menu's black; a production build without that define will look black in one-wire mode and that is not a machine fault. `README.md` still documents neither the build nor the deploy.
+
+#### Files Modified:
+
+- fpga/gba/diag/sdram_probe.v
+- fpga/gba/diag/sdram_model.v
+- fpga/gba/diag/tb_sdram_controller.sv
+- tools/load_gba_rom.py
+- .ai/core-log.md
+
+#### Status:
+
+- Build: PASS for 01_video, 02_sdram, 03_prod, 04_machine; the corrected SDRAM probe FAILED place and route at seed 1 after 26 minutes
+- Deployment: one-wire, 01_video 33c639b1, 02_sdram 960e2ae0
+- User Test: PASS video chain, eight bars in correct orientation; SDRAM result requires the rebuild above
+
+---
