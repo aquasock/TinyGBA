@@ -17,14 +17,14 @@ cartridge has run on the board, so no game has produced a picture.
   bars and a green status band: 64 MiB, both dies, all sixteen patterns. Two
   earlier readings of that probe were taken on images whose `clk67` crossed no
   clock-plane pip at all and are superseded. See `core-reference.md` BRD-006.
-- **The machine: the halt's cause is found, the fix is built, and the board has
-  not seen it.** The CPU halted in the BIOS at the `HALTCNT` write because an
-  undriven `gb_bus_rst` folded to constant 1 under `synth_gowin`, which made
-  every MMIO register's write path dead code and deleted about 4,500 flip-flops
-  from a 9,100-register design. The design still built, passed timing and packed.
-  Driving the wire to `1'b0` — the vendor's own behaviour — restores the
-  registers. See `core-reference.md` TCL-011 and BRD-008. The fixed image is
-  built and gated; no retail title has yet produced a picture on the board.
+- **The machine: passes its boot halt, and does not yet reach the cartridge.**
+  The CPU halted at the `HALTCNT` write because an undriven `gb_bus_rst` folded
+  to constant 1 under `synth_gowin`, deleting every MMIO register's write path
+  and about 4,500 of 9,100 flip-flops. Driving the wire low restores them, and on
+  the board the halt now clears and the CPU runs its boot halt loop — fifteen
+  halts, each one woken by VBlank, where the previous build entered one and
+  never left. See `core-reference.md` TCL-011, BRD-008 and BRD-009. It has still
+  never fetched from `0x08000000`, so no retail title has produced a picture.
 
 ## Build
 

@@ -390,3 +390,33 @@ Deploy `build/c6_fixed/tinygba.fs` with the status probe and the logo-bearing ca
 - User Test: N/A
 
 ---
+
+## 12 COMMIT Unreleased 2026-11-02T16:25:27-07:00
+
+#### Coming From:
+
+Unreleased b0ce2cb
+
+#### Purpose:
+
+Put the `gb_bus_rst` fix on the board and find out whether the machine's boot halt finally clears.
+
+#### Outcome:
+
+The halt clears, and the machine executes its boot halt loop for the first time in this port's history. The deployed image, `build/c6_fixed/tinygba.fs` at SHA-256 `5cfea671aa842c4169ceed0a5fa4b675b066744b64a215c80202185875b194d3`, carries 9,100 registers against the 4,631 of the previous build, and the status probe reads `0xFFFE` under field map `1dce3f01`: the `DISPSTAT` V-Blank IRQ enable asserts, `halt` clears after having been seen, and the halt counter saturates at fifteen. The previous build entered exactly one halt and never left it, so the difference is the whole interrupt path working end to end -- the CPU writes `DISPSTAT` bit 3, `IRP_VBlank` asserts, `IRPFlags` sets, and `halt` clears -- which is precisely what BRD-008 predicted and what entries 8 to 10 could not have seen, because the registers those writes landed in did not exist. The rest of the reading is unchanged and self-consistent: the scanline advances, VBlank and HBlank arrive, writes to `0x04000004`, `0x04000200` and `0x04000208` all occurred, and `halt` is live at the sampled instant, which is expected since the BIOS spends most of a frame halted between VBlanks -- the simulator, which showed 76 percent of cycles halted, predicts exactly that. Two captures eight seconds apart are identical, so this is a steady state and not a transient. One thing did not change: the CPU has still never fetched from the cartridge, since `rom_addr[27:24]` non-zero has never been observed, and the machine has now run at least fifteen complete halt-and-wake cycles without reaching `0x08000000`. That is the next fault and it is a different one from this cycle's. The measurement method is worth recording because it is the first hardware reading in this project that was decoded by a tool rather than by eye: `tools/probe_map.py` generated the RTL packing and the decode from one field list, and the bar interpretation came from that rather than from reading a screenshot, which is the discipline TCL-010 calls for after four consecutive mis-decodes on the sibling project. The capture device was held by OBS for part of the cycle and one capture attempt failed with `Device or resource busy`; the fix is to take the reading when the device is free rather than to work around it. Nothing remains deployed beyond the tested image. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 11 were not rewritten and that BRD-009 carries a unique id and the canonical field order, and validated this entry as entry 12 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of twelve against the 100-entry limit.
+
+#### Next Steps:
+
+Find why the CPU runs fifteen halt-and-wake cycles without ever fetching from `0x08000000`, and do it in the simulator rather than with another probe, because the board has now given the same six-bar answer twice while the simulator can show every fetch. The specific question is what the BIOS is waiting for after its halt loop: the official image boots to the logo and then reads the cartridge header at `0x08000004`, so a machine that never touches `0x08000000` is either still in pre-logo initialisation or has diverged before the header check. Instrument the simulator to log the first fetch from each region and compare that sequence against the board's fetch-region history, which is already recorded and sticky. If the simulator also never reaches the cartridge with this cartridge image, the difference from the earlier successful run is the image, since the earlier run that reached the logo used a retail cartridge and this reading streams `build/test/test_logo.gba`; re-run the simulator with the same test cartridge before concluding anything about the board. Do not re-measure the halt path, the raster, the SDRAM or the register writes -- all are now measured and working -- and do not build another probe until the simulator has answered. Record baselines for the production and SDRAM-test configurations once each is boot-tested, since a baseline from an unverified build certifies nothing.
+
+#### Files Modified:
+
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

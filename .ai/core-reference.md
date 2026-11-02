@@ -283,4 +283,18 @@ Field meanings:
     - "`tools/synth_parity.py` and `tools/synth_baseline.json`, which make the register population a build gate"
   verification: "Measured 2026-11-02 by synthesis: 4,631 registers without the fix and 9,100 with it, both from identical sources otherwise, and the defect reproduced in isolation.  Not yet confirmed on hardware: the fixed image has been built and gated but not deployed."
 
+- record_id: BRD-009
+  kind: BOARD
+  topic_id: BRD
+  title: "The halt clears: the board executes its boot halt loop for the first time"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "The image built with `gb_bus_rst` driven low (`build/c6_fixed/tinygba.fs`, SHA-256 `5cfea671aa842c4169ceed0a5fa4b675b066744b64a215c80202185875b194d3`, 9,100 registers against the previous 4,631) reads `0xFFFE` on the status probe under field map `1dce3f01`: `DISPSTAT`'s V-Blank IRQ enable asserts, `halt` clears after being seen, and the halt counter saturates at 15, where the previous build entered exactly one halt and never left it.  The rest of the reading is unchanged and consistent -- the scanline advances, VBlank and HBlank arrive, writes to `0x04000004`, `0x04000200` and `0x04000208` all occurred, and `halt` is live at the sampled instant, which is expected because the BIOS spends most of a frame between VBlanks halted.  The CPU has still not fetched from the cartridge (`rom_addr[27:24]` non-zero has never been seen), and two readings eight seconds apart are identical."
+  consequence: "The MMIO register path works on hardware, and the BIOS's boot halt loop runs and is released -- the first time this port has executed past that halt.  Entries 8 to 10 measured a machine with no writable registers and their register-dependent conclusions are superseded; their non-MMIO findings (SDRAM contents, raster flags, halt address, fetch-region history) stand.  The remaining fault is now past the halt, in the path from the BIOS to the cartridge: the machine has run at least fifteen complete halt-and-wake cycles and still never reached `0x08000000`, which is the next thing to isolate.  That question belongs in the simulator, where every fetch is visible, rather than in another probe: the board has now given the same six-bar answer twice."
+  sources:
+    - "This repository, `build/c6_fixed/tinygba.fs` and its `parity.log`, `clock-plane.log`, `timing-gate.log`"
+    - "Board capture of the `TINYGBA_STATUS_TEST` probe, decoded with `tools/probe_map.py --decode`, map id `1dce3f01`"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the `assign gb_bus_rst = 1'b0;` that produced the difference"
+  verification: "Observed on the board 2026-11-02 across two captures eight seconds apart, both identical.  The probe's own field map generated both the RTL packing and the decode, so the bar interpretation is not hand-read."
+
 ---
