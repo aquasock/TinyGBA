@@ -491,3 +491,35 @@ Localise the divergence to the read path before touching anything else, because 
 - User Test: PENDING
 
 ---
+
+## 15 COMMIT Unreleased 2026-11-02T21:20:00-07:00
+
+#### Coming From:
+
+Unreleased b3f55fc
+
+#### Purpose:
+
+Put the sticky status probe on the board and get a hardware answer to a question a black screen cannot answer: how far does the machine actually get?
+
+#### Outcome:
+
+The machine gets further than any record in this project has ever claimed, and stops at one specific place: it never fetches from the cartridge. `TINYGBA_STATUS_TEST` was built at seed 5, packed clean (`clk67` 131.2 MHz against 67.0, zero hold violations, no relaxation needed) and loaded, and three states were read off the board with the generated decoder. With no cartridge: every bit zero and the status band blue, which is the correct "still loading" baseline and also proof the probe is not self-setting. With the 4 KiB test cartridge: scanline, VBlank and HBlank all arrive, the CPU writes DISPSTAT, DISPSTAT-with-IRQ-enable, IE and IME, it halts and wakes seven times, and `cart_fetched` stays low. With RetroRegen: the same alive signals and the same four register writes, but the CPU halts exactly once and never wakes, and `cart_fetched` is still low. So on hardware the video timing runs, the CPU executes, and the interrupt registers the BIOS needs are all written -- and no cartridge instruction is ever fetched in any configuration. That is the first time the boot path has been narrowed to a single stage on the board rather than inferred from a black picture. Two corrections belong with the result and are not incidental to it. The first is that a decode of these same captures was initially read against a hand-written bit list in the RTL comment, which a later edit to the map had left behind, and that stale list put `cpu_mem_ready`, `rom_en`, `pixel_out_we` and `loader_do_valid` at bits that are actually `vblank_arrived`, `scanline_run`, `vblank_irq_en` and `halt_live`. A "the SDRAM controller answered on hardware" claim was stated to the operator from that decode and is withdrawn here: the generated map has no such field, and the board has not been shown to answer a memory request. The comment has been replaced with a pointer to `tools/probe_map.py --list` so the prose copy cannot drift again. The second is that two earlier cycles concluded from a black screen that cartridge bytes were not reaching the core; the actual cause was the capture card returning black at 1280x720 whatever the board drew, recorded as BRD-012, and the loader was working the whole time. The picture is still black with a real cartridge loaded, and that is now the open question rather than the finding, with the probe having ruled out the stages before the fetch. Nothing was deployed beyond this diagnostic image, and the machine image was flashed and reloaded several times during the readings.
+
+#### Next Steps:
+
+The gap is between the loader accepting bytes on the host side and the CPU fetching from `0x08000000`, and it has two candidate halves that the current probe cannot separate: whether the cartridge bytes land in SDRAM at all, and whether the CPU's fetch path reaches the controller once they do. Add a probe bit or two rather than reasoning: a sticky `loader_do_valid` (the byte actually entered the loader, not the host's belief that it sent it) and a sticky `cpu_mem_ready`, both of which exist as wires in `gbatang_memory`'s interface and neither of which is in the current map, then read them under the same three conditions. If `loader_do_valid` never sets, the fault is in the loader-to-memory path and `tools/load_gba_rom.py`'s baud and framing are the instruments. If it sets and `cpu_mem_ready` does not, the fault is the acknowledged-request loss already fixed in simulation and the fix has not reached the board. Also worth one cycle: with the test cartridge the CPU halts and wakes seven times, which is the boot halt loop the simulation shows, while RetroRegen halts once and never wakes -- that difference is not explained and may be the larger cartridge or the save-data check rather than a fault. Do not read a black picture as evidence about the machine: pin the capture format and quote the histogram, as BRD-012 requires.
+
+#### Files Modified:
+
+- .ai/core-log.md
+- .ai/core-reference.md
+- fpga/gba/src/gbatang_top.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PENDING
+
+---

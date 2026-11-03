@@ -291,18 +291,21 @@ assign cpu_mem_port  = mem_port;
 // never armed against their own reset value.  Each bit is therefore held low
 // while `resetn` is low, and only then allowed to set.
 //
-//   bit 0  `gbaon` rose            -- the loader finished and released the machine
-//   bit 1  `rom_en` asserted       -- the CPU issued a cartridge fetch
-//   bit 2  `cpu_mem_ready` rose    -- the SDRAM controller answered a request
-//   bit 3  `loader_do_valid` rose  -- cartridge bytes reached the loader at all
-//   bit 4  `pixel_out_we` asserted -- the GPU drew a pixel
-//   bit 5  `halt` asserted         -- the CPU executed a HALT-like stall
-//   bits 6..15  st_region         -- sticky OR of rom_addr[27:18]: every 256 KB
-//                                    region the CPU has fetched from since reset
+// The bit assignment is NOT written here.  It lives in one place,
+// `fpga/gba/src/probe_bits.vh`, which `tools/probe_map.py` generates and which
+// also generates the host decoder, so the RTL packing and the decoder cannot
+// disagree.  Before a capture is decoded, run `tools/probe_map.py --list`.
 //
-// Bits 0..5 are sticky; the top ten are a live view and move, so read them as a
-// region rather than a number.  The status band turns green once `gbaon` is high,
-// which separates "still loading" from "running and failing".
+// This comment used to restate the map by hand, and a later edit to the map left
+// it behind.  A decode taken from the stale comment read bit 2 as "the SDRAM
+// controller answered" when on the board it is `vblank_arrived`, and bit 4 as
+// "the GPU drew a pixel" when it is the DISPSTAT V-Blank IRQ enable.  Both were
+// reported as hardware results before the generated map was checked.  A prose
+// copy of a generated table is a second source of truth and will drift; read the
+// generator, not a comment.
+//
+// The status band turns green once `gbaon` is high, which separates "still
+// loading" from "running and failing".
 (* keep *) reg [5:0]  st_bits;
 (* keep *) reg [2:0]  st_gpu;
 (* keep *) reg [9:0]  st_region;

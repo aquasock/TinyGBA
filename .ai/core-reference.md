@@ -339,4 +339,18 @@ Field meanings:
     - "Board capture 2026-11-02, 1920x1080 MJPEG, grey=321840 black=1749600, identical for `build/c6_machine_ok` and `build/tang_ctrl`"
   verification: "Measured 2026-11-02 by loading the recorded-good `build/c6_machine_ok` image, capturing it both ways, and comparing colour histograms and middle-row run boundaries. The 1280x720 grab was uniformly black; the 1920x1080 MJPEG grab showed the grey pillarbox the project's own records predict."
 
+- record_id: BRD-013
+  kind: BOARD
+  topic_id: BRD
+  title: "On the board the CPU writes every interrupt register the BIOS needs and never fetches from the cartridge"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "`TINYGBA_STATUS_TEST` built at seed 5 (`7770b88a158c817f9b01972936497718bbdd9c97e858a8690f1d7fc86e153fb1`) and read on the board through `tools/probe_map.py --decode`, in three states.  No cartridge: word `0x0000`, status band blue -- every bit clear, which is the correct still-loading baseline and shows the sticky bits are armed and do not self-set.  With the 4 KiB test cartridge streamed on `/dev/ttyUSB1`: word `0x7FFE`, band green, `scanline_run=1`, `vblank_arrived=1`, `hblank_arrived=1`, `vblank_irq_en=1`, `dispstat_written=1`, `dispstat_en_written=1`, `ie_written=1`, `ime_written=1`, `halt_seen=1`, `halt_cleared=1`, `halt_entries=7`, and `cart_fetched=0`.  With RetroRegen-GBA-Test-v1.5 streamed the same way: word `0x1F7E`, band green, the same alive signals and the same four register writes, but `halt_cleared=0`, `halt_entries=1`, and `cart_fetched=0`.  `cart_fetched` is `rom_addr[27:24]` non-zero accumulated over reset, so it is clear in every configuration: no cartridge instruction is ever fetched."
+  consequence: "The board's boot path is narrowed to one stage. Video timing runs (scanline, VBlank and HBlank all arrive), the CPU executes, and it writes all four of the registers that govern the V-Blank interrupt -- DISPSTAT, a DISPSTAT write carrying din[3], IE and IME -- so the failure is not 'the CPU never gets that far'. It is that the fetch from `0x08000000` never happens, with the test cartridge leaving the CPU cycling through a halt that wakes (seven entries) and RetroRegen leaving it halted once and never woken. Two things must travel with this record. First, an earlier decode of these same captures was read against a stale hand-written bit list in a code comment and produced a withdrawn claim that the SDRAM controller answered on hardware; the generated map has no such field, and the board has not been shown to answer a memory request. Any decode must come from `tools/probe_map.py --list`, never from prose. Second, the picture is still black with a real cartridge loaded, so a black screen remains consistent with a machine that is alive up to the fetch and this record must not be quoted as evidence that the picture is right."
+  sources:
+    - "This repository, `build/tang_status/tinygba.fs` and its `timing-gate.log`, `clock-plane.log`"
+    - "Captures `/tmp/status1.png`, `/tmp/st_usb1.png`, `/tmp/st_rr.png`, decoded with `tools/probe_map.py --decode`, field map `1dce3f01`"
+    - "This repository, `fpga/gba/src/probe_bits.vh` and `tools/probe_map.py`"
+  verification: "Observed on the board 2026-11-02 after flashing with `openFPGALoader -b tangconsole` and streaming each image with `tools/load_gba_rom.py --uart /dev/ttyUSB1`, captured as MJPEG at 1920x1080 per BRD-012."
+
 ---
