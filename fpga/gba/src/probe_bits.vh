@@ -26,13 +26,13 @@ localparam PROBE_LOADER_VALID_LSB = 12;
 localparam PROBE_LOADER_VALID_WIDTH = 1;   // bits 12: a cartridge byte reached the loader (loader_do_valid rose)
 localparam PROBE_MEM_READY_LSB = 13;
 localparam PROBE_MEM_READY_WIDTH = 1;   // bits 13: the SDRAM controller acknowledged a request, as seen from clk16 (cpu_mem_ready rose while a clk16 edge sampled it)
-localparam PROBE_CLK67_ALIVE_LSB = 14;
-localparam PROBE_CLK67_ALIVE_WIDTH = 1;   // bits 14: a flip-flop clocked by clk67 has run -- clk67 reaches this logic
+localparam PROBE_SCANLINE_RUN_LSB = 14;
+localparam PROBE_SCANLINE_RUN_WIDTH = 1;   // bits 14: the GPU's raw scanline counter (VCOUNT) has advanced at all
 localparam PROBE_MEM_READY_CLK67_LSB = 15;
 localparam PROBE_MEM_READY_CLK67_WIDTH = 1;   // bits 15: the SDRAM controller acknowledged, latched in its own clk67 domain
 
 localparam PROBE_BUS_WIDTH = 16;
-localparam PROBE_MAP_ID = 32'h16432f99;   // decode captures with the map that built them
+localparam PROBE_MAP_ID = 32'h8c589e34;   // decode captures with the map that built them
 // The guard MEASURES the packing expression rather than restating the
 // generator's own arithmetic.  `$bits` of the concatenation is compared
 // against the bus width, so if any source expression ever changes width
@@ -40,7 +40,7 @@ localparam PROBE_MAP_ID = 32'h16432f99;   // decode captures with the map that b
 // here instead of shipping a readout that has to be decoded around.
 // Verified 2026-11-02 by comparing against a deliberately wrong constant
 // and watching elaboration fail with `unknown module`.
-localparam PROBE_PACK_WIDTH = $bits({ st_mrfast_sync[1], st_alive_sync[1], st_bits[2], st_bits[3], st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, st_gpu[0], st_cart_seen });
+localparam PROBE_PACK_WIDTH = $bits({ st_mrfast_sync[1], st_gpu[2], st_bits[2], st_bits[3], st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, st_gpu[0], st_cart_seen });
 generate
   if (PROBE_PACK_WIDTH != PROBE_BUS_WIDTH) begin : probe_width_error
     // Deliberately undefined module: slang rejects $error, yosys drops a
@@ -50,4 +50,4 @@ generate
 endgenerate
 
 `define TINYGBA_PROBE_ASSIGN \
-    st_dbg <= { st_mrfast_sync[1], st_alive_sync[1], st_bits[2], st_bits[3], st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, st_gpu[0], st_cart_seen };
+    st_dbg <= { st_mrfast_sync[1], st_gpu[2], st_bits[2], st_bits[3], st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, st_gpu[0], st_cart_seen };

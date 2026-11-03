@@ -79,8 +79,16 @@ FIELDS = [
     #                                                 acknowledges
     #   alive=1, mem_ready_clk67=1, mem_ready=0    -> it acknowledges and the
     #                                                 clk16 domain never samples it
-    dict(name="clk67_alive", width=1, value="st_alive_sync[1]",
-         doc="a flip-flop clocked by clk67 has run -- clk67 reaches this logic"),
+    # `clk67_alive` was on bit 14 and read 1 in every run on every build, so it
+    # has done its job and gives the bit back.  What is needed now is the same
+    # question one layer down: in the failing state `vblank_arrived` is 0, which
+    # is the DISPSTAT V-Blank FLAG.  That flag is produced by the GPU's timing
+    # generator, so a zero could mean the raster is not running at all, or that
+    # it runs and only the flag path is broken.  `st_gpu[2]` latches
+    # `|dispstat_dbg[23:16]`, the raw VCOUNT, which advances on every scanline
+    # regardless of any flag -- so it separates "GPU dead" from "flag not set".
+    dict(name="scanline_run", width=1, value="st_gpu[2]",
+         doc="the GPU's raw scanline counter (VCOUNT) has advanced at all"),
     dict(name="mem_ready_clk67", width=1, value="st_mrfast_sync[1]",
          doc="the SDRAM controller acknowledged, latched in its own clk67 domain"),
 ]
@@ -191,8 +199,23 @@ def bar_bits_from_frame(path):
     if len(segs) < 3:
         raise SystemExit(f"{path}: only {len(segs)} colour runs; not a probe frame")
     # Exclude the letterbox (very dark) and the probe's own grey margin.
+    #
+    # By TOLERANCE, not by membership in a short list of exact greys.  An earlier
+    # version tested `c[0] == c[1] == c[2] and c[0] in (0, 34, 43, 127, 135)`,
+    # and the capture card's MJPEG encoder renders the 135-grey margin as
+    # `(134,134,134)` at some columns.  134 is not in that list, so a strip of
+    # margin counted as field and inflated the measured field edge by about 40
+    # display pixels.  Every bar centre was then shifted right, the last bar was
+    # sampled inside the margin, and it read as a zero.  That produced a
+    # contradictory hardware decode -- a clk67-domain latch reporting 0 where the
+    # clk16-domain latch of the SAME signal reported 1, which is impossible and is
+    # what exposed the bug.  A near-neutral pixel is either margin or letterbox;
+    # neither is a probe field, and compression noise must not change the answer.
     def is_field(c):
-        return not (c[0] == c[1] == c[2] and c[0] in (0, 34, 43, 127, 135))
+        r, g, b = c[0], c[1], c[2]
+        if abs(r - g) <= 10 and abs(g - b) <= 10 and abs(r - b) <= 10:
+            return False        # any near-neutral grey: margin or letterbox
+        return True
     body = [s for s in segs if is_field(s[2])]
     if not body:
         raise SystemExit(f"{path}: no field pixels found")
