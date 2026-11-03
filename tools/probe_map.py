@@ -45,11 +45,6 @@ FIELDS = [
          doc="CPU has fetched from the cartridge (rom_addr[27:24] non-zero)"),
     dict(name="vblank_arrived", width=1, value="st_gpu[0]",
          doc="a VBlank period has arrived (DISPSTAT flag, needs no CPU help)"),
-    dict(name="vblank_irq_en", width=1, value="dispstat_dbg[3]",
-         doc="DISPSTAT V-Blank IRQ enable, LIVE -- the one gate that makes "
-             "IRP_VBlank assert and so the one thing that can release halt"),
-    dict(name="halt_live", width=1, value="halt",
-         doc="the CPU is halted right now"),
     dict(name="halt_seen", width=1, value="st_halt_valid",
          doc="a halt has been observed since reset"),
     dict(name="halt_cleared", width=1, value="st_irq[3]",
@@ -74,7 +69,20 @@ FIELDS = [
     dict(name="loader_valid", width=1, value="st_bits[3]",
          doc="a cartridge byte reached the loader (loader_do_valid rose)"),
     dict(name="mem_ready", width=1, value="st_bits[2]",
-         doc="the SDRAM controller acknowledged a request (cpu_mem_ready rose)"),
+         doc="the SDRAM controller acknowledged a request, as seen from clk16 "
+             "(cpu_mem_ready rose while a clk16 edge sampled it)"),
+    # Separate the three ways `mem_ready = 0` can happen.  Read together with the
+    # bit above, these form a 2x2 that names the fault instead of guessing:
+    #   alive=0                                    -> clk67 never clocks the
+    #                                                 controller at all
+    #   alive=1, mem_ready_clk67=0, mem_ready=0    -> controller runs but never
+    #                                                 acknowledges
+    #   alive=1, mem_ready_clk67=1, mem_ready=0    -> it acknowledges and the
+    #                                                 clk16 domain never samples it
+    dict(name="clk67_alive", width=1, value="st_alive_sync[1]",
+         doc="a flip-flop clocked by clk67 has run -- clk67 reaches this logic"),
+    dict(name="mem_ready_clk67", width=1, value="st_mrfast_sync[1]",
+         doc="the SDRAM controller acknowledged, latched in its own clk67 domain"),
 ]
 
 def map_id():
@@ -189,13 +197,43 @@ def bar_bits_from_frame(path):
     if not body:
         raise SystemExit(f"{path}: no field pixels found")
     left, right = min(s[0] for s in body), max(s[1] for s in body)
-    # The band above the bars may extend the field; the sixteen bars divide it.
-    bw = (right - left + 1) / PROBE_WIDTH
+    # Sample each bar at the centre of the span the RENDERER actually draws, not
+    # by dividing the field into sixteen equal bands.  The renderer
+    # (`gba2hdmi.sv`, `st_colour`) computes `dbg_bits[x / 15]` for `x < 232`, so
+    # bar i covers source pixels [15i, 15i+15) and the LAST bar is truncated to
+    # 7 pixels at [225, 232).  The field is therefore 232 source pixels, not a
+    # multiple of 16, and an even 16-way split samples the last band roughly one
+    # bar to the left: bit 15 was decoded from bar 14's colour.  That is not a
+    # cosmetic error -- it silently reports one field's value under another
+    # field's name, which is exactly the failure this tool exists to prevent, and
+    # it produced a wrong hardware conclusion on 2026-11-02 (a `mem_ready` of 0
+    # that was really a mis-sampled bar) before being caught by sampling the raw
+    # pixels by hand.
+    FIELD_SRC = 232          # x < 232 in gba2hdmi.sv
+    BAR_W     = 15           # dbg_bits[x / 15]
+    scale = (right - left + 1) / FIELD_SRC
     bits = []
     for i in range(PROBE_WIDTH):
-        x = int(left + i * bw + bw / 2)
-        c = im.getpixel((x, y))
-        bits.append(1 if (c[1] > 200 and c[0] < 60) else 0)
+        sx0 = i * BAR_W
+        sx1 = min(sx0 + BAR_W, FIELD_SRC)
+        if sx0 >= FIELD_SRC:
+            raise SystemExit(f"{path}: field runs out before bar {i}")
+        centre = (sx0 + sx1) / 2.0
+        # Two samples per bar, a quarter and three quarters across, so a bar that
+        # is only half drawn (or a capture that is mid-resync) is caught rather
+        # than averaged into a plausible bit.
+        votes = []
+        for frac in (0.25, 0.5, 0.75):
+            sxc = sx0 + (sx1 - sx0) * frac
+            x = int(left + sxc * scale)
+            c = im.getpixel((x, y))
+            votes.append(1 if (c[1] > 200 and c[0] < 60) else 0)
+        if len(set(votes)) > 1:
+            c = im.getpixel((int(left + centre * scale), y))
+            sys.stderr.write(
+                f"probe_map: WARNING {path}: bar {i} (bit {i}) disagrees across "
+                f"its span {votes}, colour {c}; using the majority\n")
+        bits.append(1 if sum(votes) * 2 >= len(votes) else 0)
     return bits
 
 

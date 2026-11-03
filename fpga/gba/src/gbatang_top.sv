@@ -425,6 +425,57 @@ always @(posedge clk16) begin
     end
 end
 
+// clk67-domain observations.  On the board the machine reports `mem_ready = 0`
+// -- the SDRAM controller never acknowledged a request -- while the loader
+// accepted cartridge bytes and the CPU fetched.  That reading is real (both bits
+// are driven flops in the netlist) but it has three quite different causes and
+// the clk16-domain sticky bit cannot tell them apart:
+//
+//   a) `clk67` never reaches the controller's flip-flops at all, so nothing in
+//      the controller runs.  This design has never clocked thousands of sinks on
+//      this pip -- `clk67` sits on SPINE27/TOP2, recorded `partial` precisely
+//      because only a probe's few hundred flops have ever been measured on it.
+//   b) the controller runs but never acknowledges, e.g. it is stuck in its
+//      200 microsecond initialisation.
+//   c) the controller acknowledges correctly and nothing in the clk16 domain
+//      ever samples it, because `cpu_ready` is high for one clk16 period and the
+//      window can fall between two clk16 edges.
+//
+// `st_clk67_alive` separates (a) from the rest: it can only set if a flop
+// clocked by clk67 ran at least twice.  `st_mem_ready_fast` separates (c) from
+// (b): it is the same `cpu_mem_ready` signal latched in the domain that produces
+// it, so a controller that acknowledges will set it regardless of whether the
+// clk16 side ever sees the pulse.
+//
+// Both are latched by clk67 and read by the clk16 packer, so they pass through a
+// two-flop synchroniser.  Sticky bits only ever rise, so a synchroniser is
+// sufficient; there is no ordering to preserve between them.
+(* keep *) reg st_clk67_alive;
+(* keep *) reg st_mem_ready_fast;
+reg [1:0] st_clk67_tog;
+always @(posedge clk67) begin
+    if (~resetn) begin
+        st_clk67_tog      <= 2'b00;
+        st_clk67_alive    <= 1'b0;
+        st_mem_ready_fast <= 1'b0;
+    end else begin
+        st_clk67_tog <= st_clk67_tog + 2'd1;
+        if (st_clk67_tog[1])     st_clk67_alive    <= 1'b1;
+        if (cpu_mem_ready)       st_mem_ready_fast <= 1'b1;
+    end
+end
+
+(* keep *) reg [1:0] st_alive_sync, st_mrfast_sync;
+always @(posedge clk16) begin
+    if (~resetn) begin
+        st_alive_sync  <= 2'b00;
+        st_mrfast_sync <= 2'b00;
+    end else begin
+        st_alive_sync  <= {st_alive_sync[0],  st_clk67_alive};
+        st_mrfast_sync <= {st_mrfast_sync[0], st_mem_ready_fast};
+    end
+end
+
 // The display layout is NOT written here.  It is generated from one declarative
 // field list by tools/probe_map.py, into probe_bits.vh beside this file, and the
 // host-side decoder is generated from that same list.  Four consecutive cycles
