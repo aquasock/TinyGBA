@@ -353,4 +353,18 @@ Field meanings:
     - "This repository, `fpga/gba/src/probe_bits.vh` and `tools/probe_map.py`"
   verification: "Observed on the board 2026-11-02 after flashing with `openFPGALoader -b tangconsole` and streaming each image with `tools/load_gba_rom.py --uart /dev/ttyUSB1`, captured as MJPEG at 1920x1080 per BRD-012."
 
+- record_id: BRD-014
+  kind: BOARD
+  topic_id: BRD
+  title: "The GPU's raster never completes a scanline, which is why the machine halts forever"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "On the board the machine is bimodal across loads of one fixed bitstream. The good state (`0xFFFF`) has VBlank, fifteen or more halt entries and a cartridge fetch. The bad state (`0xB638` under map `169aa481`, and `0x7FF3` under map `b7850627` before the ladder was added) has `mem_ready=1`, `mem_ready_clk67=1`, `gpu_released=1`, the CPU writing DISPSTAT, IE and IME, `halt_entries=1`, `halt_cleared=0`, `cart_fetched=0`, `vblank_arrived=0` and `scanline_run=0`. With the GPU timing generator tapped (`build/tang_gpu`, map `169aa481`), the failing ladder reads `gpu_released=1`, `left_visible=0`, `cycles_100=1`: the cycle counter advances past 100 and the state machine never leaves VISIBLE, so no line of 1008 cycles is ever completed and no VBlank is ever raised. The memory controller, the clk67 clock distribution and the CPU all work in the failing state. The picture in the failing state is a black field with grey pillarbox bars at 1920x1080, which is a locked, synced video path displaying an empty framebuffer, confirmed by the operator on a monitor."
+  consequence: "The fault is the GPU's raster, not memory. Two claims made earlier in the same session are superseded and must not be revived: that the SDRAM controller never acknowledges, and that the black picture implies a memory-path fault. The signature -- a counter that passes 100 and never finishes a 1008-cycle line -- is what a reset that keeps returning looks like, so `gbaon` (which drives the GPU's reset) falling again after rising is the leading candidate, with the generator's unreset `mclk_r`/`pixelpos` as the alternative. Because the badge is bimodal across loads, any hardware reading taken from a single capture has a coin-flip chance of naming the wrong state; six load cycles were needed to observe both. The status probe's bars are drawn by `gba2hdmi`'s own raster, not by the GBA GPU, so a correct probe picture proves the display path and says nothing about the GPU timing generator -- conflating the two hid this fault for several cycles."
+  sources:
+    - "This repository, `build/tang_gpu` (map `169aa481`) and `build/tang_scan` (map `8c589e34`)"
+    - "Captures decoded with `tools/probe_map.py --decode` after the bar-geometry and grey-tolerance fixes"
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_timing.v`: the `DBG_gt` packing and the `if (mclk & ~mclk_r) cycles = cycles + 1` increment"
+  verification: "Observed on the board 2026-11-03 by flashing with `openFPGALoader -b tangconsole`, streaming `build/test/test.gba` with `tools/load_gba_rom.py --uart /dev/ttyUSB1`, and decoding MJPEG captures pinned at 1920x1080. The bad state was caught in two independent builds with different maps."
+
 ---
