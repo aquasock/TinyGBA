@@ -151,6 +151,16 @@ done
 echo "=== 0. probe field map ==="
 "$suite/py3bin/python3" "$root/tools/probe_map.py" --check \
     || { echo "probe_bits.vh is stale; run tools/probe_map.py --emit-verilog" >&2; exit 1; }
+# Record which field map this bitstream was built from, in the build directory
+# itself.  A capture is decoded against a map, and the only honest source for
+# "which map" is the build that produced the image being flashed -- not whatever
+# the tree happens to contain when someone decodes it later.  `tools/cap_tang.sh`
+# copies this into the capture's `.map` sidecar and `tools/probe_map.py --decode`
+# refuses a capture whose sidecar disagrees, so a stale capture cannot be read
+# under a newer map.  Written unconditionally: a build without the probe has a
+# map id too, and recording it costs nothing.
+"$suite/py3bin/python3" "$root/tools/probe_map.py" --map-id > "$out/probe-map.id" \
+    || { echo "could not record the probe field map" >&2; exit 1; }
 
 # --------------------------------------------------------------- 1. synthesis
 if [[ ! -f "$out/tinygba.json" || "${TINYGBA_FORCE_SYNTH:-0}" == 1 ]]; then

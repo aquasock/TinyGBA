@@ -523,3 +523,37 @@ The gap is between the loader accepting bytes on the host side and the CPU fetch
 - User Test: PENDING
 
 ---
+
+## 16 COMMIT Unreleased 2026-11-02T21:40:00-07:00
+
+#### Coming From:
+
+Unreleased e46fe86
+
+#### Purpose:
+
+Put the two signals that separate "the bytes never arrived" from "the controller never acknowledged" onto the probe wire, and close a hole in the decoder that made reading a capture depend on luck.
+
+#### Outcome:
+
+The probe now carries `loader_valid` (`loader_do_valid` rose) at bit 14 and `mem_ready` (`cpu_mem_ready` rose) at bit 15, which are the two facts BRD-013 left unresolved: `cart_fetched = 0` is consistent with the cartridge bytes never entering the loader and with them entering a controller that never acknowledges, and nothing on the wire could tell those apart. Both signals already existed as sticky latches in `st_bits[2]` and `st_bits[3]`; they had simply never been exposed, so this is a map change rather than new capture logic. Two bits had to come off to keep the sixteen-bar geometry that the renderer and the decoder both assume, and `scanline_run` and `hblank_arrived` were the ones removed: both are already recorded as VERIFIED in BRD-013, and `vblank_arrived` still proves the video timing runs, so nothing that has been relied on is lost. The map id moves from `1dce3f01` to `b7850627`, which is the mechanism working: every field above bit 1 moved, so an old capture is not readable under the new map. Building this exposed a defect in the decoder that was worse than the thing being built. `--decode` printed the *current* map id and then decoded regardless, so a capture taken under one map was silently rendered with another map's field names -- demonstrated by decoding the BRD-013 RetroRegen capture under the new map, which reported `vblank_arrived = 1` where the bit was actually `scanline_run`. The docstring claimed "a capture decodes only under the map that built it" and that claim was false in the code, which is the same class of defect as the stale comment in entry 15: a plausible output with no enforcement behind it. It mattered more here, because the tool exists specifically to stop this, and a session that trusted it would have gotten a confident wrong answer. The fix is mechanical rather than advisory: `tools/build_tinygba.sh` now records the map id in `$out/probe-map.id` at build time, `tools/cap_tang.sh` copies that into a `<capture>.png.map` sidecar when it flashes and captures, and `--decode` exits 3 with both ids shown when the sidecar disagrees while marking a capture with no sidecar UNVERIFIED rather than decoding it quietly. The ids are derived from the build that produced the bitstream, not from whatever the tree contains at decode time, so a capture cannot be re-labelled after the fact. `tools/cap_tang.sh` is new and also pins the capture format, because the 1280x720-black trap in BRD-012 was previously avoided only by remembering to type the format by hand. The image built clean: seed 5, `clk67` 153.5 MHz against 67.0, cross-domain 21.4 and 41.5 ns against 59.7, zero hold violations, no relaxation, SHA-256 `23903d61b10f97f12d191d1cdac5fc8d930a7b117dbf1a1175dc85070db62a57`. Nothing was deployed, at the operator's instruction.
+
+#### Next Steps:
+
+Flash `build/tang_status2` and read the same three conditions BRD-013 used -- no cartridge, the 4 KiB test cartridge, RetroRegen -- because the two new bits make that comparison decisive: `loader_valid = 1` with `mem_ready = 0` means the bytes reach the memory path and the controller never acknowledges, so the simulation-verified fix has not reached the board; `loader_valid = 0` means the fault is upstream of memory and `tools/load_gba_rom.py`'s framing and baud are the instruments; both set with `cart_fetched = 0` would move the question to the CPU's fetch path rather than the loader or the controller. Capture with `tools/cap_tang.sh` rather than by hand, so the format is pinned and the sidecar is written. Keep the remaining unexplained difference in view: with the 4 KiB cartridge the CPU halts and wakes seven times, and with RetroRegen it halts once and never wakes, which nothing in this cycle accounts for and which may be the image size or the save-data check rather than a fault. Do not decode any capture without checking the map id, and do not treat the absence of a sidecar as agreement.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/probe_bits.vh
+- tools/build_tinygba.sh
+- tools/probe_map.py
+- tools/cap_tang.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: PENDING
+
+---

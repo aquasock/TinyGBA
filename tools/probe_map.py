@@ -43,12 +43,8 @@ INCLUDE_PATH = "fpga/gba/src/probe_bits.vh"
 FIELDS = [
     dict(name="cart_fetched", width=1, value="st_cart_seen",
          doc="CPU has fetched from the cartridge (rom_addr[27:24] non-zero)"),
-    dict(name="scanline_run", width=1, value="st_gpu[2]",
-         doc="GPU scanline counter has advanced"),
     dict(name="vblank_arrived", width=1, value="st_gpu[0]",
          doc="a VBlank period has arrived (DISPSTAT flag, needs no CPU help)"),
-    dict(name="hblank_arrived", width=1, value="st_gpu[1]",
-         doc="an HBlank period has arrived (DISPSTAT flag)"),
     dict(name="vblank_irq_en", width=1, value="dispstat_dbg[3]",
          doc="DISPSTAT V-Blank IRQ enable, LIVE -- the one gate that makes "
              "IRP_VBlank assert and so the one thing that can release halt"),
@@ -68,6 +64,17 @@ FIELDS = [
          doc="the CPU ever wrote 0x04000208 (IME)"),
     dict(name="halt_entries", width=4, value="st_halt_edges",
          doc="how many times the CPU has entered a halt, saturating at 15"),
+    # The loader-to-memory path.  BRD-013 left one question open: whether the
+    # cartridge bytes the host sends ever enter the loader, and whether the SDRAM
+    # controller ever answers, because "the CPU never fetched from 0x08000000" is
+    # consistent with the bytes never arriving AND with them arriving into a
+    # controller that never acknowledges.  `halts_entries` and the video bits
+    # cannot separate those.  Both signals already existed as sticky latches in
+    # `st_bits[2]`/`st_bits[3]`; they were simply never put on the wire.
+    dict(name="loader_valid", width=1, value="st_bits[3]",
+         doc="a cartridge byte reached the loader (loader_do_valid rose)"),
+    dict(name="mem_ready", width=1, value="st_bits[2]",
+         doc="the SDRAM controller acknowledged a request (cpu_mem_ready rose)"),
 ]
 
 def map_id():
@@ -77,8 +84,18 @@ def map_id():
     same list.  It CAN mislabel an older capture, because two layouts may use the
     same bar for different fields -- which happened in this project on 2026-11-02,
     when bar 3 changed from the VBlank IRQ enable to the HBlank flag between
-    builds.  The id is emitted into the RTL as PROBE_MAP_ID so a netlist and a
-    capture can be matched, and printed by --list and --decode.
+    builds, and again when the loader and SDRAM-acknowledge fields were added to
+    the map and every bar above bit 1 moved.
+
+    The id is emitted into the RTL as `PROBE_MAP_ID`.  A capture carries it in a
+    sidecar `<capture>.map` written at capture time by the script that flashed the
+    build (see `tools/cap_tang.sh`), and `--decode` REFUSES a capture whose
+    sidecar names a different map.  A capture with no sidecar decodes with a loud
+    UNVERIFIED warning rather than silently, because "no evidence" and "matching
+    evidence" are not the same thing.  An earlier version of this docstring
+    claimed a capture "decodes only under the map that built it" while the code
+    merely printed the current id and decoded regardless; that claim was false,
+    and an old capture was misdecoded through it.
     """
     import hashlib
     desc = "|".join(f"{f['name']}:{f['width']}:{f['value']}" for f in FIELDS)
@@ -182,6 +199,15 @@ def bar_bits_from_frame(path):
     return bits
 
 
+def read_capture_map(path):
+    """Return the map id recorded beside a capture, or None if it has none."""
+    try:
+        with open(path + ".map") as f:
+            return f.read().strip().split()[0]
+    except (OSError, IndexError):
+        return None
+
+
 def decode_bits(bits):
     """Turn a 16-entry list of bar bits (index = bit number) into fields."""
     word = 0
@@ -201,6 +227,8 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--emit-verilog", action="store_true")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--map-id", action="store_true",
+                    help="print this tree's map id, for a build to record")
     ap.add_argument("--decode", metavar="FRAME")
     ap.add_argument("--barbits", metavar="BITS",
                     help="decode a literal bit string, leftmost char = bar 0")
@@ -210,8 +238,9 @@ def main():
     if args.list:
         total = 0
         print(f"probe word is {PROBE_WIDTH} bits; bar i shows bit i")
-        print(f"field map id {map_id()} -- a capture decodes only under the map "
-              f"that built it\n")
+        print(f"field map id {map_id()}")
+        print("  --decode refuses a capture whose .map sidecar names another "
+              "map, and warns when it has none\n")
         print(f"  {'field':20s} {'bits':>8s}  source")
         for f in FIELDS:
             lsb = total; hi = lsb + f["width"] - 1
@@ -245,11 +274,35 @@ def main():
         if len(s) != PROBE_WIDTH or set(s) - set("01"):
             raise SystemExit(f"expected {PROBE_WIDTH} characters of 0/1, got {s!r}")
         bits = [int(c) for c in s]
-    elif args.decode:
+    elif args.map_id:
+        print(map_id())
+        return 0
+
+    if args.decode:
         bits = bar_bits_from_frame(args.decode)
     if bits is None:
         ap.print_help()
         return 2
+
+    # Refuse to decode a capture that names a different map, and say so loudly when
+    # a capture names no map at all.  Printing the current id is not a check: it
+    # labels the capture with whatever map is loaded now, which is precisely the
+    # mistake this guard exists to stop.
+    want = map_id()
+    got = read_capture_map(args.decode)
+    if got is not None and got != want:
+        sys.stderr.write(
+            f"probe_map: REFUSING to decode {args.decode}\n"
+            f"  capture was built with map {got}\n"
+            f"  this tree's map is       {want}\n"
+            f"  re-capture from a build made with the current map, or decode\n"
+            f"  with the tree that built that capture.\n")
+        return 3
+    if got is None:
+        sys.stderr.write(
+            f"probe_map: UNVERIFIED -- {args.decode} has no .map sidecar, so it\n"
+            f"  cannot be shown to match this tree's map {want}.  Treat the\n"
+            f"  field names below as unconfirmed.\n")
 
     word, fields = decode_bits(bits)
     if args.json:

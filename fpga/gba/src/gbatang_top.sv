@@ -401,7 +401,8 @@ always @(posedge clk16) begin
         // correctly running BIOS and a stalled one alike, and the display only
         // samples one instant per pixel.  Sticky OR makes "did the CPU ever
         // reach the cartridge at 0x08000000" a fact that survives the frame.
-        // Cartridge fetches set bit 25, which is bar 13.
+        // Cartridge fetches set bit 25.  `st_region` is no longer on the probe
+        // wire, so no bar number is named here: see `tools/probe_map.py --list`.
         st_region <= st_region | rom_addr[27:18];
         if (gbaon)                    st_bits[0] <= 1'b1;
         if (rom_en)                   st_bits[1] <= 1'b1;
