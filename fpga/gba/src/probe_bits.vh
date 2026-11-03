@@ -8,31 +8,31 @@ localparam PROBE_CART_FETCHED_LSB = 0;
 localparam PROBE_CART_FETCHED_WIDTH = 1;   // bits 0: CPU has fetched from the cartridge (rom_addr[27:24] non-zero)
 localparam PROBE_VBLANK_ARRIVED_LSB = 1;
 localparam PROBE_VBLANK_ARRIVED_WIDTH = 1;   // bits 1: a VBlank period has arrived (DISPSTAT flag, needs no CPU help)
-localparam PROBE_HALT_SEEN_LSB = 2;
-localparam PROBE_HALT_SEEN_WIDTH = 1;   // bits 2: a halt has been observed since reset
-localparam PROBE_HALT_CLEARED_LSB = 3;
-localparam PROBE_HALT_CLEARED_WIDTH = 1;   // bits 3: halt has gone low again after being seen high
-localparam PROBE_DISPSTAT_WRITTEN_LSB = 4;
-localparam PROBE_DISPSTAT_WRITTEN_WIDTH = 1;   // bits 4: the CPU ever wrote 0x04000004 (DISPSTAT) at all
-localparam PROBE_DISPSTAT_EN_WRITTEN_LSB = 5;
-localparam PROBE_DISPSTAT_EN_WRITTEN_WIDTH = 1;   // bits 5: a DISPSTAT write carried din[3], the V-Blank IRQ enable
-localparam PROBE_IE_WRITTEN_LSB = 6;
-localparam PROBE_IE_WRITTEN_WIDTH = 1;   // bits 6: the CPU ever wrote 0x04000200 (IE)
-localparam PROBE_IME_WRITTEN_LSB = 7;
-localparam PROBE_IME_WRITTEN_WIDTH = 1;   // bits 7: the CPU ever wrote 0x04000208 (IME)
-localparam PROBE_HALT_ENTRIES_LSB = 8;
-localparam PROBE_HALT_ENTRIES_WIDTH = 4;   // bits 11:8: how many times the CPU has entered a halt, saturating at 15
-localparam PROBE_LOADER_VALID_LSB = 12;
-localparam PROBE_LOADER_VALID_WIDTH = 1;   // bits 12: a cartridge byte reached the loader (loader_do_valid rose)
-localparam PROBE_MEM_READY_LSB = 13;
-localparam PROBE_MEM_READY_WIDTH = 1;   // bits 13: the SDRAM controller acknowledged a request, as seen from clk16 (cpu_mem_ready rose while a clk16 edge sampled it)
-localparam PROBE_SCANLINE_RUN_LSB = 14;
-localparam PROBE_SCANLINE_RUN_WIDTH = 1;   // bits 14: the GPU's raw scanline counter (VCOUNT) has advanced at all
-localparam PROBE_MEM_READY_CLK67_LSB = 15;
-localparam PROBE_MEM_READY_CLK67_WIDTH = 1;   // bits 15: the SDRAM controller acknowledged, latched in its own clk67 domain
+localparam PROBE_DISPSTAT_WRITTEN_LSB = 2;
+localparam PROBE_DISPSTAT_WRITTEN_WIDTH = 1;   // bits 2: the CPU ever wrote 0x04000004 (DISPSTAT) at all
+localparam PROBE_HALT_ENTRIES_LSB = 3;
+localparam PROBE_HALT_ENTRIES_WIDTH = 4;   // bits 6:3: how many times the CPU has entered a halt, saturating at 15
+localparam PROBE_LOADER_VALID_LSB = 7;
+localparam PROBE_LOADER_VALID_WIDTH = 1;   // bits 7: a cartridge byte reached the loader (loader_do_valid rose)
+localparam PROBE_MEM_READY_LSB = 8;
+localparam PROBE_MEM_READY_WIDTH = 1;   // bits 8: the SDRAM controller acknowledged a request, as seen from clk16 (cpu_mem_ready rose while a clk16 edge sampled it)
+localparam PROBE_SCANLINE_RUN_LSB = 9;
+localparam PROBE_SCANLINE_RUN_WIDTH = 1;   // bits 9: the GPU's raw scanline counter (VCOUNT) has advanced at all
+localparam PROBE_MEM_READY_CLK67_LSB = 10;
+localparam PROBE_MEM_READY_CLK67_WIDTH = 1;   // bits 10: the SDRAM controller acknowledged, latched in its own clk67 domain
+localparam PROBE_GPU_RELEASED_LSB = 11;
+localparam PROBE_GPU_RELEASED_WIDTH = 1;   // bits 11: the GPU timing generator saw its reset released at all
+localparam PROBE_LEFT_VISIBLE_LSB = 12;
+localparam PROBE_LEFT_VISIBLE_WIDTH = 1;   // bits 12: the GPU's state machine left VISIBLE at any point
+localparam PROBE_CYCLES_100_LSB = 13;
+localparam PROBE_CYCLES_100_WIDTH = 1;   // bits 13: the GPU timing generator's cycle counter reached 100
+localparam PROBE_CYCLES_1008_LSB = 14;
+localparam PROBE_CYCLES_1008_WIDTH = 1;   // bits 14: the GPU timing generator's cycle counter reached 1008, the line length
+localparam PROBE_GBAON_FELL_LSB = 15;
+localparam PROBE_GBAON_FELL_WIDTH = 1;   // bits 15: gbaon went low again after having gone high -- the release is not stable
 
 localparam PROBE_BUS_WIDTH = 16;
-localparam PROBE_MAP_ID = 32'h8c589e34;   // decode captures with the map that built them
+localparam PROBE_MAP_ID = 32'h5545760d;   // decode captures with the map that built them
 // The guard MEASURES the packing expression rather than restating the
 // generator's own arithmetic.  `$bits` of the concatenation is compared
 // against the bus width, so if any source expression ever changes width
@@ -40,7 +40,7 @@ localparam PROBE_MAP_ID = 32'h8c589e34;   // decode captures with the map that b
 // here instead of shipping a readout that has to be decoded around.
 // Verified 2026-11-02 by comparing against a deliberately wrong constant
 // and watching elaboration fail with `unknown module`.
-localparam PROBE_PACK_WIDTH = $bits({ st_mrfast_sync[1], st_gpu[2], st_bits[2], st_bits[3], st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, st_gpu[0], st_cart_seen });
+localparam PROBE_PACK_WIDTH = $bits({ st_gbaon_fell, st_gpu_step_sync[3], st_gpu_step_sync[2], st_gpu_step_sync[1], st_gpu_step_sync[0], st_mrfast_sync[1], st_gpu[2], st_bits[2], st_bits[3], st_halt_edges, st_reg[0], st_gpu[0], st_cart_seen });
 generate
   if (PROBE_PACK_WIDTH != PROBE_BUS_WIDTH) begin : probe_width_error
     // Deliberately undefined module: slang rejects $error, yosys drops a
@@ -50,4 +50,4 @@ generate
 endgenerate
 
 `define TINYGBA_PROBE_ASSIGN \
-    st_dbg <= { st_mrfast_sync[1], st_gpu[2], st_bits[2], st_bits[3], st_halt_edges, st_reg[3], st_reg[2], st_reg[1], st_reg[0], st_irq[3], st_halt_valid, st_gpu[0], st_cart_seen };
+    st_dbg <= { st_gbaon_fell, st_gpu_step_sync[3], st_gpu_step_sync[2], st_gpu_step_sync[1], st_gpu_step_sync[0], st_mrfast_sync[1], st_gpu[2], st_bits[2], st_bits[3], st_halt_edges, st_reg[0], st_gpu[0], st_cart_seen };

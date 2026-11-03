@@ -45,18 +45,8 @@ FIELDS = [
          doc="CPU has fetched from the cartridge (rom_addr[27:24] non-zero)"),
     dict(name="vblank_arrived", width=1, value="st_gpu[0]",
          doc="a VBlank period has arrived (DISPSTAT flag, needs no CPU help)"),
-    dict(name="halt_seen", width=1, value="st_halt_valid",
-         doc="a halt has been observed since reset"),
-    dict(name="halt_cleared", width=1, value="st_irq[3]",
-         doc="halt has gone low again after being seen high"),
     dict(name="dispstat_written", width=1, value="st_reg[0]",
          doc="the CPU ever wrote 0x04000004 (DISPSTAT) at all"),
-    dict(name="dispstat_en_written", width=1, value="st_reg[1]",
-         doc="a DISPSTAT write carried din[3], the V-Blank IRQ enable"),
-    dict(name="ie_written", width=1, value="st_reg[2]",
-         doc="the CPU ever wrote 0x04000200 (IE)"),
-    dict(name="ime_written", width=1, value="st_reg[3]",
-         doc="the CPU ever wrote 0x04000208 (IME)"),
     dict(name="halt_entries", width=4, value="st_halt_edges",
          doc="how many times the CPU has entered a halt, saturating at 15"),
     # The loader-to-memory path.  BRD-013 left one question open: whether the
@@ -91,6 +81,35 @@ FIELDS = [
          doc="the GPU's raw scanline counter (VCOUNT) has advanced at all"),
     dict(name="mem_ready_clk67", width=1, value="st_mrfast_sync[1]",
          doc="the SDRAM controller acknowledged, latched in its own clk67 domain"),
+    # Ladder inside the GPU timing generator, so a frozen VCOUNT can be located
+    # rather than guessed at.  Read in order: the first rung that is still 0 names
+    # the stage that did not happen.
+    #   cycles_100     the cycle counter reached 100   -- it is counting at all
+    #   cycles_1008    it reached 1008                -- the VISIBLE->HBLANK threshold
+    #   left_visible   the state machine left VISIBLE  -- transitions fire
+    # `DBG_gt` is {cycles>=1008, cycles>=100, gpustate!=VISIBLE, reset_released},
+    # so index 0 is the release, 1 is "left VISIBLE", 2 is 100 and 3 is 1008.  An
+    # earlier revision of this list read index 1 as `cycles_100` and index 2 as
+    # `cycles_1008` -- one rung low, and it silently relabelled two hardware
+    # readings before the ladder's own ordering exposed it.  The indices here are
+    # the packing in `gba_gpu_timing.v`; if that packing changes, this list is
+    # wrong and the map id changes with it, which is the only reason the mistake
+    # was catchable at all.
+    dict(name="gpu_released", width=1, value="st_gpu_step_sync[0]",
+         doc="the GPU timing generator saw its reset released at all"),
+    dict(name="left_visible", width=1, value="st_gpu_step_sync[1]",
+         doc="the GPU's state machine left VISIBLE at any point"),
+    dict(name="cycles_100", width=1, value="st_gpu_step_sync[2]",
+         doc="the GPU timing generator's cycle counter reached 100"),
+    dict(name="cycles_1008", width=1, value="st_gpu_step_sync[3]",
+         doc="the GPU timing generator's cycle counter reached 1008, the line length"),
+    # The counter reaching 100 but never 1008 is what a RESET that keeps coming
+    # back looks like: the counter restarts from zero often enough to pass 100 and
+    # never to finish a line.  `gbaon` is the loader's release, and it is what
+    # drives the GPU's reset, so a `gbaon` that falls again after rising would
+    # produce exactly the observed state.
+    dict(name="gbaon_fell", width=1, value="st_gbaon_fell",
+         doc="gbaon went low again after having gone high -- the release is not stable"),
 ]
 
 def map_id():

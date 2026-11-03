@@ -242,6 +242,9 @@ wire pixel_out_we /* verilator public */;
 // implicitly-created net in every build without that define.
 // (Note: a line beginning `// Verilator` is parsed as a pragma directive, so
 // that word is kept out of the start of a comment.)
+`ifdef TINYGBA_STATUS_TEST
+wire [3:0]  gpu_dbg;        // GPU timing generator internals, see gba_gpu_timing.v
+`endif
 wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
                             //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
                             //  flag, both set unconditionally on arrival.
@@ -465,6 +468,36 @@ always @(posedge clk67) begin
     end
 end
 
+// GPU timing generator internals, latched.  `gpu_dbg` is produced on clk50 (the
+// GPU's fclk) and is a level, not a pulse, but it is sampled here on every clk50
+// edge so the ladder survives however briefly a rung is true.
+// Did the loader's release stay released?  `gbaon` drives the GPU's reset, so a
+// `gbaon` that falls again after rising would restart the GPU's cycle counter
+// often enough that it passes 100 and never finishes a 1008-cycle line -- which
+// is precisely the ladder the board shows.  One flop remembers that it was high,
+// another latches the first time it goes back low.
+(* keep *) reg st_gbaon_high, st_gbaon_fell;
+always @(posedge clk16) begin
+    if (~resetn) begin
+        st_gbaon_high <= 1'b0;
+        st_gbaon_fell <= 1'b0;
+    end else begin
+        if (gbaon)              st_gbaon_high <= 1'b1;
+        else if (st_gbaon_high) st_gbaon_fell <= 1'b1;
+    end
+end
+
+(* keep *) reg [3:0] st_gpu_step;
+reg [3:0] st_gpu_step_sync;
+always @(posedge clk50) begin
+    if (~resetn) st_gpu_step <= 4'b0000;
+    else         st_gpu_step <= st_gpu_step | gpu_dbg;
+end
+always @(posedge clk16) begin
+    if (~resetn) st_gpu_step_sync <= 4'b0000;
+    else         st_gpu_step_sync <= st_gpu_step;
+end
+
 (* keep *) reg [1:0] st_alive_sync, st_mrfast_sync;
 always @(posedge clk16) begin
     if (~resetn) begin
@@ -584,6 +617,9 @@ gba_gpu #(.FCLK_SPEED(3)) gpu (
     .PALETTE_OAM_we(palette_oam_we), 
 
     .DISPSTAT_debug(dispstat_dbg)
+`ifdef TINYGBA_STATUS_TEST
+    , .DBG_gt(gpu_dbg)
+`endif
 );
 
 
