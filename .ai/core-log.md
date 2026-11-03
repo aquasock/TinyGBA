@@ -455,3 +455,39 @@ Run RetroRegen on the Tang, because it is now the sharpest instrument this proje
 - User Test: PASS
 
 ---
+
+## 14 COMMIT Unreleased 2026-11-02T19:28:00-07:00
+
+#### Coming From:
+
+Unreleased 4f679cd
+
+#### Purpose:
+
+Compile the real SDRAM controller into the Verilator model, so that what the simulation says about memory stops describing an array and starts describing the 534 lines of `sdram_gba.v` that run on the board.
+
+#### Outcome:
+
+The controller now loads a cartridge byte-perfectly and services the CPU at the same stall rate as the behavioural array, and getting there required finding two acknowledgement losses in the memory FSM that had never been visible because no bench had ever run the controller. The infrastructure cost four repairs before a single line of controller logic executed: the model and the controller both drive a tristate from a `reg`, which this simulator refuses and which is fixed by copying to a wire first; a `z`-valued register initialiser is the same construct and becomes `16'h0000` behind a `dq_oen` that is already high; the harness clock could not express the 4:3:1 relationship at all, since its six-step counter yielded only `clk16` and `clk50` and the controller needs `clk67` at exactly four times `clk16`; and the loader began writing before the controller had finished its 200 microsecond initialisation, 13,424 `clk67` cycles, so the first writes went into a part that was still programming its mode register. With those fixed the controller accepted exactly one request and then stopped, which is what led to the real finding. `sdram_gba` acknowledges a CPU request at its `cycle[3]` slot, three `clk67` after the slot counter is re-seeded by a `clk16` edge, and holds `cpu_ready` for exactly one `clk16` period. Because the slot always falls inside the `clk16` period that issued the request, the acknowledgement is visible on the very next `clk16` edge and on no other -- measured, and invariant across all twelve relative phases of the two clocks, which was checked by sweeping them rather than argued. The ROM path reaches `REQ1_WAIT` on that edge and works. The loader's `REQ1_START` and the second request's `REQ2_START` each add one `clk16` hop, so their first `REQ1_WAIT`/`REQ2_WAIT` sample lands one edge after the window has closed and they wait forever; a counter in the consuming FSM confirmed `sdram_ready` was never sampled high in any wait state. Why this was never seen is the part worth carrying forward: `sdram_sim.v` runs on `clk16` and acknowledges a request two `clk16` after it, one cycle later than the controller does, so the FSM's extra hop was free against the array and is fatal against the real part. The array was not a weaker version of the controller; it was a different timing contract. Three edits restore it, each marked `TinyGBA:` -- the loader goes straight to `REQ1_WAIT` as the ROM path does, `REQ2_START` consumes the acknowledgement and falls back to `REQ2_WAIT` for the 32-bit case that acknowledges a cycle later, and `cpu_en`'s concurrent rom+ram term is widened to `REQ2_START` because it would otherwise read low through the acknowledgement it was just taught to accept; the first attempt at the second edit omitted that third and stalled the CPU instead, which is worth recording as the reason the three travel together. Measured after: the loader writes all 4,096 bytes of the test cartridge and a dump of the memory die matches the file halfword for halfword, `ldrWrites` wrapping to exactly zero being 16 times 256 and therefore itself evidence the load completed; the memory FSM stops stalling, and on RetroRegen the controller build reports 2.5 percent CPU stall against the array's 2.5 percent over the same run; boot reaches the built-in BIOS splash and animates through it. What is not established, and must not be read into the above: the cartridge's own code has not been seen to execute under the controller. The run reaches frame 500 with no instruction fetch from `0x08000000` while the controller's request counters freeze, the picture stops on the BIOS logo, and the array build on the same ROM has already drawn RetroRegen's own splash by frame 100. Two candidate causes remain and neither is excluded: the cartridge read path returning data the CPU does not accept, which is unverified in a way the write path is not, or the BIOS choosing not to hand off. Both are reachable with the instruments now in the tree. One earlier conclusion was withdrawn during this cycle: a screen that does not change is not evidence of a hang, and equal frame hashes across samples were twice explained by static-by-design content before the request counters showed which runs were actually idle. Nothing was deployed.
+
+#### Next Steps:
+
+Localise the divergence to the read path before touching anything else, because the write path is proven and the read path is not: dump the first cartridge reads the BIOS performs, address and sampled `dq_in` at the controller's collect point, and compare them against the same offsets in the ROM file, which distinguishes a wrong word from a right word at the wrong time. If the words are right, the fault is timing or handoff and not data, and the next instrument is the CPU's view: whether `cpu_en` and the read data are presented on the cycles the ARM7TDMI samples them, which the array model's one-cycle-later acknowledgement hides. Do not conclude anything about cartridge execution from a run that has not reached at least frame 500, and treat the request counters rather than the picture as the evidence for whether the machine is idle. Once the read path is settled, re-run RetroRegen on the controller and require the same ten facts entry 13 obtained from the array -- CPU identity, BIOS checksum, per-region bus timing and `ALL REGIONS PASS` -- because a memory test that passes through a real controller is the first result in this project that speaks about the board's memory rather than a model of it. The `sdram_model.v` used here is the sibling project's part and models no refresh, no timing violations and not the second die's physical timing, so even a perfect run bounds logic and sequencing only. One known latent defect is deliberately left alone: the DMA path still enters `REQ1_START` and will lose its acknowledgement the same way the loader did, and nothing has exercised DMA yet.
+
+#### Files Modified:
+
+- fpga/gba/diag/gba_sdram_rtl.v
+- fpga/gba/diag/sdram_model.v
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/memory/sdram_gba.v
+- tools/sim/build_gba_sim.sh
+- tools/sim/sim_main.cpp
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: PENDING
+
+---

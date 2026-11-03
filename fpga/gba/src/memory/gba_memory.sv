@@ -131,6 +131,15 @@ module gba_memory (
     // model exhibits, since an undriven wire is 0 there.
     output              gb_bus_rst,
 
+`ifdef TINYGBA_SDRAM_DEBUG
+    // TinyGBA: observation-only outputs for the simulation.  Compiled only under
+    // TINYGBA_SDRAM_DEBUG, which no synthesised build defines, so the shipped
+    // design is byte-identical with and without them.
+    output      [2:0]   dbg_state,
+    output      [7:0]   dbg_loader_writes,
+    output              dbg_loader_writing,
+`endif
+
     // SDRAM interface
 	output reg [1:0]    sdram_port,           
     output reg [25:2]   sdram_addr,
@@ -357,6 +366,47 @@ always @* begin
     end
 end
 
+`ifdef TINYGBA_SDRAM_DEBUG
+// Count loader bytes handed to the SDRAM, and expose the FSM state, so the
+// simulation can tell "the loader stopped feeding" from "the controller stopped
+// answering" without guessing.
+reg [7:0] dbg_loader_writes_r;
+always @(posedge clk)
+    if (~resetn) dbg_loader_writes_r <= 8'd0;
+    else if (state == MAIN & bram_port == PORT_NONE &
+             (loading == 2'd1 | loading == 2'd2) & loader_writing)
+        dbg_loader_writes_r <= dbg_loader_writes_r + 8'd1;
+// Stall detector.  `sdram_ready` is a single-clk16 pulse, so a wait state that
+// arrives at it one cycle late never sees it and hangs.  Counting the stalls and
+// printing the sampled level says which state and which level, without inference.
+reg [7:0] dbg_stall_r;
+reg [7:0] dbg_ready_seen_r;
+always @(posedge clk) begin
+    if (~resetn) begin
+        dbg_stall_r      <= 8'd0;
+        dbg_ready_seen_r <= 8'd0;
+    end else if (state == REQ2_WAIT | state == REQ1_WAIT | state == REQ1_START) begin
+        dbg_stall_r <= dbg_stall_r + 8'd1;
+        if (sdram_ready) dbg_ready_seen_r <= dbg_ready_seen_r + 8'd1;
+    end else
+        dbg_stall_r <= 8'd0;
+end
+
+// Periodic snapshot of the inputs that decide `cpu_en`.  The stall figure alone
+// cannot say whether the CPU is waiting on SDRAM or whether `cpu_en` is being
+// forced low by the DMA term, so print the decode inputs instead of guessing.
+integer dbg_snap = 0;
+always @(posedge clk) begin
+    dbg_snap <= dbg_snap + 1;
+    if (dbg_snap % 100000 == 0)
+        $display("memsnap: state=%0d cpu_en=%b dma_on=%b rom_en=%b ram_cen=%b rom_addr=%h ram_addr=%h ready=%b",
+                 state, cpu_en, dma_on, rom_en, ram_cen, rom_addr, ram_addr, sdram_ready);
+end
+assign dbg_state          = state;
+assign dbg_loader_writes  = dbg_loader_writes_r;
+assign dbg_loader_writing = loader_writing;
+`endif
+
 // the state machine
 always @(posedge clk) begin
     reg [1:0] port;
@@ -470,7 +520,20 @@ always @(posedge clk) begin
                     sdram_wdata_buf <= {4{loader_d}};
                     sdram_be_buf <= 4'b1 << loader_addr[1:0];
                     sdram_port_buf <= PORT_RAM;
-                    state <= REQ1_START;
+                    // TinyGBA: upstream hops through `REQ1_START` here.  That is one
+                    // clk16 too many.  `sdram_gba` acknowledges a request at its
+                    // `cycle[3]` slot and holds `cpu_ready` for exactly one clk16
+                    // period; the slot always falls inside the clk16 period that
+                    // issued the request, so the acknowledgement is visible on the
+                    // very next clk16 edge and on no other.  The ROM/RAM path above
+                    // reaches `REQ1_WAIT` on that edge; the loader's extra state
+                    // arrives one edge late, after the window has closed, and waits
+                    // forever.  Measured: the FSM enters `REQ1_WAIT` on the edge
+                    // where `cpu_ready` falls, and `sdram_ready` is never sampled
+                    // high in any wait state.  `cpu_en` for the loader needs no
+                    // change because it is `sdram_ready` in both `REQ1_WAIT` and
+                    // `REQ1_START`.  See core-log entry 14.
+                    state <= REQ1_WAIT;
                 end
             end
 
@@ -480,7 +543,14 @@ always @(posedge clk) begin
 
         REQ2_BRAM:  state <= MAIN;
 
-        REQ2_START: state <= REQ2_WAIT;
+        REQ2_START:
+            // TinyGBA: same defect, same cause.  Upstream always hops to
+            // `REQ2_WAIT`, which is one clk16 after the edge that can see the
+            // acknowledgement, so a RAM access whose second request is a halfword
+            // or byte hangs here forever.  A 32-bit second request acknowledges one
+            // clk16 later instead and is caught by `REQ2_WAIT` below, so both arms
+            // are needed.  `cpu_en`'s concurrent rom+ram term is widened to match.
+            state <= sdram_ready ? MAIN : REQ2_WAIT;
         
         REQ2_WAIT: 
             if (sdram_ready) 
@@ -509,7 +579,11 @@ always @* begin
             else
                 cpu_en = sdram_ready; 
         default:                // both rom and ram
-            cpu_en = state == REQ2_BRAM | state == REQ2_WAIT & sdram_ready;
+            // TinyGBA: upstream tests only `REQ2_WAIT` here, so with the fix above
+            // a concurrent rom+ram access would leave `cpu_en` low through the
+            // `REQ2_START` acknowledgement and stall the CPU instead.
+            cpu_en = state == REQ2_BRAM |
+                     (state == REQ2_START | state == REQ2_WAIT) & sdram_ready;
     endcase
 
     dma_done = 0;

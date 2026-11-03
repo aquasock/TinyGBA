@@ -79,6 +79,8 @@ module gbatang_top (
 `else           // Ports for Verilator
     input clk16,
     input clk50,
+    input clk67,        // 4x clk16, used only when TINYGBA_SDRAM_RTL simulates
+                        // the real controller; sdram_sim needs no such clock
     input [11:0] joy_btns,
     output gba_on,
 
@@ -547,6 +549,11 @@ gba_sound sound (
 ////////////////////////////
 
 // cpu sdram memory interface
+`ifdef TINYGBA_SDRAM_DEBUG
+wire [2:0] mem_dbg_state;
+wire [7:0] mem_dbg_lw;
+wire       mem_dbg_lwr;
+`endif
 wire [25:2] cpu_mem_addr;
 wire [31:0] cpu_mem_wdata;
 wire [31:0] cpu_mem_rdata [1:3];
@@ -628,6 +635,9 @@ gba_memory mem (
     .vram_lo_we(vram_lo_we), .vram_lo_be(vram_lo_be), 
     .vram_hi_addr(vram_hi_addr), .vram_hi_din(vram_hi_din), .vram_hi_dout(vram_hi_dout), 
     .vram_hi_we(vram_hi_we), .vram_hi_be(vram_hi_be), 
+`ifdef TINYGBA_SDRAM_DEBUG
+	.dbg_state(mem_dbg_state), .dbg_loader_writes(mem_dbg_lw), .dbg_loader_writing(mem_dbg_lwr),
+`endif
     .gb_bus_din(gb_bus_din), .gb_bus_dout(gb_bus_dout), .gb_bus_adr(gb_bus_adr),
     .gb_bus_rnw(gb_bus_rnw), .gb_bus_ena(gb_bus_ena), .gb_bus_done(gb_bus_done),
     .gb_bus_acc(gb_bus_acc), .gb_bus_be(gb_bus_be), .gb_bus_rst(gb_bus_rst), 
@@ -662,6 +672,30 @@ sdram_gba sdram (
 
 `else
 
+// TinyGBA: under TINYGBA_SDRAM_RTL, simulate the REAL controller against a
+// pin-level part instead of the behavioural array.  `sdram_sim` answers
+// correctly and instantly, so it can never reproduce a controller fault -- the
+// same blind spot the sibling SNES project records when its GSU's memory reads
+// only worked while the other master happened to be reading.  The define exists
+// only in the simulation build; synthesis always takes the `ifndef VERILATOR`
+// branch above and is unaffected.
+`ifdef TINYGBA_SDRAM_RTL
+gba_sdram_rtl sdram (
+	.SDRAM_DQ(), .SDRAM_A(), .SDRAM_DQM(), .SDRAM_BA(),
+	.SDRAM_nCS(), .SDRAM_nWE(), .SDRAM_nRAS(), .SDRAM_nCAS(),
+	.clk(clk67), .mclk(clk16), .resetn(resetn),
+	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata),
+	.cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
+	.cpu_ready(cpu_mem_ready), .cpu_port(cpu_mem_port),
+	.config_backup_type(config_backup_type), .backup_written(backup_written),
+	.rv_dout(), .rv_req_ack(), .total_refresh(), .busy(),
+`ifdef TINYGBA_SDRAM_DEBUG
+	.dbg_mem_state(mem_dbg_state), .dbg_loader_writes(mem_dbg_lw),
+	.dbg_loader_writing(mem_dbg_lwr),
+`endif
+	.clk67_unused()
+);
+`else
 // model for cpu to work under verilator
 sdram_sim sdram (
 	.clk(clk16),
@@ -670,6 +704,7 @@ sdram_sim sdram (
     .cpu_ready(cpu_mem_ready), .cpu_port(cpu_mem_port), 
     .config_backup_type(config_backup_type)
 );
+`endif   // TINYGBA_SDRAM_RTL
 
 `endif
 

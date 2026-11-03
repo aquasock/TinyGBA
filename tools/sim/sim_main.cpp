@@ -136,12 +136,44 @@ void trace_off();
 static bool posedge;
 static int clk16_last;
 
+// Phase of clk16 relative to clk67, in simulation steps (3 steps = one clk67
+// period).  This is a real degree of freedom, not a knob for taste.  `sdram_gba`
+// acknowledges a CPU request at its `cycle[3]` slot, three clk67 after the slot
+// counter is re-seeded by a clk16 edge, and holds `cpu_ready` for exactly one
+// clk16 period.  Where that window lands relative to the clk16 edge that consumes
+// it therefore depends on which clk67 edge carries the clk16 rising edge.  With
+// both clocks rising in the same evaluation the window falls one cycle earlier
+// than the memory FSM expects and every `*_START` state absorbs it; on the board
+// the PLL does not put them in the same instant.  TINYGBA_CLK16_SHIFT picks the
+// phase so that can be measured rather than assumed.
+static int clk16_shift = -1;
+
+static int clk16_shift_get()
+{
+	if (clk16_shift < 0) {
+		const char *e = getenv("TINYGBA_CLK16_SHIFT");
+		clk16_shift = e ? atoi(e) : 0;
+		clk16_shift = ((clk16_shift % 12) + 12) % 12;
+	}
+	return clk16_shift;
+}
+
+static inline int clk16_level(int cnt)
+{
+	return (((cnt + clk16_shift_get()) % 12) < 6) ? 1 : 0;
+}
+
 static void loading_step()
 {
 	Vgbatang_top_gbatang_top *gba = top->gbatang_top;
-	clkcnt = clkcnt == 5 ? 0 : clkcnt + 1;
-	top->clk50 = clkcnt & 1;
-	top->clk16 = clkcnt >= 3;
+	// A 12-step cycle keeps all three clocks integer: clk16 period 12 steps,
+	// clk50 period 4 (3x), clk67 period 3 (4x).  The previous 6-step counter
+	// could only express clk16 and clk50, and the real SDRAM controller needs
+	// clk67 at exactly four times clk16.
+	clkcnt = clkcnt == 11 ? 0 : clkcnt + 1;
+	top->clk50 = (clkcnt & 3) < 2;
+	top->clk16 = clk16_level(clkcnt);
+	top->clk67 = (clkcnt % 3) < 1;
 	top->eval();
 	if (trace_toggle && trace_loading) {
 		m_trace->dump(sim_time);
@@ -175,6 +207,19 @@ void gba_load(uint8_t *rom, int size, int backup_type)
 
 	while (sim_time < 10 || !posedge)
 		loading_step();
+
+	// The real SDRAM controller holds `busy` for 200 us after reset while it
+	// precharges, refreshes and programs the mode register -- 13,424 clk67
+	// cycles, or 3,356 clk16 cycles at the 4:1 ratio.  The behavioural
+	// `sdram_sim` array has no such period, so the loader could start at cycle
+	// 36 and the array answered anyway.  Against the real controller those
+	// writes land while it is still in initialisation and are lost, and the
+	// memory state machine then waits forever for a ready that cannot come.
+	// On the board this never bites because the BL616 streams the cartridge over
+	// a 2 Mbaud UART, so 200 us has long passed before the first byte arrives.
+	// Wait it out here so the model matches what the hardware does implicitly.
+	for (int i = 0; i < 4200; i++)
+		do loading_step(); while (!posedge);
 
 	top->loading = 1; // reset GBA and start loading ROM
 	loading_step();
@@ -510,9 +555,10 @@ int main(int argc, char **argv, char **env)
 			// if (sim_time == 3 * 1000 * 1000)
 			// 	// top->joy_btns = 1 << 11;	// right shoulder button is on
 			// 	top->joy_btns = 1 << 10; // left shoulder button is on
-			clkcnt = clkcnt == 5 ? 0 : clkcnt + 1;
-			top->clk50 = clkcnt & 1;
-			top->clk16 = clkcnt >= 3;
+			clkcnt = clkcnt == 11 ? 0 : clkcnt + 1;
+			top->clk50 = (clkcnt & 3) < 2;
+			top->clk16 = clk16_level(clkcnt);
+			top->clk67 = (clkcnt % 3) < 1;
 			top->eval();
 			posedge = (top->clk16 == 1 && clk16_last == 0);
 			clk16_last = top->clk16;

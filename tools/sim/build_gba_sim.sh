@@ -7,6 +7,12 @@
 #   tools/sim/build_gba_sim.sh run ROM.gba    # run with SDL window
 #   tools/sim/build_gba_sim.sh run ROM.gba -s 60000000
 #
+#   TINYGBA_SIM_DEFINES=-DTINYGBA_SDRAM_RTL   simulate the real SDRAM controller
+#                                  against a pin-level part instead of the
+#                                  behavioural array (see fpga/gba/diag/
+#                                  gba_sdram_rtl.v).  Slower, and the only way
+#                                  to exercise the controller at all.
+#
 # Why this exists.  Every hardware result this project has produced came from a
 # 16-bit strip on a capture card, one word per flash cycle, with no reference to
 # compare against -- the sibling SNES project reached exactly that impasse and
@@ -59,6 +65,11 @@ srcs=(
     "$d/memory/gba_eeprom.sv"
     "$d/memory/mem_eeprom.v"
     "$d/memory/sdram_sim.v"
+    # The real controller and its pin-level model, for TINYGBA_SDRAM_RTL builds.
+    # Compiled always; selected at elaboration by the define in gbatang_top.sv.
+    "$d/memory/sdram_gba.v"
+    "$root/fpga/gba/diag/gba_sdram_rtl.v"
+    "$root/fpga/gba/diag/sdram_model.v"
     "$d/gpu/gba_drawer_merge.v"
     "$d/gpu/gba_drawer_mode0.v"
     "$d/gpu/gba_drawer_mode2.v"
@@ -101,6 +112,7 @@ build)
     verilator --top-module "$top" --trace-fst \
         -Wno-WIDTH -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
         -Wno-LATCH -Wno-IMPLICIT -Wno-REDEFMACRO \
+        ${TINYGBA_SIM_DEFINES:-} \
         --cc --exe \
         -CFLAGS "$(sdl2-config --cflags) -O2" \
         -LDFLAGS "$(sdl2-config --libs)" \

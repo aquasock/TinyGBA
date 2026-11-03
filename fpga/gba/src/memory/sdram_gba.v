@@ -107,7 +107,11 @@ module sdram_gba
 // Tri-state DQ input/output
 reg dq_oen;        // 0 means output
 reg [15:0] dq_out;
-assign SDRAM_DQ = dq_oen ? {16{1'bz}} : dq_out;
+// TinyGBA: driven from a wire, not from the register directly; Verilator refuses
+// a tristate whose data term is a reg assigned in an always block.  See
+// fpga/gba/diag/sdram_model.v for the same change and the measurement.
+wire [15:0] dq_out_w = dq_out;
+assign SDRAM_DQ = dq_oen ? {16{1'bz}} : dq_out_w;
 wire [15:0] dq_in = SDRAM_DQ;     // DQ input
 reg [3:0] cmd;
 reg [12:0] a;

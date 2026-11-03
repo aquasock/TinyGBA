@@ -87,9 +87,20 @@ module snes_sdram_model #(
     integer    k;
 
     // ------------------------------------------------------------- DQ tri-state
-    reg  [15:0] dq_out = 16'hzzzz;
+    // TinyGBA: zero, not z.  A z-valued initialiser on a reg is the construct
+    // this simulator refuses, and dq_oen gates the bus anyway so the register's
+    // idle value is unobservable.  (A comment line must not begin with the
+    // simulator's name: that is parsed as a pragma directive.)
+    reg  [15:0] dq_out = 16'h0000;
     reg         dq_oen = 1'b1;          // 1 = high-Z
-    assign SDRAM_DQ = dq_oen ? 16'hzzzz : dq_out;
+    // TinyGBA: the tristate is driven from a wire rather than from the register
+    // directly.  Verilator refuses a tristate whose data term is a `reg` assigned
+    // in an always block -- "Unsupported tristate construct (not in propagation
+    // graph): VARREF 'dq_out'" -- and accepts the identical logic once the reg is
+    // copied to a wire first.  Same behaviour, and it is what lets this model be
+    // compiled into the simulation at all.
+    wire [15:0] dq_out_w = dq_out;
+    assign SDRAM_DQ = dq_oen ? 16'hzzzz : dq_out_w;
     wire [15:0] dq_in = SDRAM_DQ;
 
     integer w;
@@ -194,9 +205,19 @@ module snes_sdram_model #(
 
         // Separate the data register from the enable so the value does not have
         // to survive in rd_pipe until the enable is withdrawn.
+        //
+        // TinyGBA: driven as a whole word rather than per byte.  The original
+        // built dq_out from `{dqm ? 8'hzz : hi, dqm ? 8'hzz : lo}`, which is a
+        // concatenation mixing data and high-impedance; Verilator rejects that
+        // outright ("Unsupported tristate construct ... CONCAT"), so the model
+        // could not be compiled into the simulation at all.  The difference is
+        // unobservable for this controller: it issues every read with
+        // `SDRAM_DQM <= 2'b00`, so no byte lane is ever masked on a read, and
+        // DQM still gates writes exactly as before.  A partial-DQM read -- which
+        // nothing in this design performs -- would now return both bytes instead
+        // of one byte and one high-impedance lane.
         if (cas_latency >= 3'd1 && cas_latency <= 3'd4 && rd_valid_pipe[cas_latency-1]) begin
-            dq_out <= {dqm_pipe[cas_latency-1][1] ? 8'hzz : rd_pipe[cas_latency-1][15:8],
-                       dqm_pipe[cas_latency-1][0] ? 8'hzz : rd_pipe[cas_latency-1][7:0]};
+            dq_out <= rd_pipe[cas_latency-1];
         end
     end
 
