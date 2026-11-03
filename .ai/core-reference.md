@@ -325,4 +325,18 @@ Field meanings:
     - "This repository, `tools/sim/build_gba_sim.sh`: the simulated source list, which carries `sdram_sim.v` and not `sdram_gba.v`"
   verification: "Observed 2026-11-02 in the Verilator model, driven interactively by the operator through the SDL window, with frames dumped to `qd_frame*.ppm` and the two verdict screens read directly."
 
+- record_id: BRD-012
+  kind: BOARD
+  topic_id: BRD
+  title: "The capture card returns solid black at 1280x720 whatever the board is doing"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "Opening the Guermok/MACROSILICON USB3 capture device with ffmpeg and no format pinned makes it negotiate a 1280x720 mode that delivers a frame of uniform `(0,0,0)` regardless of what the Tang is driving. Loaded with `build/c6_machine_ok/tinygba.fs`, an image core-log entry 8 records as drawing a black field flanked by grey pillarbox bars, such a grab reported exactly one colour across all 921,600 pixels and one run on its middle row. The same board, captured as MJPEG at 1920x1080, reported 14 colours with grey `(43,43,43)` at x=0..148 and x=1770..1919 and a 1,616-pixel black window between them -- the picture entry 8 describes. The device advertises yuyv422, mjpeg, bgr24 and nv12 at ten resolutions including both of these, so the wrong mode is reachable by default rather than being a malformed request."
+  consequence: "A black frame from this card is not evidence about the board unless the format is pinned, and the failure is silent: it produces a plausible-looking all-black image rather than an error, so it reads exactly like a machine that draws nothing. Every conclusion drawn from an unpinned single-frame grab is void. `TINYGBA_OVERLAY_OFF` images must be captured as `-f v4l2 -input_format mjpeg -video_size 1920x1080`, and a reading must state the negotiated size and the colour histogram beside the picture, because `1920x1080` and black-at-1080p versus black-at-720p is the difference between a measurement and an artefact. Two of this cycle's own readings were taken through the unpinned path before the control was run; both are discarded."
+  sources:
+    - "This repository, `build/c6_machine_ok/tinygba.fs` and the picture core-log entry 8 records for it"
+    - "`ffmpeg -f v4l2 -list_formats all -i /dev/video0`: the mode list the device advertises"
+    - "Board capture 2026-11-02, 1920x1080 MJPEG, grey=321840 black=1749600, identical for `build/c6_machine_ok` and `build/tang_ctrl`"
+  verification: "Measured 2026-11-02 by loading the recorded-good `build/c6_machine_ok` image, capturing it both ways, and comparing colour histograms and middle-row run boundaries. The 1280x720 grab was uniformly black; the 1920x1080 MJPEG grab showed the grey pillarbox the project's own records predict."
+
 ---
