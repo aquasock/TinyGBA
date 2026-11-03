@@ -259,9 +259,19 @@ module gba_gpu_timing(fclk, mclk, reset, lockspeed, gb_bus_din, gb_bus_dout, gb_
                             end
                         end 
                 endcase
-            end 
 
-            cycles_reg <= cycles;
+                // TinyGBA: this assignment used to sit after the if/else, which
+                // made the reset branch's `cycles_reg <= 0` dead code -- the last
+                // non-blocking assignment in a time step wins, so the zero was
+                // overwritten by this one and the cycle counter survived reset.
+                // Measured 2026-11-03 in a Verilator model: assert reset at
+                // cycles_reg=206 and it stays 206.  With the counter never
+                // cleared, a generator held in reset still reports
+                // `cycles_100=1` while `gpustate` is pinned to VISIBLE, which is
+                // exactly the board's reading.  Keeping it inside the non-reset
+                // branch lets reset actually clear the counter.
+                cycles_reg <= cycles;
+            end 
         end 
 
 endmodule

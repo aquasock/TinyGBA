@@ -622,3 +622,34 @@ Rebuild `build/tang_gb` from the current tree (synthesis is cached and the netli
 - User Test: FAIL (black screen, grey pillarbox, HDMI synced)
 
 ---
+
+## 19 COMMIT Unreleased 2026-11-03T13:00:32-07:00
+
+#### Coming From:
+
+Unreleased 67e60ad
+
+#### Purpose:
+
+Settle whether the board's frozen GPU raster comes from a metastable loader release or from a defect inside the timing generator, by simulating the generator directly and then putting the best-supported configuration on the board.
+
+#### Outcome:
+
+The generator's reset was genuinely broken, fixing it produced the best timing this port has ever recorded, and the board still draws nothing -- and the cycle's durable results are that defect, a negative result about clock phase, and the first simulation of a BIOS screen in this project's history. The defect is in `gba_gpu_timing.v`: the reset branch sets `cycles_reg <= 0`, but the same always block ends with an unconditional `cycles_reg <= cycles;` where `cycles` was loaded from the pre-edge value, and in Verilog the last non-blocking assignment in a time step wins, so the zero was destroyed and the counter survived reset. Measured in a standalone Verilator model of the module: assert reset at `cycles_reg` 206 and it stays 206. Moving that assignment inside the non-reset branch makes reset do what it says (206 to 0) and leaves frame generation untouched (2 VBlanks in 40 ms, linecounter sweeping 0 to 227, 405 lines). The consequence is larger than the bug: all five seeds of the corrected design now pass `clk67` at 154.012 to 163.747 MHz against a 67.002 MHz constraint with no multicycle relaxation at all, where every earlier build needed the documented four-cycle readback allowance to scrape past at 31 to 36 MHz, so the dead assignment had been masking the real critical path from `cpu_mem_rdata` into `sdram.*`. Two things were established with the Verilator harness rather than the board. Built with the operator's official BIOS and the logo-bearing test cartridge, the model renders the BIOS boot screen -- 240x160, 22 colours, a white `(252,252,252)` field with the logo lettering -- which is the first time this project has reproduced that picture anywhere; and because the harness draws its screenbuffer straight from `pixel_out_we`, `pixel_out_x/y` and `pixel_out_data`, and because `video.mem_portA_we` traces through `mem_portA_we_DFF_Q` to `gpu.igba_gpu_colorshade.pixel_out_we` in the routed netlist, both the GPU's pixel stream and its handoff into the framebuffer are sound. A phase sweep then refuted entry 10's leading candidate outright: with `clk50` and `clk16` at 3:1 and the `clk16` edge moved across twelve offsets from 0 to 55 ns, the raster completed two frames at every one, so the difference between the model's single counter and the board's two PLLs does not matter. Three mechanisms were proposed and withdrawn in the course of this. The first was that `gbaon` was toggling, which the probe had already refuted by reading `gpu_released=1` in the failing state; the sticky release built on it was reverted rather than carried. The second was `TINYGBA_GBAON_ALWAYS`, which ties the release high and failed on hardware because it starts the machine before the loader has written the cartridge, an ordering the model does not have. The third was re-examining the OSD, which is absent from the netlist by construction: zero nets matching overlay, menu, textdisp or cursor. The deployed image was `build/rf_4/tinygba.fs`, SHA-256 `752d933ee7bfa62410f954f5c0e19143650fe7e8a805f2d1051f9aaf3ff9ad19`, built at seed 4 and flashed one-wire, and the operator reports the same picture as every previous attempt: black centre with the grey pillarbox, HDMI synced. One operational fact cost time and is recorded so it does not again: three separate USB disappearances this session, twice taking the FT2232 and both serial ports and once producing a `TinyTang CDC` device instead, were all the console sitting in two-wire mode rather than a cable or driver fault, and the board flashes normally once it is returned to one-wire. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 18 were not rewritten, and validated this entry as entry 19 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of nineteen against the 100-entry limit.
+
+#### Next Steps:
+
+Add `gba2hdmi` to the Verilator build, because the model and the board now agree about everything the model contains and disagree only on the picture, and the one block the model does not compile is the framebuffer, the scaler and the TMDS path -- compiling it turns the last untested link into something a simulation can fail. The question to answer first is whether the GPU still produces a pixel stream once the model carries the framebuffer, and the second is what `x/y` coordinates those pixels land on, since a stream writing outside `pixel_y * 240 + pixel_x` would leave the frame empty while looking perfect upstream. Do not re-derive what this cycle settled: the reset assignment defect, the phase-independence result, the BIOS render in the model, and the absence of the OSD from the netlist are all measured and recorded. Treat the two-way split honestly -- the board has still never been shown to write the framebuffer, so a build that holds the GPU in reset while driving `mem_portA` from a known pattern would separate "no pixels are generated" from "pixels are generated and not displayed" in one flash, and that is the cheaper experiment if the simulation path stalls. Keep `TINYGBA_GBAON_ALWAYS` in the tree as a documented diagnostic even though it failed here, because it isolates the loader from the machine and will be wanted again once the picture works; do not enable it expecting a picture.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gpu/gba_gpu_timing.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---

@@ -368,3 +368,45 @@ Field meanings:
   verification: "Observed on the board 2026-11-03 by flashing with `openFPGALoader -b tangconsole`, streaming `build/test/test.gba` with `tools/load_gba_rom.py --uart /dev/ttyUSB1`, and decoding MJPEG captures pinned at 1920x1080. The bad state was caught in two independent builds with different maps."
 
 ---
+
+- record_id: TCL-012
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A non-blocking assignment after an if/else silently destroys the branch's value, and no tool reports it"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "`gba_gpu_timing.v` cleared its cycle counter with `if (reset) begin ... cycles_reg <= 0; ... end else begin ... end` followed, outside the branch, by an unconditional `cycles_reg <= cycles;` where `cycles` had been loaded from the pre-edge value of `cycles_reg` at the top of the same always block. In Verilog the last non-blocking assignment scheduled in a time step wins, so the reset branch's zero was overwritten and the counter kept its old value. Measured in a standalone Verilator model of the module: with the raster running at `cycles_reg` 206, asserting reset and holding it for 2.5 us left `cycles_reg` at 206. Moving the assignment inside the non-reset branch makes reset clear the counter (206 to 0) with no change to frame generation, which still produced 2 VBlanks in 40 ms, 405 lines and a linecounter sweep of 0 to 227. Neither slang nor yosys nor nextpnr reports this construct; it elaborates, synthesises, passes every gate this project has, and behaves differently from what the source appears to say."
+  consequence: "A reset that appears to clear a register may not, and the only reliable way to know is to assert reset in a model and read the register back rather than to read the branch. On this design the surviving counter is what made the GPU read `gpu_released=1`, `left_visible=0`, `cycles_100=1`: a state machine pinned to VISIBLE with a counter above 100 that never advances. The second-order effect was timing -- removing the dead assignment moved `clk67`'s worst path away from the SDRAM cone and all five seeds then passed at 154 to 164 MHz against 67.002 with no multicycle relaxation, where every earlier build had needed the four-cycle readback allowance to pass at 31 to 36 MHz. Treat a large unexplained timing improvement as evidence that dead logic was removed, not as a sign that the change was neutral."
+  sources:
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_timing.v` before and after, and the `if (reset)` branch against the unconditional assignment at the end of the same always block"
+    - "Standalone benches at /tmp/gt_cycle, 2026-11-03: `tb_gt_resetclear.sv` (assert reset at a known counter value and read it back) and `tb_gt_frames.sv` (frame completion under a static release)"
+    - "This repository, `build/rf_1` through `build/rf_6/timing-gate.log`: five seeds, `clk67` 154.012 to 163.747 MHz, no relaxation"
+  verification: "Measured 2026-11-03 in Verilator 5.032: the pre-fix module left `cycles_reg` at 206 through a held reset, the post-fix module returned it to 0, and the frame bench reported identical frame counts before and after. Confirmed at scale in five separate place-and-route runs."
+
+- record_id: BRD-015
+  kind: BOARD
+  topic_id: BRD
+  title: "The Tang in two-wire mode has no FT2232 and cannot be flashed; it enumerates as a TinyTang CDC device"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "When the Tang Console is switched to two-wire mode its FT2232 is not present on USB. `lsusb` shows no `0403:6010`, `/dev/ttyUSB0` and `/dev/ttyUSB1` do not exist, and `openFPGALoader -b tangconsole` fails with `unable to open ftdi device: -3 (device not found)` because that board definition selects the ft2232 cable. In one instance the console instead enumerated as `ffff:5454 TinyTang CDC` and presented a single `/dev/ttyACM0`. Three separate disappearances during one session were all this mode switch and none was a cable, driver, hub or kernel fault; each cleared as soon as the console was returned to one-wire, at which point `0403:6010` reappeared and the same image flashed normally."
+  consequence: "A board that vanishes from USB mid-session is a mode switch until proven otherwise, and the check is `lsusb | grep 0403:6010` rather than any driver investigation. The symptom is worth recognising because it arrives as a plain load failure after earlier loads in the same session succeeded, which reads like a hardware or cable fault. Nothing in this project needs the two-wire path: every image on record was deployed one-wire with `openFPGALoader -b tangconsole`."
+  sources:
+    - "This repository, session transcript 2026-11-03: `lsusb`, `/dev/ttyUSB*` and `openFPGALoader` output before and after the operator returned the console to one-wire mode"
+    - "`openFPGALoader --list-boards`: `tangconsole` is bound to the `ft2232` cable"
+  verification: "Observed 2026-11-03 three times in one session: FT2232 absent and the load refused each time, FT2232 present and `Done`/`DONE` each time after the operator switched back."
+
+- record_id: BRD-016
+  kind: BOARD
+  topic_id: BRD
+  title: "The model renders the BIOS screen and the board does not, and the block the model omits is the framebuffer and scaler"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "Built with the operator's official GBA BIOS (`TINYGBA_BIOS_HEX`) and driven with the logo-bearing test cartridge, the Verilator model renders the BIOS boot screen: a 240x160 frame of 22 distinct colours, dominated by a `(252,252,252)` white field with the logo lettering. It also reports the boot path in numbers -- 33,333,333 `clk16` cycles after `gba_on`, 2.0 percent of cycles stalled with `cpu_en` low, 75.5 percent halted, `rom_en` asserted 18.0 percent, data regions 0x00000000 through 0x0C000000 all touched -- and it never fetches from the cartridge, which on this 4 KiB image is the same behaviour the board shows. The harness builds its screenbuffer directly from `pixel_out_we`, `pixel_out_x`, `pixel_out_y` and `pixel_out_data`, so the GPU's pixel stream is real; and in the routed netlist `video.mem_portA_we` traces through `mem_portA_we_DFF_Q` to `gpu.igba_gpu_colorshade.pixel_out_we`, so the handoff into the framebuffer is wired. What the model does not compile at all is `gba2hdmi`: the framebuffer array, the 4.5x scaler and the TMDS serialiser path are absent from `tools/sim/build_gba_sim.sh`'s source list. The board, running the same BIOS and cartridge, draws a black centre with the grey pillarbox and a synced HDMI signal. A phase sweep also cleared the two-PLL-versus-one-counter difference that entry 10 named as the leading candidate: with `clk50` and `clk16` at 3:1 and the `clk16` edge swept across twelve offsets from 0 to 55 ns, the raster completed two frames at every one."
+  consequence: "The model and the board now agree on the rasters, the CPU, the memory decode and the pixel stream, and disagree only on the picture, so the remaining candidate is the one block the model does not contain: what happens between the pixel stream and the TMDS pair. The next instrument is to compile `gba2hdmi` into the model rather than to flash another hypothesis, and the specific question to answer is where `pixel_out_x/y` writes land relative to `pixel_y * 240 + pixel_x`. Do not re-test clock phase, the reset assignment, or the presence of the OSD: all three are measured and closed. Note also that the board has never been shown to write the framebuffer at all, so a build holding the GPU in reset while driving `mem_portA` from a known pattern remains the cheapest way to separate generated-but-undisplayed from never-generated."
+  sources:
+    - "This repository, `tools/sim/build_gba_sim.sh` source list (no `gba2hdmi.sv`) and `tools/sim/sim_main.cpp`, which draws from `gba->pixel_out_*`"
+    - "This repository, `build/sim_prod/obj_dir`, built 2026-11-03 with `TINYGBA_SIM_DEFINES='-DTINYGBA_BIOS_HEX=...'`; frame `/tmp/simf_frame0060.ppm`, 22 colours"
+    - "This repository, `build/rf_4/tinygba.json`: `video.mem_portA_we` driven by `video.mem_portA_we_DFF_Q`, whose `D` is `gpu.igba_gpu_colorshade.pixel_out_we`"
+    - "Standalone bench at /tmp/gt_cycle/tb_gt_phase.sv, 2026-11-03: twelve `clk16` phase offsets, 2 VBlanks at each"
+  verification: "Measured 2026-11-03. The model render and its counters are from a completed 400,000,000-step run; the netlist trace is from the routed netlist of the deployed image `build/rf_4/tinygba.fs` (SHA-256 `752d933ee7bfa62410f954f5c0e19143650fe7e8a805f2d1051f9aaf3ff9ad19`); the phase result is a twelve-point sweep. The board's black picture is the operator's report across every image deployed this session."

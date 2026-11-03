@@ -159,7 +159,29 @@ CLKDIV #(.DIV_MODE("5")) div5 (
     .CALIB(1'b0)
 );
 `endif
-wire gbaon;         // this is resetn signal for everything gba except memory (needed by iosys)
+wire gbaon_mem;     // what the loader actually drove (see the override below)
+// `gbaon` itself is declared by the override below:
+// this is resetn signal for everything gba except memory (needed by iosys)
+
+// TinyGBA diagnostic override.  `gbaon` is the reset for the CPU and for the GPU
+// timing generator, and on the board the generator reports `gpu_released=1`,
+// `left_visible=0`, `cycles_100=1` -- a counter that got past 100 and a state
+// machine that never left VISIBLE.  That pair is what a generator held in reset
+// looks like once you know `cycles_reg` is not cleared by reset (fixed in
+// gba_gpu_timing.v this cycle), so the leading hypothesis is that the loader's
+// release is not being sustained rather than that the raster cannot count.
+//
+// Defining TINYGBA_GBAON_ALWAYS removes the hypothesis by removing its subject:
+// the machine is released unconditionally, so any picture or absence of one is
+// about the machine and not about the loader.  The cartridge still loads through
+// the normal path; the BIOS boot animation runs while it streams, which is long
+// enough for a 4 KiB image at 0.6 s.  This is a diagnostic configuration only --
+// a shipping build leaves it undefined and keeps the loader-gated release.
+`ifdef TINYGBA_GBAON_ALWAYS
+wire gbaon = 1'b1;
+`else
+wire gbaon = gbaon_mem;
+`endif
 
 wire cartram_dirty_clear;
 wire cartram_dirty;
@@ -718,7 +740,7 @@ gba_memory mem (
 
     // Loader interface
     .loading(loading), .loader_data(loader_do), .loader_valid(loader_do_valid),
-    .gbaon(gbaon), .config_backup_type(config_backup_type),
+    .gbaon(gbaon_mem), .config_backup_type(config_backup_type),
     .cartram_dirty(cartram_dirty), .cartram_dirty_clear(cartram_dirty_clear),
 
     // Interface to GPU to access special memory like VRAM, OAMRAM, PALETTE
