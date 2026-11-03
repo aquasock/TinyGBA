@@ -297,4 +297,32 @@ Field meanings:
     - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the `assign gb_bus_rst = 1'b0;` that produced the difference"
   verification: "Observed on the board 2026-11-02 across two captures eight seconds apart, both identical.  The probe's own field map generated both the RTL packing and the decode, so the bar interpretation is not hand-read."
 
+- record_id: BRD-010
+  kind: BOARD
+  topic_id: BRD
+  title: "The RetroRegen GBA diagnostic ROM boots to its main menu in the Verilator model"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "With the official GBA BIOS (`boot.rom`, SHA-256 `fd2547724b505f487e6dcb29ec2ecff3af35a841a77ab2e85fd87350abd36570`) and `RetroRegen-GBA-Test-v1.5.gba` (284,384 bytes, detected as SRAM backup type 3), the simulated core renders the ROM's GBA-family boot logo, its RetroRegen splash screen at 3,000 distinct colours, and its main menu listing QUICK TEST, SYSTEM STATUS, MEMORY TEST, SCREEN TEST, GPU STRESS TEST, BUTTON TEST, AUDIO TEST, BURN-IN TEST and ABOUT/HELP with a working cursor and the footer `MODEL: GBA FAMILY (AGB BIOS)`. A scripted START press at frame 300 advanced the splash to the menu, so controller input through `joy_btns` into `KEYINPUT` is confirmed working in the model. The same core also boots Super Mario Advance to that game's own save-check message, and the first instruction fetch from the cartridge occurs at sim_time 452,974,016 with execution later seen in `0x08000000`, `0x0C000000` and `0x06000000`."
+  consequence: "The GBA core executes retail and diagnostic cartridges correctly in simulation, with working graphics, palette, sprite and tilemap rendering and working controller input.  This makes the model a usable reference for hardware work: the RetroRegen suite already reports `GBA FAMILY (AGB BIOS)` and can run nineteen independent PASS/FAIL checks, which is a far sharper instrument than the sixteen-bar status probe.  It also establishes what the simulator cannot settle: the model substitutes `sdram_sim.v` for the real controller and stubs the save hardware as `0xff`, so a retail game stopping at 'The saved data is corrupt' is expected there and says nothing about the board.  Note that frame dumps taken at fixed intervals can be byte-identical across several dumps and that a static screen is not by itself a hang -- the splash and menu are both static by design, and only a comparison across frames that span an input can show progress."
+  sources:
+    - "`/home/vash/Desktop/RetroRegen-GBA-Test-v1.5/RetroRegen-GBA-Test-v1.5.gba` and its `README.txt`"
+    - "This repository, `tools/sim/build_gba_sim.sh` and `tools/sim/sim_main.cpp`: the harness, the frame dump and the scripted-press support added this cycle"
+    - "Frames `rr_frame0240.ppm` (BIOS logo), `rr_frame0300.ppm` (RetroRegen splash, 3000 colours) and `rr_frame0420.ppm` (main menu)"
+  verification: "Observed 2026-11-02 in the Verilator model with `-s 1200000000 -pe 60 -pf 240 -press 3@300:10,3@420:10,8@540:10,8@660:10`.  The splash-to-menu transition followed the scripted START press, which is what establishes that the input path works rather than merely being connected."
+
+- record_id: BRD-011
+  kind: BOARD
+  topic_id: BRD
+  title: "RetroRegen's diagnostic suite passes the core's CPU, system ID, graphics and every internal memory region in simulation"
+  status: VERIFIED
+  verified_date: 2026-11-02
+  statement: "`RetroRegen-GBA-Test-v1.5.gba` driven by hand through the Verilator model, with the official GBA BIOS, reports: SYSTEM STATUS -- `CPU: ARM7TDMI @ 16.78 MHz`, `SET: ARM v4T (ARM+THUMB)`, `BIOS SUM: 0xBAAE187F`, `AGB BIOS: GBA/SP/MICRO`, and bus timing `IWRAM 1190`, `EWRAM 1702`, `ROM 1702` cyc/256 reads all `OK`, `WAITCNT: 0x0000`, `CART SAVE (SRAM PROBE): OK (64K RANGE)`.  MEMORY TEST -- `IWRAM 32K PASS`, `EWRAM 256K PASS`, `VRAM 96K PASS`, `PRAM 1K PASS`, `OAM 1K PASS`, `RESULT: ALL REGIONS PASS`, cart SRAM `OK (64K RANGE)`.  The guided checks also passed by eye: system ID, CPU, memory, LCD solid, LCD ramps and the GPU scene.  Audio and the button test were skipped deliberately, because the model's audio goes nowhere observable and the input was being driven by hand.  The GPU stress test ran."
+  consequence: "The core's CPU executes ARM and Thumb correctly, its BIOS is byte-identical to the official image by checksum, its memory decode and byte-lane handling are correct across every internal region at every width, its palette and framebuffer carry the full colour range, and its drawer renders a real scene.  This is the first independent third-party confirmation of the machine side of this port, and it is much stronger evidence than any probe built during this session, because it is a test suite judging the core rather than the core's own instrument reporting on itself.  The limit must be stated wherever this result is quoted: the model substitutes `sdram_sim.v`, a behavioural array, for the real SDRAM controller and does not compile `sdram_gba.v` at all, so `EWRAM` and `ROM` passing says the CPU asked the right addresses and the decode is right, and says nothing about the physical controller or its timing.  The same ROM on the board is therefore the correct next instrument, and it will report the same ten facts in one screen -- either matching this result or naming where hardware diverges, which is exactly the spot-check the current plan calls for."
+  sources:
+    - "`/home/vash/Desktop/RetroRegen-GBA-Test-v1.5/` and its `README.txt`"
+    - "Superseded screenshot of the SYSTEM STATUS and MEMORY TEST screens, 2026-11-02"
+    - "This repository, `tools/sim/build_gba_sim.sh`: the simulated source list, which carries `sdram_sim.v` and not `sdram_gba.v`"
+  verification: "Observed 2026-11-02 in the Verilator model, driven interactively by the operator through the SDL window, with frames dumped to `qd_frame*.ppm` and the two verdict screens read directly."
+
 ---

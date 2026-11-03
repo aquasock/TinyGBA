@@ -17,7 +17,16 @@ cartridge has run on the board, so no game has produced a picture.
   bars and a green status band: 64 MiB, both dies, all sixteen patterns. Two
   earlier readings of that probe were taken on images whose `clk67` crossed no
   clock-plane pip at all and are superseded. See `core-reference.md` BRD-006.
-- **The machine: passes its boot halt, and does not yet reach the cartridge.**
+- **The machine: a retail-grade diagnostic suite passes it in simulation.** On
+  the board the boot halt now clears; in the Verilator model `RetroRegen GBA Test
+  v1.5` reports `ARM7TDMI @ 16.78 MHz`, `ARM v4T`, the official BIOS checksum, and
+  `RESULT: ALL REGIONS PASS` across IWRAM 32K, EWRAM 256K, VRAM 96K, PRAM 1K and
+  OAM 1K, plus LCD solid, LCD ramps and a GPU scene. The model has no SDRAM
+  controller — it substitutes an array — so that result says nothing about the
+  physical memory path, and running the same ROM on the board is the next
+  instrument. See `core-reference.md` BRD-011.
+
+- **The board in detail.**
   The CPU halted at the `HALTCNT` write because an undriven `gb_bus_rst` folded
   to constant 1 under `synth_gowin`, deleting every MMIO register's write path
   and about 4,500 of 9,100 flip-flops. Driving the wire low restores them, and on

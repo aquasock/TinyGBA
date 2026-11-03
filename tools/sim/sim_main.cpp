@@ -58,6 +58,27 @@ unsigned long long rom_req_cycles = 0;   // ...of which rom_en was asserted
 // the display -- the first attempt at this project grabbed the whole desktop.  A
 // direct dump of the same screenbuffer the texture is built from is deterministic,
 // needs no X server cooperation, and can be decoded like any other frame capture.
+// Fetch-region history, mirroring the hardware status probe exactly so the two
+// can be compared without translation.  The probe records which 2 MB regions of
+// `rom_addr` the CPU has EVER fetched from; a live sample cannot answer that,
+// because every BIOS address is below 0x40000 and reads zero in the high bits
+// whether the CPU is healthy or stalled.  This is the same measurement in the
+// model, which is what makes a disagreement between them meaningful.
+uint32_t region_seen = 0;        // sticky OR of rom_addr[27:21] (instruction fetch)
+uint32_t data_region_seen = 0;   // sticky OR of ram_addr[27:21]  (data access)
+unsigned long long first_cart_fetch = 0;   // sim_time of the first >=0x08000000 fetch
+bool cart_fetch_seen = false;
+
+// Scripted controller input, so a boot test does not depend on a human pressing
+// keys in a window that has to be focused.  A retail game that stops at a
+// message and waits is indistinguishable from one that has hung unless the press
+// can be repeated exactly, and a manual press cannot say whether the core ever
+// saw it.  Format: -press BIT@FRAME[:DURATION],BIT@FRAME[:DURATION],...
+// BIT follows joy_btns: 0=B 2=SELECT 3=START 4=UP 5=DOWN 6=LEFT 7=RIGHT 8=A.
+// A press is held for DURATION frames (default 8) starting at FRAME.
+struct ScriptedPress { int bit, frame, duration; };
+ScriptedPress presses[64];
+int n_presses = 0;
 const char *dump_prefix = NULL;   // -p PREFIX: write PREFIX_frameNNNN.ppm
 int dump_every = 0;               // -pe N: dump every Nth frame (0 = off)
 int dump_first = 0;               // -pf N: start dumping at frame N
@@ -80,6 +101,7 @@ void usage()
 	printf("  -m     print all memory writes (after BIOS initialization)");
 	printf("  -f     print flash related memory accesses\n");
 	printf("  -p P   write frames as PPM: PREFIX_frameNNNN.ppm\n");
+	printf("  -press BIT@FRAME[:DUR] scripted button; 0=B 2=SEL 3=START 8=A\n");
 	printf("  -pe N  dump every Nth frame (default every frame when -p given)\n");
 	printf("  -pf N  first frame to dump      -pl N  last frame to dump\n");
 }
@@ -356,6 +378,22 @@ int main(int argc, char **argv, char **env)
 			memlog_en = true;
 			printf("Printing memory log\n");
 		} 
+		else if (strcmp(argv[i], "-press") == 0 && i + 1 < argc) {
+			char *spec = strdup(argv[++i]);
+			for (char *tok = strtok(spec, ","); tok && n_presses < 64; tok = strtok(nullptr, ",")) {
+				int bit = -1, fr = 0, dur = 8;
+				char *at = strchr(tok, '@');
+				if (!at) { printf("bad -press token '%s'\n", tok); exit(1); }
+				*at = 0;
+				bit = atoi(tok);
+				char *colon = strchr(at + 1, ':');
+				if (colon) { *colon = 0; dur = atoi(colon + 1); }
+				fr = atoi(at + 1);
+				if (bit < 0 || bit > 11) { printf("bad button bit %d\n", bit); exit(1); }
+				presses[n_presses++] = {bit, fr, dur};
+				printf("scripted press: bit %d (button) at frame %d for %d frames\n", bit, fr, dur);
+			}
+		}
 		else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
 			dump_prefix = argv[++i];
 		}
@@ -507,6 +545,12 @@ int main(int argc, char **argv, char **env)
 				}
 				// stall accounting, taken at the same edge the memory logs use
 				if (top->gba_on) {
+					region_seen |= (gba->rom_addr >> 21) & 0x7F;
+					if (gba->ram_cen) data_region_seen |= (gba->ram_addr >> 21) & 0x7F;
+					if (!cart_fetch_seen && (gba->rom_addr >> 24) != 0) {
+						cart_fetch_seen = true;
+						first_cart_fetch = sim_time;
+					}
 					cpu_clk_cycles++;
 					if (!gba->cpu_en) cpu_stall_cycles++;
 					if (gba->halt)    cpu_halt_cycles++;
@@ -562,6 +606,18 @@ int main(int argc, char **argv, char **env)
 
 					if (frame_count % 5 == 0 || m_trace)
 						printf("Frame #%d\n", frame_count);
+
+					// Scripted presses are applied at frame boundaries and
+					// OR-ed with whatever the keyboard is doing.
+					for (int pi = 0; pi < n_presses; pi++) {
+						ScriptedPress &pr = presses[pi];
+						if (frame_count >= pr.frame && frame_count < pr.frame + pr.duration)
+							top->joy_btns |= (1 << pr.bit);
+						else if (frame_count == pr.frame + pr.duration) {
+							top->joy_btns &= ~(1 << pr.bit);
+							printf("press bit %d released at frame %d\n", pr.bit, frame_count);
+						}
+					}
 
 					if (dump_prefix && frame_count >= dump_first && frame_count <= dump_last) {
 						int every = dump_every > 0 ? dump_every : 1;
@@ -709,6 +765,25 @@ int main(int argc, char **argv, char **env)
 	} else {
 		printf("CPU: no post-boot cycles observed -- gba_on never went high\n");
 	}
+
+	// The same question the hardware probe answers, in the same units.
+	printf("fetch regions ever seen (rom_addr[27:21], OR): 0x%08X\n", region_seen);
+	for (int r = 0; r < 32; r++)
+		if (region_seen & (1u << r))
+			printf("   INSTR region 0x%02X000000\n", r << 1);
+	// Data accesses are a separate address space in this core: the cartridge
+	// header is read with a load, which reaches the memory controller on
+	// `ram_addr`, so instruction-fetch history alone cannot say whether the
+	// cartridge was touched.  The hardware probe tracks rom_addr only, which is
+	// an instrument gap this comparison exposed.
+	printf("data regions ever seen  (ram_addr[27:21], OR): 0x%08X\n", data_region_seen);
+	for (int r = 0; r < 32; r++)
+		if (data_region_seen & (1u << r))
+			printf("   DATA   region 0x%02X000000\n", r << 1);
+	if (cart_fetch_seen)
+		printf("first fetch from the cartridge at sim_time %llu\n", first_cart_fetch);
+	else
+		printf("NEVER fetched from the cartridge (no rom_addr[27:24] non-zero)\n");
 
 	SDL_DestroyTexture(sdl_texture);
 	SDL_DestroyRenderer(sdl_renderer);

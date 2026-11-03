@@ -420,3 +420,38 @@ Find why the CPU runs fifteen halt-and-wake cycles without ever fetching from `0
 - User Test: PASS
 
 ---
+
+## 13 COMMIT Unreleased 2026-11-02T17:36:15-07:00
+
+#### Coming From:
+
+Unreleased 416cf14
+
+#### Purpose:
+
+Turn the newly working Verilator model into the project's primary instrument, and find out what the core can actually do with it.
+
+#### Outcome:
+
+The core runs retail and diagnostic cartridges correctly in simulation, and an independent hardware test suite says so. Upstream GBATang ships a complete Verilator harness with an SDL window, FST tracing and audio capture, and this port had never carried it, so every result on record had come from a sixteen-pixel bar strip on a capture card with nothing to compare against. The harness needed three repairs before it built at all, each evidence it had not been run against this revision: two `ifdef VERILATOR` `$display` statements in `gba_eeprom.sv` index an array whose declaration is commented out in that same file, upstream's source list omits `gpu/linebuffer.v` and `memory/mem_eeprom.v` which are instantiated unconditionally, and `mem_eeprom.v` still needs the `MUX2`, `DFFRE` and `DPB` primitives, carried in `tools/sim/gowin_cells_sim.v` with `specify` blocks removed. Three additions made it usable as an instrument rather than a demo: deterministic frame dumping to PPM straight from the framebuffer, since capturing the SDL window depends on it being findable and unoccluded and the first attempt grabbed the whole desktop; CPU stall accounting, which reports cycles with `cpu_en` low and the halt fraction; and fetch-region history, mirroring the hardware probe's sticky OR of `rom_addr[27:21]` so the two can be compared without translation, plus a data-region counter over `ram_addr`, because cartridge data reaches the controller on a different bus from instruction fetches and the hardware probe tracks only the latter. The results are stronger than expected. Super Mario Advance boots: the BIOS animation completes, the first instruction fetch from the cartridge occurs at sim_time 452,974,016, execution is later seen in `0x08000000`, `0x0C000000` and `0x06000000`, and the game reaches its own save-data check and reports 'The saved data is corrupt', which is correct behaviour because the harness fills cart RAM with `0xff` and models no save hardware. RetroRegen GBA Test v1.5 goes much further and is the result that matters: it reports `CPU: ARM7TDMI @ 16.78 MHz`, `SET: ARM v4T (ARM+THUMB)`, `BIOS SUM: 0xBAAE187F`, `AGB BIOS: GBA/SP/MICRO`, bus timing `IWRAM 1190`/`EWRAM 1702`/`ROM 1702` cyc per 256 reads all `OK`, `WAITCNT: 0x0000`, cart SRAM `OK (64K RANGE)`, and `MEMORY TEST -- RESULT: ALL REGIONS PASS` across IWRAM 32K, EWRAM 256K, VRAM 96K, PRAM 1K and OAM 1K; the LCD solid, LCD ramps and GPU scene checks also passed by eye and the GPU stress test ran, with audio and buttons skipped deliberately. That is the first independent third-party confirmation of the machine side of this port and it is far better evidence than any probe built during this session, because it is a suite judging the core rather than the core's own instrument reporting on itself. Its limit is stated in the same breath and must travel with it: the model substitutes `sdram_sim.v`, a behavioural array, for the real controller and does not compile `sdram_gba.v` at all, so `EWRAM` and `ROM` passing establishes that the CPU asked the right addresses and the decode is right and establishes nothing about the physical controller or its timing. Two methodological corrections came out of this cycle and both were mine. Frame dumps at fixed intervals can be byte-identical across several samples while the picture is merely static by design, and a static screen is not a hang; more seriously, I drew conclusions from runs I had cut short, reporting that the simulator never fetched from the cartridge when in fact the first cartridge fetch is around frame 500 and my samples stopped at 177 -- conclusions drawn from a run that has not finished are not measurements. Scripted controller input was added, `-press BIT@FRAME[:DURATION]`, so a boot test does not depend on a human and a window having focus, and it was confirmed working by a scripted START advancing the splash screen; manual driving was still faster for exploring the diagnostic menu, and the operator took over. The 177-frame and 605-frame samples also show the CPU doing real work rather than idling: the halt fraction falls from 80.9 percent in the BIOS loop to 37.2 percent running the diagnostic ROM, with 49.8 percent of cycles issuing cartridge fetches. Nothing was deployed this cycle. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 12 were not rewritten and that the two new records carry unique ids and the canonical field order, and validated this entry as entry 13 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirteen against the 100-entry limit.
+
+#### Next Steps:
+
+Run RetroRegen on the Tang, because it is now the sharpest instrument this project has and the one question the model cannot answer is the physical memory path: the same ROM on the board will report the same ten facts in one screen -- CPU identity, BIOS checksum, per-region bus timing, and the memory verdict -- and either match the simulation or name exactly where hardware diverges, which is worth more than any probe built this session. Build the production machine image with the `gb_bus_rst` fix at a clean seed, gate it, and stream the diagnostic cartridge at it; expect the BIOS logo, then the RetroRegen splash, and note that it needs START to leave it. Treat the memory test as the decisive line: `IWRAM` and the graphics regions are block RAM in both model and bitstream and should match, while `EWRAM` and `ROM` go through `sdram_gba.v` on the board and an array in the model, so a difference confined to those two regions is the SDRAM controller and a difference anywhere else is something new. Do not re-measure what the diagnostic suite has already settled in simulation, and do not build another bespoke probe before this ROM has run on hardware. Independently of the board, two gaps in the model are worth closing because they gate whole classes of retail testing: the save hardware is a `0xff` fill rather than a model, so every game that checks its save stops at a message, and `sdram_gba.v` is absent entirely, so nothing the model does can exercise the controller. Do not draw a conclusion from a simulation run that has not reached its step budget, and record the step budget and frame count with any result taken from it.
+
+#### Files Modified:
+
+- README.md
+- tools/sim/build_gba_sim.sh
+- tools/sim/gowin_cells_sim.v
+- tools/sim/sim_main.cpp
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/gba_eeprom.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: PASS
+
+---
