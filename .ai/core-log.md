@@ -588,3 +588,37 @@ Flash `build/tang_scan` and read the bimodal pair, because `scanline_run` decide
 - User Test: PENDING
 
 ---
+
+## 18 COMMIT Unreleased 2026-11-03T00:55:00-07:00
+
+#### Coming From:
+
+Unreleased 332840e
+
+#### Purpose:
+
+Localise the frozen GPU inside the timing generator, and leave a clean, reproducible state for a handoff after the interruptible build was stopped at the operator's request.
+
+#### Outcome:
+
+The GPU's stall is now located one level deeper than before, and the cycle produced a third decoder defect that matters more than the findings it would otherwise have supported. Taps added behind `TINYGBA_STATUS_TEST` in `gba_gpu_timing.v`, plumbed through `gba_gpu.v` to the top, latched on `clk50` and synchronised into `clk16`, expose four rungs of the generator: reset released, state machine left VISIBLE, cycle counter reached 100, cycle counter reached 1008. The non-diagnostic build is unaffected, checked by building the Verilator model, which does not define the tap. The first capture with these taps decoded as `gpu_released=1`, `[1]=0`, `[2]=1`, and the field map labelled `[1]` as `cycles_100` and `[2]` as `cycles_1008`. That was one rung low: `DBG_gt` packs `{cycles>=1008, cycles>=100, left_visible, released}`, so `[1]` is `left_visible` and `[2]` is `cycles>=100`, and `[3]` — the top rung — was not on the wire at all. Relabelled and widened, the reading is that the cycle counter reaches 100 and the state machine never leaves VISIBLE, which is a specific fault rather than "frozen" and points at a reset that keeps returning: the counter restarts from zero often enough to pass 100 and never often enough to complete a 1008-cycle line. `gbaon` drives that reset, so a `gbaon` that falls again after rising would produce exactly this signature, and a `gbaon_fell` bit was added to test it directly. This is the third decode defect found in one session and the pattern is the important part: the first was bar geometry, where `--decode` divided the field into sixteen equal bands while the renderer draws 15-pixel bars with the last truncated to 7 pixels; the second was grey classification, where exact membership in a short list of greys failed against the capture card's MJPEG rendering the margin as `(134,134,134)`, inflating the field edge by about forty display pixels; the third was hand-written bit indices in the new map, one rung off the RTL packing. All three produced plausible output rather than an error, all three were caught by evidence rather than inspection — the first two by an impossible combination (`mem_ready=1` from clk16 while `mem_ready_clk67=0`, impossible because clk67 is four times faster), the third by the ladder's own internal ordering — and none would have been caught by a width check. Two conclusions from earlier in the session are withdrawn and must not be revived: that the SDRAM controller never acknowledges (it does; `mem_ready` and `mem_ready_clk67` are both 1 in the failing state), and that the fault is a memory-path problem at all. The memory path, the clk67 clock distribution and the CPU are all demonstrably working in the failing state; what fails is the GPU's raster. Every capture taken through the unpinned ffmpeg path is void per BRD-012, and every capture decoded before the geometry and grey fixes is suspect for bit 15 at minimum. The bitstream `build/tang_gb` was stopped during routing at the operator's instruction and is not complete: synthesis finished at 79,460,697 bytes, the register-parity gate passed, and nextpnr was killed at iteration 207,000 with 30,875 nets still unrouted. Nothing was deployed after `build/tang_scan`, whose map `8c589e34` is what produced the discriminating `scanline_run=0`.
+
+#### Next Steps:
+
+Rebuild `build/tang_gb` from the current tree (synthesis is cached and the netlist is intact; `TINYGBA_STAGE=pnr` then `pack`), flash it, and cycle loads until the bad state is caught, because the board is bimodal across loads and a single capture has a coin-flip chance of naming the wrong state — six cycles were needed earlier. Read `gbaon_fell` in the failing state: if it is 1 the loader's release is not stable and the fix is to make `gbaon` latching rather than a level, which would explain the bimodality, the single halt entry and the missing fetch from one cause; if it is 0 the reset theory is wrong and the next instrument is the `mclk` edge detector inside the generator, since `if (mclk & ~mclk_r) cycles = cycles + 1` is the only path that advances the counter and `mclk_r` is one of two registers in `gba_gpu_timing.v` that the reset branch does not assign, the other being `pixelpos`. Fix with mechanism, then demonstrate the bimodality is gone by cycling loads under the same conditions rather than by observing one good run. Capture with `tools/cap_tang.sh` so the format is pinned and the map sidecar is written, decode with `tools/probe_map.py --decode`, and check every decode for internal contradictions before quoting it — that check is what caught two of the three decoder defects. The Verilator model cannot reproduce this class of fault because it never fails to boot, so a fix must be validated on the board or by deliberately perturbing the model's reset timing; do not claim a fix is verified from simulation alone.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gpu/gba_gpu.v
+- fpga/gba/src/gpu/gba_gpu_timing.v
+- tools/probe_map.py
+- fpga/gba/src/probe_bits.vh
+
+#### Status:
+
+- Build: NOT RUN (build/tang_gb stopped during routing)
+- Deployment: PASS (build/tang_scan, map 8c589e34)
+- User Test: FAIL (black screen, grey pillarbox, HDMI synced)
+
+---
