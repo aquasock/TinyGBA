@@ -557,3 +557,34 @@ Flash `build/tang_status2` and read the same three conditions BRD-013 used -- no
 - User Test: PENDING
 
 ---
+
+## 17 COMMIT Unreleased 2026-11-02T23:05:00-07:00
+
+#### Coming From:
+
+Unreleased eadc31a
+
+#### Purpose:
+
+Find out what actually stalls the machine, after two decoder defects had made the previous hardware conclusions unreliable.
+
+#### Outcome:
+
+The memory controller is exonerated and the fault is the GPU not producing a VBlank, but reaching that answer required finding two independent bugs in the tool that was supposed to make decoding trustworthy. The first was geometry: `--decode` divided the measured field into sixteen equal bands, while the renderer computes `dbg_bits[x / 15]` for `x < 232`, so bar 15 spans 15 source pixels except the last, which is truncated to 7, and the field is not a multiple of sixteen. Every bar centre was therefore slightly wrong and the last bar was sampled roughly one bar to the left, reporting one field's value under another field's name -- the precise failure `tools/probe_map.py` exists to prevent, committed by the tool itself. The second was classification: `is_field` excluded the grey margin by exact match against a short list of greys, and the capture card's MJPEG encoder renders the 135-grey margin as `(134,134,134)` at some columns, so a strip of margin counted as field, the field edge was inflated by about forty display pixels, every centre shifted again, and the last bar was sampled inside the margin and read as zero. Both are now fixed by replicating the renderer's arithmetic and by classifying near-neutral pixels by tolerance rather than by membership in a list. The second bug was caught only because its output was impossible: a clk16-domain latch of `cpu_mem_ready` read 1 while a clk67-domain latch of the same signal read 0, and clk67 is four times faster, so that cannot happen. That contradiction was the most useful measurement of the cycle, and the lesson is to check decode output for internal consistency before believing any of it. With both fixed, the corrected picture is flatly different from the previous report and that report is withdrawn. On a fixed bitstream the board is bimodal across power cycles -- six runs alternating `0xFFFF, 0xF1F4, 0xFFFF, 0xFFFF, 0xF1F4, 0xFFFF`, identically for a 4 KiB and a 284 KiB cartridge. The good state has VBlank, fifteen or more halt entries, and a cartridge fetch. The bad state has `mem_ready = 1`, `mem_ready_clk67 = 1`, `clk67_alive = 1`, DISPSTAT written including the V-Blank IRQ enable, IE and IME written, `halt_entries = 1`, `halt_cleared = 0`, `vblank_arrived = 0` and `cart_fetched = 0`. So in the bad state the CPU configures the V-Blank interrupt, halts once, and waits forever for a VBlank that never arrives; the memory path, the clk67 clock distribution and the CPU are all demonstrably working. The black picture is a consequence, not the fault. The claim in the previous entry that the controller never acknowledges was a decoder artefact and is withdrawn here. A lead was found by reading the timing generator while the build ran and is recorded as a lead and not a result: `cycles` advances only on `if (mclk & ~mclk_r)`, and `mclk_r` is one of two registers in `gba_gpu_timing.v` that the reset branch does not assign (the other is `pixelpos`); if that edge detector never fires, `cycles` never reaches its per-state thresholds, `linecounter` never advances, no VBlank is raised and the CPU stays halted -- which is the observed state exactly. Why this was missed for several cycles is worth carrying: the status probe draws its bars from `gba2hdmi`'s own raster, not from the GBA's GPU, so a perfect picture proves the display path and says nothing whatever about the GBA timing generator, and treating the picture as evidence about the GPU is what hid a frozen GPU behind a working screen. The discriminator build itself (`build/tang_scan`, seed 5, `clk67` 130.5 MHz, zero hold violations, no relaxation, SHA-256 `e6731802d0fe9093f747798a0de601499882368548e46209e7a13b58c8e06500`, map `8c589e34`) puts `scanline_run` on bit 14, replacing `clk67_alive` which had read 1 in every run, so the raw VCOUNT separates "GPU not running" from "GPU running and the flag path broken". Nothing was deployed, at the operator's instruction.
+
+#### Next Steps:
+
+Flash `build/tang_scan` and read the bimodal pair, because `scanline_run` decides between the two remaining causes in one capture: if it is 1 in the failing state the timing generator is advancing and the fault is the DISPSTAT flag or probe path, and if it is 0 the generator is frozen and the unreset `mclk_r`/`pixelpos` lead becomes the primary suspect. Run each condition until both states have been observed rather than reading a single capture, since six runs were needed to see both and a one-shot read has a coin-flip chance of naming the wrong state. Then fix with mechanism rather than prose: assign `mclk_r` and `pixelpos` in the reset branch so the timing generator has no power-up-dependent state, and re-run the same alternating sequence to show the bimodality is gone. Every capture from here should come from `tools/cap_tang.sh` so the format is pinned and the map sidecar is written, and decode output should be checked for internal contradictions before it is quoted.
+
+#### Files Modified:
+
+- tools/probe_map.py
+- tools/build_tinygba.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: PENDING
+
+---
