@@ -433,11 +433,15 @@ module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rn
     // Verilog silently creates an implicit 1-bit wire instead of reading the
     // register: the comparison then folded to a constant and every tap read VCC.
     output     [9:0]  DBG_ds;
-    // TinyGBA: the mode 3/4/5 drawer's VRAM fetch state (2 bits, see
-    // gba_drawer_mode345's DBG_vf).  `busy_mode345` only clears when a fetch
-    // completes, so this names the fetch state a hung line is parked in.
-    output      [1:0]  DBG_vf;
-    wire        [1:0]  DBG_vf_w;
+    // TinyGBA: the mode 3/4/5 drawer's fetch state and pixel draw state, plus the
+    // display mode the drawer is actually in.  `busy_mode345` only clears when a
+    // fetch returns to IDLE with the pixel machine back at NEXTPIXEL, so this
+    // names which half of that pair is stuck rather than merely that it is stuck.
+    //   DBG_vf[1:0]  vramfetch: 0 IDLE, 1 STARTREAD, 2 WAITREAD, 3 FETCHDONE
+    //   DBG_vf[3:2]  DrawState: 0 NEXTPIXEL, 1 WAITREAD
+    //   DBG_vf[6:4]  BG_Mode: the register the drawer decodes, not DISPCNT
+    output      [6:0]  DBG_vf;
+    wire        [3:0]  DBG_vf_w;
 `endif
     
     wire [7:0]    busy_allmod;
@@ -2434,7 +2438,9 @@ end
     
 `ifdef TINYGBA_GPU_TAPS
     assign DBG_ds = {busy_allmod, drawstate};
-    assign DBG_vf = DBG_vf_w;
+    // TinyGBA: BG_Mode is read here rather than inside gba_drawer_mode345 so the
+    // band shows the register the drawer's own decode sees.
+    assign DBG_vf = {BG_Mode, DBG_vf_w};
 `endif
 
 endmodule

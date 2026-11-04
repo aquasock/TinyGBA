@@ -183,33 +183,39 @@ end
 // whole 240x160 array, so the display path is proven by the field appearing at
 // all and says nothing about the machine.
 //
-// Bands 0 to 4 are LIVE levels, re-sampled every clk50; bands 5 to 10 are sticky
-// ever-true history.  Read the first five as "where is it now" and the last six
-// as "did the machinery ever work".
+// Bands 0 to 6 are LIVE levels and bands 7 to 15 are STICKY.  The split is the
+// correction to the previous build, which sampled the per-line fetch state live:
+// `vramfetch` cycles every line, so a live sample of it cannot tell a frozen
+// machine from a capture that lands at the same line phase every frame, because
+// clk50 and the pixel clock are locked.  Sticky questions are immune to that.
 //
-//   band  0 (x   0..14) drawstate[0]           live  } 0 IDLE 1 WAITHBLANK
-//   band  1 (x  15..29) drawstate[1]           live  } 2 DRAWING 3 MERGING
-//   band  2 (x  30..44) busy_mode345           live
-//   band  3 (x  45..59) vramfetch[0]           live  } 0 IDLE 1 STARTREAD
-//   band  4 (x  60..74) vramfetch[1]           live  } 2 WAITREAD 3 FETCHDONE
-//   band  5 (x  75..89) vramfetch reached FETCHDONE ever
-//   band  6 (x  90..104) `pixel_out_we` ever          (control: expected black)
-//   band  7 (x 105..119) `drawline` ever              (control: expected white)
-//   band  8 (x 120..134) busy_modeobj ever
-//   band  9 (x 135..149) busy_allmod ever non-zero
-//   band 10 (x 150..164) gbaon ever high
-//   band 11 (x 165..179) gbaon live
-//   bands 12..15 (x 180..239) unused, black
+//   band  0 (x   0..14) drawstate[0]         live  } 0 IDLE 1 WAITHBLANK
+//   band  1 (x  15..29) drawstate[1]         live  } 2 DRAWING 3 MERGING
+//   band  2 (x  30..44) busy_mode345         live
+//   band  3 (x  45..59) DrawState             live  0 NEXTPIXEL 1 WAITREAD
+//   band  4 (x  60..74) BG_Mode[0]            live  } display mode the drawer
+//   band  5 (x  75..89) BG_Mode[1]            live  } decodes, all three bits:
+//   band  6 (x  90..104) BG_Mode[2]           live  } 3 = 011  4 = 100  5 = 101
+//   band  7 (x 105..119) vramfetch reached STARTREAD   (sticky, after drawline)
+//   band  8 (x 120..134) vramfetch reached WAITREAD    (sticky)
+//   band  9 (x 135..149) vramfetch reached FETCHDONE  (sticky)
+//   band 10 (x 150..164) vramfetch returned to IDLE    (sticky) <- discriminator
+//   band 11 (x 165..179) `pixel_out_we` ever           (control: expected black)
+//   band 12 (x 180..194) `drawline` ever               (control and arming bit)
+//   band 13 (x 195..209) busy_modeobj ever
+//   band 14 (x 210..224) busy_allmod ever non-zero
+//   band 15 (x 225..239) gbaon ever high
 //
-// The discriminating pair is band 2 against bands 3 and 4: `busy_mode345` high
-// with `vramfetch` parked in WAITREAD names a VRAM fetch that never collected its
-// data, which parks the drawer in DRAWING for ever and never merges a pixel out.
+// Bands 9 and 10 together are the question.  A fetch machine that cycles normally
+// reaches FETCHDONE and returns to IDLE every line, so both are white.  A machine
+// frozen at FETCHDONE sets band 9 and never band 10 -- and neither bit can clear,
+// so no capture artefact can fake it.  Bands 3 and 4 then say whether the pixel
+// machine is the reason, since FETCHDONE only advances when DrawState is
+// NEXTPIXEL.
 //
-// An earlier build of this test latched every band and produced a strip that said
-// WAITHBLANK had been reached while `drawline` was clear, which is impossible;
-// the latches were sampling arbitrary power-up values.  Live levels are the
-// correct instrument for a stuck machine, and the sticky bands are only the
-// controls.
+// The sticky fetch bands only begin recording once a `drawline` has been seen.
+// Before that the machine legitimately sits in IDLE, so an unarmed latch would be
+// recording the reset value -- the arming trap of TCL-013.
 //
 // `pixel_data`, `pixel_x` and `pixel_y` are folded into the low bit of the blue
 // channel rather than ignored.  Taking the framebuffer away from the GPU leaves

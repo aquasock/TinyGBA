@@ -7,17 +7,22 @@ module gba_drawer_mode345(fclk, BG_Mode, line_trigger, drawline, busy, second_fr
     input            drawline;
     output reg       busy;
 
-    // TinyGBA: the VRAM fetch state, exported raw for the TINYGBA_PIXTEST bands.
-    // `busy` below only clears when a fetch reaches FETCHDONE, so a fetch that
-    // never completes parks this machine in DRAWING for ever and no pixel is ever
-    // merged out.  Reading `vramfetch` on the board says which fetch state it is
-    // parked in, which `busy` alone cannot: 0 IDLE, 1 STARTREAD, 2 WAITREAD,
-    // 3 FETCHDONE.  Exported rather than latched here because a register inside
-    // this module has no path to a displayed output and synthesis removes it
-    // (core-reference TCL-013); the assign is at the end of the module, after
-    // `vramfetch` is declared, because a reference before its declaration would
-    // silently create an implicit wire (TCL-014).
-    output      [1:0]  DBG_vf;
+    // TinyGBA: the VRAM fetch state and the pixel draw state, exported raw for
+    // the TINYGBA_PIXTEST bands.  `busy` below only clears when a fetch reaches
+    // IDLE with DrawState back at NEXTPIXEL, so a pixel machine that never
+    // returns parks this drawer in DRAWING for ever and no pixel is ever merged
+    // out.  Reading both registers on the board says which half is stuck.
+    //   DBG_vf[1:0]  vramfetch: 0 IDLE, 1 STARTREAD, 2 WAITREAD, 3 FETCHDONE
+    //   DBG_vf[3:2]  DrawState: 0 NEXTPIXEL, 1 WAITREAD
+    // These two are mutually dependent -- FETCHDONE advances only when
+    // DrawState is NEXTPIXEL, and DrawState leaves NEXTPIXEL only from
+    // FETCHDONE -- so neither alone names the fault.
+    // Exported rather than latched here because a register inside this module has
+    // no path to a displayed output and synthesis removes it (core-reference
+    // TCL-013); the assign is at the end of the module, after both are declared,
+    // because a reference before its declaration would silently create an
+    // implicit wire (TCL-014).
+    output      [3:0]  DBG_vf;
     
     input            second_frame;
     input            mosaic;
@@ -240,8 +245,8 @@ module gba_drawer_mode345(fclk, BG_Mode, line_trigger, drawline, busy, second_fr
             endcase
         end 
 
-    // TinyGBA: after `vramfetch` is declared, so this reads the register rather
-    // than creating an implicit wire (core-reference TCL-014).
-    assign DBG_vf = vramfetch;
+    // TinyGBA: after `vramfetch` and `DrawState` are declared, so this reads the
+    // registers rather than creating implicit wires (core-reference TCL-014).
+    assign DBG_vf = {DrawState, vramfetch};
     
 endmodule

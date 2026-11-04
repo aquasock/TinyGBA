@@ -494,3 +494,17 @@ Field meanings:
     - "This repository, `tools/clock_plane_report.py`: the measured-good table and the `--strict` refusal path"
     - "TinySNES `.ai/core-reference.md` BRD-005, the sibling project's placement-decides-it result"
   verification: "Measured 2026-11-04 from the routed netlists rather than from build timestamps: the strict gate exits 1 on both, the default gate exits 0 on both, and the bridge-pip strings were read directly (`clk16` 7 bridge pips / 149 spine references, `clk50` 6/140, `clk67` 2/19, `hclk` 4/47). Not measured on hardware: no build has been loaded since this record was written."
+
+- record_id: TCL-016
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "Diagnostic compare logic costs routing arcs far out of proportion to its flip-flop count, and the arc count is the number to watch"
+  status: VERIFIED
+  verified_date: 2026-11-04
+  statement: "Adding three diagnostic flip-flops to this design took LUTs from 40,778 to 41,294 and nextpnr's routing arc count from 220,272 to 228,317, an increase of about 8,000 arcs or 3.8 percent, for a 0.03 percent increase in registers. The flip-flop count is therefore a misleading measure of what a diagnostic change costs the placer, and the arc count printed once at the top of every nextpnr log is the honest one. The growth is attributed to the added combinational logic rather than to the registers: the new bands include a wide vector reduction written as `gpu_ds[9:2] != 8'h00`, and a comparison of a multi-bit vector against a constant is precisely the construct this project already records as folding-prone and expensive (TCL-013). Measured across five seeds on the changed netlist the arc count varies with placement as well as with netlist -- 228,317, 228,580, 228,680, 228,892 and 228,912 -- so it is a netlist-plus-seed quantity and not a pure function of the source."
+  consequence: "A diagnostic change that looks free by its register count can cost a clean-seed yield an order of magnitude of placement time. Measured here: the instrument before the change placed at one seed of one attempted, and the instrument after placed at one seed of five, with seed 1 plateauing near 20,000 unrouted nets for 32 minutes and 368,000 iterations before being stopped. The consequence for future diagnostic work is to prefer individual bit terms over whole-vector comparisons when spending spare bits, and to read `Routing N arcs` at the top of the nextpnr log before and after a diagnostic change rather than trusting `flip-flops` from the parity gate to say whether the change was cheap."
+  sources:
+    - "This repository, `build/pix16_s1/nextpnr.log` (`Routing 220272 arcs`) against `build/pix17_s1` through `build/pix17_s5` (`Routing 228317` to `228912 arcs`)"
+    - "This repository, the two netlists' `gbatang_top` cell censuses: LUTs 40,778 against 41,294, flip-flops 11,535 against 11,538"
+    - "This repository, `tools/gatelevel_report.py` output for `pix_live`, `pix_hist` and `pix_armed`, which shows the added registers are only three"
+  verification: "Measured 2026-11-04 from the build logs of six placements and the cell census of two synthesised netlists. Not a hypothesis: the arc, LUT and flip-flop counts are read out of the artifacts, and the clean-seed yield is the outcome of five attempted placements, three of them stopped by pid while still oscillating at 42 minutes. The `build/pix17_s2` placement completed with zero hold violations and every clock passing, so the changed netlist is placeable, just less often."

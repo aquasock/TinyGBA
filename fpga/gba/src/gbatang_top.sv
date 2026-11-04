@@ -282,7 +282,7 @@ wire pixel_out_we /* verilator public */;
 wire [7:0]  gpu_dbg;        // GPU timing generator internals, see gba_gpu_timing.v
 wire [1:0]  gpu_ev;         // GPU drawer line-start events, see gba_gpu.v
 wire [9:0]  gpu_ds;         // GPU drawer state machine + busy vector, see gba_gpu.v
-wire [1:0]  gpu_vf;         // GPU mode 3/4/5 drawer VRAM fetch state, see gba_gpu.v
+wire [6:0]  gpu_vf;         // GPU mode 3/4/5 fetch state, draw state, BG_Mode
 `endif
 wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
                             //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
@@ -592,77 +592,95 @@ assign dbg_done = gbaon;
 // and that `pixel_out_we` never does, so a line reaches the drawer and dies
 // there.
 //
-// Bands 0 to 4 are LIVE LEVELS, re-sampled every clk50.  That is deliberate and
-// is the correction to the previous build of this test.  The previous build
-// latched everything, and the machine is stuck rather than transient, so the
-// steady state is the answer; a latch started sampling `drawstate` from the
-// instant reset released, which is how one build produced a strip that said
-// WAITHBLANK had been reached while `drawline` was clear -- an impossible pair
-// that identified the instrument, not the machine, as the fault.
+// Two instrument faults are corrected here, and both were mine.
 //
-// Band 5 to 10 are STICKY ever-true history, cleared on reset.  They are the
-// controls: each one is a fact that a healthy machine must have produced, so a
-// black control band means the premise of the whole picture is wrong rather than
-// that the fault moved.
+// The first is that the whole frame used to be latched.  A latch started sampling
+// `drawstate` from the instant reset released, which is how one build produced a
+// strip claiming WAITHBLANK had been reached while `drawline` was clear -- an
+// impossible pair that named the instrument, not the machine.
 //
-//   band  0  drawstate[0]        live   \\  together these read the state
-//   band  1  drawstate[1]        live   /   0 IDLE 1 WAITHBLANK 2 DRAWING 3 MERGING
+// The second is subtler and cost the 2026-11-04 reading its standing.  Bands 0 to
+// 4 were made live levels, which is correct for a genuinely stuck register -- but
+// `vramfetch` is a PER-LINE CYCLING register, not a stuck one, and 48 identical
+// frames across 8 seconds could equally be a real freeze or the capture landing at
+// the same line phase every frame, because clk50 and the pixel clock are locked.
+// That is the same aliasing class BRD-014 and TCL-010 record, and a live sample
+// of a cycling register cannot distinguish the two.  The fetch questions are
+// therefore asked as STICKY facts from here on, which aliasing cannot fake.
+//
+// Bands 0 to 6 are live levels, and every one of them is a register that either
+// never moves or is the answer to a mode question:
+//
+//   band  0  drawstate[0]        live  \  the outer machine's state
+//   band  1  drawstate[1]        live  /   0 IDLE 1 WAITHBLANK 2 DRAWING 3 MERGING
 //   band  2  busy_mode345        live   the mode 3/4/5 drawer has not finished
-//   band  3  vramfetch[0]        live   \\  the VRAM fetch state a hung line is
-//   band  4  vramfetch[1]        live   /   parked in: 0 IDLE 1 STARTREAD
-//                                           2 WAITREAD 3 FETCHDONE
-//   band  5  vramfetch reached FETCHDONE ever  (a fetch did complete once)
-//   band  6  pixel_out_we ever                 (control: known black)
-//   band  7  drawline ever                     (control: known white)
-//   band  8  busy_modeobj ever                 (the OBJ drawer ran at all)
-//   band  9  busy_allmod ever non-zero         (some drawer started)
-//   band 10  gbaon ever high                   (the machine was released)
-//   band 11  gbaon live
-//   band 12..15  unused, black
+//   band  3  DrawState[0]        live  \  the pixel machine inside that drawer
+//   band  4  DrawState[1]        live  /   0 NEXTPIXEL 1 WAITREAD
+//   band  5  BG_Mode[2]          live  \  the mode the drawer decodes:
+//   band  6  BG_Mode[1]          live  /   3 = 0,1   4 = 1,0   5 = 1,0
 //
-// Read bands 0 to 4 as the answer to "where is it now" and 5 to 10 as "did the
-// machinery ever work at all".  The discriminating pair is band 2 against bands
-// 3 and 4: `busy_mode345` high with `vramfetch` in WAITREAD names a fetch that
-// never collected its data, because `busy_mode345` only clears when a fetch
-// reaches FETCHDONE.  That state machine waits on `VRAM_Drawer_valid_Lo` / `_Hi`,
-// which are one-cycle strobes manufactured from a free-running counter, and the
-// WAITREAD branch spends a two-cycle `vram_readwait` countdown BEFORE it looks at
-// them -- so a strobe arriving inside that window is discarded and the poll then
-// waits for a pulse that has already gone.  Nothing in the Verilator model can
-// expose that, because the model's memory returns on an ideal schedule.
+// Bands 7 to 15 are STICKY ever-true since the first `drawline`, which is the
+// arming condition: before a line is drawn the fetch machine legitimately sits in
+// IDLE, so recording IDLE unarmed would be recording the reset value.  This is the
+// trap the sibling project records as its TCL-013.
 //
-// `busy_modeobj` is read as a raw bit rather than through a whole-vector compare:
-// a comparison against a constant folds to a single constant when synthesis can
-// prove it, and one band of an earlier attempt did exactly that.
+//   band  7  vramfetch reached STARTREAD
+//   band  8  vramfetch reached WAITREAD
+//   band  9  vramfetch reached FETCHDONE
+//   band 10  vramfetch returned to IDLE after a line started   <- the discriminator
+//   band 11  `pixel_out_we` ever            (control: expected black, BRD-018)
+//   band 12  `drawline` ever                (control and arming bit)
+//   band 13  busy_modeobj ever              (the OBJ drawer ran at all)
+//   band 14  busy_allmod ever non-zero      (some drawer started)
+//   band 15  gbaon ever high                (the machine was released)
 //
-// Every band is registered on clk50, the drawer's own clock, so the picture is
-// taken in the domain that produces the signals.
-(* keep *) reg [15:0] pix_live;    // bands 0..4 and 11, live levels
-(* keep *) reg [5:0]  pix_hist;    // bands 5..10, ever-true since reset
+// The discriminator is band 10 against band 9.  A fetch machine that cycles
+// normally reaches FETCHDONE and then returns to IDLE every line, so both set.  A
+// machine frozen at FETCHDONE -- which is what bands 3 and 4 then have to explain,
+// since FETCHDONE only advances when DrawState is NEXTPIXEL -- sets band 9 and
+// never band 10.  That distinction is immune to frame-phase aliasing because
+// neither bit ever clears.
+//
+// `gpu_ds[8]` and `gpu_ds[9]` are read as raw bits rather than through a
+// whole-vector compare: a comparison against a constant folds to a single constant
+// when synthesis can prove it, and one band of an earlier attempt did exactly that
+// and would have read black for ever.
+(* keep *) reg [6:0] pix_live;    // bands 0..6, live levels
+(* keep *) reg [8:0] pix_hist;    // bands 7..15, ever-true after arming
+(* keep *) reg        pix_armed;  // a `drawline` has been seen
 always @(posedge clk50) begin
     if (~resetn) begin
-        pix_live <= 16'b0;
-        pix_hist <= 6'b0;
+        pix_live  <= 7'b0;
+        pix_hist  <= 9'b0;
+        pix_armed <= 1'b0;
     end else begin
-        pix_live[0]  <= gpu_ds[0];      // drawstate[0]
-        pix_live[1]  <= gpu_ds[1];      // drawstate[1]
-        pix_live[2]  <= gpu_ds[8];      // busy_mode345
-        pix_live[3]  <= gpu_vf[0];      // vramfetch[0]
-        pix_live[4]  <= gpu_vf[1];      // vramfetch[1]
-        pix_live[11] <= gbaon;
+        pix_live[0] <= gpu_ds[0];      // drawstate[0]
+        pix_live[1] <= gpu_ds[1];      // drawstate[1]
+        pix_live[2] <= gpu_ds[8];      // busy_mode345
+        pix_live[3] <= gpu_vf[2];      // DrawState[0] (bit 1 is constant 0)
+        pix_live[4] <= gpu_vf[4];      // BG_Mode[0]
+        pix_live[5] <= gpu_vf[5];      // BG_Mode[1]
+        pix_live[6] <= gpu_vf[6];      // BG_Mode[2]
 
-        if (gpu_vf == 2'd3)          pix_hist[0] <= 1'b1;   // FETCHDONE seen
-        if (pixel_out_we)            pix_hist[1] <= 1'b1;
-        if (gpu_ev[0])               pix_hist[2] <= 1'b1;   // drawline
-        if (gpu_ds[9])               pix_hist[3] <= 1'b1;   // OBJ drawer busy
-        if (gpu_ds[9:2] != 8'h00)    pix_hist[4] <= 1'b1;   // any drawer busy
-        if (gbaon)                   pix_hist[5] <= 1'b1;
+        if (gpu_ev[0])                 pix_armed <= 1'b1;
+
+        if (pix_armed) begin
+            if (gpu_vf[1:0] == 2'd1)     pix_hist[0] <= 1'b1;   // STARTREAD
+            if (gpu_vf[1:0] == 2'd2)     pix_hist[1] <= 1'b1;   // WAITREAD
+            if (gpu_vf[1:0] == 2'd3)     pix_hist[2] <= 1'b1;   // FETCHDONE
+            if (gpu_vf[1:0] == 2'd0)     pix_hist[3] <= 1'b1;   // back to IDLE
+        end
+
+        if (pixel_out_we)              pix_hist[4] <= 1'b1;
+        if (gpu_ev[0])                 pix_hist[5] <= 1'b1;   // drawline
+        if (gpu_ds[9])                 pix_hist[6] <= 1'b1;   // OBJ drawer busy
+        if (gpu_ds[9:2] != 8'h00)      pix_hist[7] <= 1'b1;   // any drawer busy
+        if (gbaon)                     pix_hist[8] <= 1'b1;
     end
 end
-// Band 15 is the leftmost, so band 0 lands in bit 0 and the ordering below is
-// left to right on screen.
-wire [15:0] DBG_band_WORD = {4'b0, pix_live[11], pix_hist[5:0], pix_live[4:0]};
-assign dbg_bits = DBG_band_WORD;
+// Bit 15 is the leftmost, so band 0 lands in bit 0 and the order below reads left
+// to right on screen.
+assign dbg_bits = {pix_hist, pix_live};
 assign dbg_done = 1'b0;
 `else
 assign dbg_bits      = 16'h0000;
