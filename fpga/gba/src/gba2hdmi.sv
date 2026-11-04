@@ -174,44 +174,42 @@ always @(posedge clk) begin
     mem_portA_wdata <= st_colour(st_x, st_y);
 end
 `elsif TINYGBA_PIXTEST
-// TinyGBA: the GPU drawer's line-start chain drawn as eight bands.  Selected with
-// TINYGBA_DEFINES=-DTINYGBA_PIXTEST.
+// TinyGBA: the GPU drawer's live state and history drawn as sixteen bands.
+// Selected with TINYGBA_DEFINES=-DTINYGBA_PIXTEST.
 //
-// The previous build of this test carried the timing generator's ladder, and it
-// came back with the raster proven: reset released, state machine left VISIBLE,
-// counter past 700, edge detector firing -- everything except the 1008 rung,
-// which is unreachable by construction.  Yet no pixel has ever been written, so
-// the fault is now inside the drawer's draw state machine and this build shows
-// how far through a line it gets.
+// The raster is proven (BRD-017) and the line reaches the drawer (BRD-018), so
+// the question this frame answers is where inside the drawer a line stops.  It
+// takes the framebuffer away from the GPU and sweeps its own raster over the
+// whole 240x160 array, so the display path is proven by the field appearing at
+// all and says nothing about the machine.
 //
-// This build takes the framebuffer away from the GPU and sweeps its own raster
-// over the whole 240x160 array, so the display path is proven by the field
-// appearing at all and says nothing about the machine.
+// Bands 0 to 4 are LIVE levels, re-sampled every clk50; bands 5 to 10 are sticky
+// ever-true history.  Read the first five as "where is it now" and the last six
+// as "did the machinery ever work".
 //
-//   band 0 (x   0..29)  drawstate reached WAITHBLANK
-//   band 1 (x  30..59)  drawstate reached DRAWING
-//   band 2 (x  60..89)  drawstate reached MERGING
-//   band 3 (x  90..119) `drawline` fired            (control: known white)
-//   band 4 (x 120..149) `pixel_out_we` asserted     (control: known black)
-//   band 5 (x 150..179) busy_allmod[7] set -- the OBJ drawer reported busy
-//   band 6 (x 180..209) busy_allmod[6] set -- the mode 3/4/5 drawer reported busy
-//   band 7 (x 210..239) a drawer stayed busy for 4096 consecutive clk50 cycles,
-//                       which is longer than any drawer needs for a line
+//   band  0 (x   0..14) drawstate[0]           live  } 0 IDLE 1 WAITHBLANK
+//   band  1 (x  15..29) drawstate[1]           live  } 2 DRAWING 3 MERGING
+//   band  2 (x  30..44) busy_mode345           live
+//   band  3 (x  45..59) vramfetch[0]           live  } 0 IDLE 1 STARTREAD
+//   band  4 (x  60..74) vramfetch[1]           live  } 2 WAITREAD 3 FETCHDONE
+//   band  5 (x  75..89) vramfetch reached FETCHDONE ever
+//   band  6 (x  90..104) `pixel_out_we` ever          (control: expected black)
+//   band  7 (x 105..119) `drawline` ever              (control: expected white)
+//   band  8 (x 120..134) busy_modeobj ever
+//   band  9 (x 135..149) busy_allmod ever non-zero
+//   band 10 (x 150..164) gbaon ever high
+//   band 11 (x 165..179) gbaon live
+//   bands 12..15 (x 180..239) unused, black
 //
-// The previous build established that `drawline` and `hblank_trigger` both fire
-// and that `pixel_out_we` never does: the line reaches the drawer and dies there.
-// Bands 0 to 2 say which state it stops in, and band 7 says whether a drawer
-// failed to finish (the DRAWING exit) rather than the machine never advancing.
+// The discriminating pair is band 2 against bands 3 and 4: `busy_mode345` high
+// with `vramfetch` parked in WAITREAD names a VRAM fetch that never collected its
+// data, which parks the drawer in DRAWING for ever and never merges a pixel out.
 //
-// Every band is a latched "ever true since power-on", taken in the drawer's own
-// fclk domain.  An earlier build of this test showed the timing generator's taps
-// live instead of latched and six of its eight bands were a coin flip, because
-// the counter sweeps 0..1007 continuously; that build is superseded and its
-// reading must not be reused.
-//
-// The field itself is grey and unconditional.  If no field appears, the display
-// path is broken in this build and no earlier conclusion about the picture is
-// safe -- that is the case the unconditional write exists to make visible.
+// An earlier build of this test latched every band and produced a strip that said
+// WAITHBLANK had been reached while `drawline` was clear, which is impossible;
+// the latches were sampling arbitrary power-up values.  Live levels are the
+// correct instrument for a stuck machine, and the sticky bands are only the
+// controls.
 //
 // `pixel_data`, `pixel_x` and `pixel_y` are folded into the low bit of the blue
 // channel rather than ignored.  Taking the framebuffer away from the GPU leaves
@@ -222,12 +220,12 @@ end
 // every one of those bits live, which is what makes the answer mean anything.
 wire px_tint = ^{pixel_data, pixel_x, pixel_y};
 
-// Eight bands across the top, each 30 source pixels wide, showing DBG_gt[0..7]
+// Sixteen bands across the top, each 15 source pixels wide, showing dbg_bits[0..15]
 // left to right.  White means set, black means clear, and the boundaries are at
 // fixed x so a shifted or mirrored scan cannot be mistaken for a different read.
 function [17:0] px_colour(input [7:0] x, input [7:0] y);
     if (y < 8'd16)
-        px_colour = dbg_bits[x / 8'd30] ? {6'h3f, 6'h3f, 6'h3f} : {6'h00, 6'h00, 6'h00};
+        px_colour = dbg_bits[x / 8'd15] ? {6'h3f, 6'h3f, 6'h3f} : {6'h00, 6'h00, 6'h00};
     else
         px_colour = {6'h20, 6'h20, {5'b10000, px_tint}};
 endfunction

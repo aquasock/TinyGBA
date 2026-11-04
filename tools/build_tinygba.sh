@@ -260,6 +260,26 @@ elif [[ $parity -ne 0 ]]; then
     exit 1
 fi
 
+# ------------------------------------------------------ 1c. clock-edge gate
+# For GW5A, synth_gowin keeps only a plain negedge flop as a true DFFN and
+# legalises every negedge flop with an enable or reset into a posedge DFFRE
+# behind a LUT1 inverter of the clock.  When both kinds sit on one clock the
+# two halves are a few ns apart on fabric routing with no hold check between
+# them.  That stopped the SuperFX on the board in the sibling TinySNES project
+# (its core-reference TCL-020), where the symptom looked like a logic deadlock
+# and no ideal-clock bench could see it.  TinyGBA had no gate for the class, so
+# this build inherits one.  Measured 2026-11-04: this tree has no DFFN at all
+# and no flop clock pin on fabric, so the gate is insurance rather than a fix.
+echo "=== 1c. clock-edge gate ==="
+edge=0
+"$suite/py3bin/python3" "$root/tools/clock_edge_check.py" "$out/tinygba.json" \
+    >"$out/clock-edge.log" 2>&1 || edge=$?
+sed 's/^/  /' "$out/clock-edge.log"
+if [[ $edge -ne 0 ]]; then
+    echo "clock-edge gate failed; see $out/clock-edge.log" >&2
+    exit 1
+fi
+
 
 # --------------------------------------------------------------- 2. place and route
 # `pack` means "pack the routed netlist that is already here", not "place and

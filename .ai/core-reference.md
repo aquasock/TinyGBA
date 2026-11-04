@@ -466,3 +466,31 @@ Field meanings:
     - "This repository, `fpga/gba/src/gpu/gba_gpu_timing.v`: `reg mclk_r;` hoisted above the tap block that reads it"
     - "This repository, `fpga/gba/src/gbatang_top.sv`: `TINYGBA_GPU_TAPS` moved from line 948 to line 108, above the `gpu_dbg` declaration at line 282"
   verification: "Measured 2026-11-03. The misplaced define failed elaboration outright with 'use of undeclared identifier gpu_dbg' and elaborated once moved. The misplaced assign produced a netlist whose tap bits were reported as `VCC`-driven until the assign was moved, after which the bits traced to the intended sources."
+
+- record_id: TCL-015
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "This tree contains no DFFN and no fabric clock, and a build gate now keeps it that way"
+  status: VERIFIED
+  verified_date: 2026-11-04
+  statement: "The sibling TinySNES project lost a cycle to a synthesis behaviour recorded there as TCL-020: for GW5A, `synth_gowin` keeps only a plain negedge flop as a true `DFFN` and legalises every negedge flop carrying an enable or a synchronous reset into a posedge `DFFRE` behind a `LUT1` inverter of the clock. When both kinds sit on one clock the two halves clock a few ns apart on fabric routing and nextpnr times the inverted net as an unrelated clock, so the path between them is never hold-checked; that deadlocked the SuperFX on the board while a bench with ideal clocks ran it. Measured on this port 2026-11-04: the routed netlist `build/drw3_1/tinygba-routed.json` carries 3,077 `DFF`, 8,251 `DFFRE` and zero `DFFN`, and no flop or block RAM clock pin is driven by a `LUT1`/`LUT2`/`MUX2`/`INV` cell. The construct is therefore absent from TinyGBA rather than fixed in it, and twelve `negedge` occurrences in the RTL are all asynchronous reset terms or the HDMI serialiser's intended `clk_pixel_x5` negedge. `tools/clock_edge_check.py` is now ported from TinySNES and runs as build step `1c`, immediately after the register-parity gate, reading the synthesised netlist before place and route because that is where the legalisation has already happened and the inverted net is still named."
+  consequence: "`DFFN` count is the cheap invariant to watch. A non-zero count on this design means someone added a plain negedge flop and the gate will refuse the build until that flop is given a synchronous reset or enable, which is the repair TinySNES records. Do not describe the gate as a fix for a present fault: it changed no logic, and the netlist it judges was already clean. Its value is that the property was previously unchecked and this project's netlists had never been examined for the class."
+  sources:
+    - "This repository, `build/drw3_1/tinygba-routed.json`: flop primitive census and the clock-pin driver scan"
+    - "This repository, `tools/clock_edge_check.py` and `tools/build_tinygba.sh` build step `1c`"
+    - "TinySNES `.ai/core-reference.md` TCL-020 and `tools/clock_edge_check.py`, the port's origin"
+  verification: "Measured 2026-11-04. The gate was proven to fire rather than assumed to: a minimal module carrying one plain negedge flop plus negedge flops with an enable and with a reset, synthesised with `synth_gowin -family gw5a`, makes the gate exit 1 and name the clock, the true negedge flop and the inverter; this tree's netlists exit 0; a missing file and a missing argument exit 2. The gate ran inside the real flow on `build/pix16_s1` and reported `clock edges: OK`."
+
+- record_id: BRD-019
+  kind: BOARD
+  topic_id: BRD
+  title: "No placement this tree produces puts all four clocks on pips measured good on this board"
+  status: VERIFIED
+  verified_date: 2026-11-04
+  statement: "`tools/clock_plane_report.py --strict` refuses every placement tried, exiting 1 on both `build/drw3_1/tinygba-routed.json` and `build/pix16_s1/tinygba-routed.json`. `clk16` reaches its sinks on six `*/TOP3` pips -- `SPINE1`, `SPINE2`/`SPINE19`, `SPINE20`, `SPINE26`, `SPINE27`, `SPINE28` -- none of which this board has a record for; `clk50` uses `SPINE0/TOP0`, `SPINE18/TOP1` and `SPINE26/TOP0` unmeasured alongside two measured-good; `clk67` uses `SPINE19/TOP2` unmeasured and `SPINE27/TOP2` only `partial`; `hclk` uses `SPINE16/BOTTOM2` and `SPINE24/BOTTOM2` unmeasured alongside one measured-good. The six clock-plane paths this project has measured good are all `clkdiv` or `pll` sites on `BOTTOM2`, `TOP0` and `TOP1`, and none of them carries `clk16`. The gate's own wording is that a clock on an unmeasured pip may be fine and may be silent, because nothing has shown it either way."
+  consequence: "A hardware reading from this tree cannot yet be attributed to the design rather than to the pip, which is precisely the ambiguity TinySNES records as its BRD-005: there, the identical netlist booted on a placement taking one spine for the master clock and left the cartridge on placements taking two others, with every build passing Fmax and none reporting a hold violation. The consequence here is a wording rule as much as an engineering one -- a result from an unmeasured `clk16` pip must say so. It does not make the builds wrong. Every image this project has flashed came from this class of placement, including the ones that drew a verified picture and read sixteen green SDRAM bars, so an unmeasured pip is demonstrably not fatal in itself; what is unproven is which pip each individual result came from."
+  sources:
+    - "This repository, `build/drw3_1/clock-plane.log` and `build/pix16_s1/clock-plane.log`, and the same two netlists' `netnames[<clock>].attributes.ROUTING`"
+    - "This repository, `tools/clock_plane_report.py`: the measured-good table and the `--strict` refusal path"
+    - "TinySNES `.ai/core-reference.md` BRD-005, the sibling project's placement-decides-it result"
+  verification: "Measured 2026-11-04 from the routed netlists rather than from build timestamps: the strict gate exits 1 on both, the default gate exits 0 on both, and the bridge-pip strings were read directly (`clk16` 7 bridge pips / 149 spine references, `clk50` 6/140, `clk67` 2/19, `hclk` 4/47). Not measured on hardware: no build has been loaded since this record was written."

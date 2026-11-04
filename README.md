@@ -32,8 +32,22 @@ cartridge has run on the board, so no game has produced a picture.
   and about 4,500 of 9,100 flip-flops. Driving the wire low restores them, and on
   the board the halt now clears and the CPU runs its boot halt loop — fifteen
   halts, each one woken by VBlank, where the previous build entered one and
-  never left. See `core-reference.md` TCL-011, BRD-008 and BRD-009. It has still
-  never fetched from `0x08000000`, so no retail title has produced a picture.
+  never left. See `core-reference.md` TCL-011, BRD-008 and BRD-009.
+
+  A cartridge fetch has since been observed on the board, but only in one of two
+  states the same bitstream alternates between across loads (BRD-014): the good
+  state fetches, the bad state halts once and never wakes. The GPU raster is
+  proven running (BRD-017) and the line reaches the drawer (BRD-018), where
+  `pixel_out_we` never asserts. That is the whole remaining distance to a
+  picture, and no retail title has produced one yet.
+
+- **The clock plan is not settled.** `clk16` reaches its sinks on six `*/TOP3`
+  pips this board has never measured, and `tools/clock_plane_report.py --strict`
+  refuses every placement this tree produces. Only four clock-plane paths are
+  measured-good here, and the sibling TinySNES project's BRD-005 records the same
+  netlist booting or not depending only on which spine the master clock takes. A
+  hardware reading from this tree cannot yet be attributed to the design rather
+  than to the pip.
 
 ## Build
 
@@ -70,6 +84,14 @@ timing report and both have shipped an image that was wrong:
   named net, whether it exists and whether every bit has a driver. Use it before
   trusting any hardware reading from a build, and `--compare` two netlists to see
   what a change did to the fetch path.
+- **`tools/clock_edge_check.py`** (build step 1c) refuses a netlist in which one
+  clock drives both a true negedge flop and a LUT clock inverter. On GW5A,
+  `synth_gowin` keeps only a plain negedge flop as `DFFN` and legalises every
+  negedge flop with an enable or reset into a posedge `DFFRE` behind a LUT1
+  inverter, so the two halves clock a few ns apart with no hold check between
+  them. That deadlocked the SuperFX in the sibling TinySNES project; this port
+  had no gate for the class. Measured 2026-11-04: this tree has no `DFFN` at all,
+  so the gate is insurance rather than a fix.
 
 ### Diagnostic builds
 
@@ -80,6 +102,7 @@ timing report and both have shipped an image that was wrong:
 | `TINYGBA_SDRAM_TEST` + `TINYGBA_SDRAM_LANES` | the low halfword's sixteen data bits, green = that lane returned 1 |
 | `TINYGBA_OVERLAY_OFF` | production machine with the OSD suppressed — use this in one-wire mode |
 | `TINYGBA_STATUS_TEST` | sixteen probe bits: fetch region, raster, halt state and interrupt enables |
+| `TINYGBA_PIXTEST` | sixteen drawer bands: live `drawstate`, `busy_mode345` and the VRAM fetch state, plus history controls |
 
 The `TINYGBA_STATUS_TEST` bar layout is **generated**, not hand-written. One field
 list in `tools/probe_map.py` produces both the RTL packing

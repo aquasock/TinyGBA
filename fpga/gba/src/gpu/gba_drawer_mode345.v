@@ -1,11 +1,23 @@
 
-module gba_drawer_mode345(fclk, BG_Mode, line_trigger, drawline, busy, second_frame, mosaic, Mosaic_H_Size, refX, refY, refX_mosaic, refY_mosaic, dx, dy, pixel_we, pixeldata, pixel_x, PALETTE_Drawer_addr, PALETTE_Drawer_data, PALETTE_Drawer_valid, VRAM_Drawer_addr_Lo, VRAM_Drawer_addr_Hi, VRAM_Drawer_data_Lo, VRAM_Drawer_data_Hi, VRAM_Drawer_valid_Lo, VRAM_Drawer_valid_Hi);
+module gba_drawer_mode345(fclk, BG_Mode, line_trigger, drawline, busy, second_frame, mosaic, Mosaic_H_Size, refX, refY, refX_mosaic, refY_mosaic, dx, dy, pixel_we, pixeldata, pixel_x, PALETTE_Drawer_addr, PALETTE_Drawer_data, PALETTE_Drawer_valid, VRAM_Drawer_addr_Lo, VRAM_Drawer_addr_Hi, VRAM_Drawer_data_Lo, VRAM_Drawer_data_Hi, VRAM_Drawer_valid_Lo, VRAM_Drawer_valid_Hi, DBG_vf);
     input            fclk;
     input [2:0]      BG_Mode;
     
     input            line_trigger;
     input            drawline;
     output reg       busy;
+
+    // TinyGBA: the VRAM fetch state, exported raw for the TINYGBA_PIXTEST bands.
+    // `busy` below only clears when a fetch reaches FETCHDONE, so a fetch that
+    // never completes parks this machine in DRAWING for ever and no pixel is ever
+    // merged out.  Reading `vramfetch` on the board says which fetch state it is
+    // parked in, which `busy` alone cannot: 0 IDLE, 1 STARTREAD, 2 WAITREAD,
+    // 3 FETCHDONE.  Exported rather than latched here because a register inside
+    // this module has no path to a displayed output and synthesis removes it
+    // (core-reference TCL-013); the assign is at the end of the module, after
+    // `vramfetch` is declared, because a reference before its declaration would
+    // silently create an implicit wire (TCL-014).
+    output      [1:0]  DBG_vf;
     
     input            second_frame;
     input            mosaic;
@@ -227,5 +239,9 @@ module gba_drawer_mode345(fclk, BG_Mode, line_trigger, drawline, busy, second_fr
 
             endcase
         end 
+
+    // TinyGBA: after `vramfetch` is declared, so this reads the register rather
+    // than creating an implicit wire (core-reference TCL-014).
+    assign DBG_vf = vramfetch;
     
 endmodule

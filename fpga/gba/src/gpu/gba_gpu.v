@@ -8,6 +8,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         , DBG_gt
         , DBG_ev
         , DBG_ds
+        , DBG_vf
 `endif
         );
     `include "pproc_bus_gba.sv"
@@ -124,6 +125,13 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
     // top level to latch.  See gba_gpu_drawer.v, where latching locally was
     // removed by synthesis.
     output     [9:0]          DBG_ds;
+    // TinyGBA: the mode 3/4/5 drawer's VRAM fetch state.  `busy_mode345` only
+    // clears when a fetch reaches FETCHDONE, and the fetch pipeline manufactures
+    // its own `valid` strobes from a free-running counter (see
+    // gba_gpu_drawer.v's VRAM_Drawer_cnt_Lo), so a stalled fetch parks the
+    // drawer in DRAWING for ever and nothing is ever merged out.  This names the
+    // state a hung line is parked in rather than merely that it is hung.
+    output     [1:0]          DBG_vf;
 `endif
 
     gba_gpu_timing #(.is_simu(is_simu)) igba_gpu_timing(
@@ -224,6 +232,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         .PALETTE_OAM_we(PALETTE_OAM_we)
 `ifdef TINYGBA_GPU_TAPS
         , .DBG_ds(DBG_ds)
+        , .DBG_vf(DBG_vf)
 `endif
     );
 

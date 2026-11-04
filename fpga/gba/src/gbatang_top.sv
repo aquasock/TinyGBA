@@ -108,7 +108,7 @@ module gbatang_top (
 // below, because `ifdef is read in order: the tap declarations come first and a
 // define written after them has no effect.  Two diagnostic builds need them.
 // TINYGBA_STATUS_TEST draws the sixteen-bit probe word; TINYGBA_PIXTEST draws
-// three bands that answer one question each.
+// the drawer's sixteen bands.
 `ifdef TINYGBA_STATUS_TEST
   `define TINYGBA_GPU_TAPS
 `endif
@@ -282,6 +282,7 @@ wire pixel_out_we /* verilator public */;
 wire [7:0]  gpu_dbg;        // GPU timing generator internals, see gba_gpu_timing.v
 wire [1:0]  gpu_ev;         // GPU drawer line-start events, see gba_gpu.v
 wire [9:0]  gpu_ds;         // GPU drawer state machine + busy vector, see gba_gpu.v
+wire [1:0]  gpu_vf;         // GPU mode 3/4/5 drawer VRAM fetch state, see gba_gpu.v
 `endif
 wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
                             //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
@@ -573,129 +574,95 @@ assign dbg_bits = st_dbg;
 assign dbg_done = gbaon;
 `else
 `ifdef TINYGBA_PIXTEST
-// TinyGBA: three facts, drawn as three bands across the top of the test field in
-// gba2hdmi.  The status probe's sixteen bits answered "what state is the machine
-// in" and cost a decoder; this answers questions a decoder cannot mis-state,
-// because every answer is the colour of a band:
+// TinyGBA: the GPU drawer's live state and its history, drawn as sixteen bands
+// across the top of the test field in gba2hdmi.  The status probe's sixteen bits
+// answered "what state is the machine in" and cost a decoder; this answers
+// questions a decoder cannot mis-state, because every answer is the colour of a
+// band:
 //
-//   bands 0..7 (x 0..239, 30 source pixels each)   DBG_gt[0..7] from the timing
-//                                                  generator, sticky since power-on
+//   bands 0..15 (x 0..239, 15 source pixels each)   DBG_bits, left to right
 //
-// The previous build of this test showed `gbaon` high and never fallen with no
-// line ever drawn, which killed the cycling-release theory outright: the release
-// is stable and the generator still never leaves VISIBLE.  So the question is now
-// internal to the counter, and the ladder answers it in one picture.  Read left
-// to right, white = set:
+// The timing generator's ladder used to live in this frame and is not repeated,
+// because its answer is already recorded -- BRD-017: the raster runs, the state
+// machine leaves VISIBLE, and every reachable rung sets -- and carrying it would
+// cost half the bands this build needs.  The generator is not in question.  The
+// drawer is.
 //
-//   band 0  the generator has seen reset released   (expect white)
-//   band 1  the state machine has left VISIBLE      (the thing under test)
-//   band 2  cycles reached 100
-//   band 3  cycles reached 1008 -- unreachable by construction, always black
-//   band 4  the `mclk` edge detector has fired      (advances the counter)
-//   band 5  cycles reached 400
-//   band 6  cycles reached 700
-//   band 7  cycles reached 1000
+// The 2026-11-03 build established that `drawline` and `hblank_trigger` both fire
+// and that `pixel_out_we` never does, so a line reaches the drawer and dies
+// there.
 //
-// Band 4 black means the counter is not being driven at all and the fault is the
-// edge detector.  Band 4 white with bands 5 to 7 black means the counter advances
-// but never gets far, so something is clearing it.  Bands 5 to 7 white with band
-// 1 black would be a contradiction and means the threshold comparison is wrong.
-(* keep *) reg pix_gbaon_high, pix_gbaon_fell;
-// Sticky OR of the whole ladder on the generator's own clock.  This is the
-// correction to the first build of this test: `DBG_gt`'s threshold comparisons
-// are live, and the counter sweeps 0..1007 continuously, so a live word sampled
-// at one instant reads "below 100, in VISIBLE" about nine times in ten even on a
-// perfectly healthy raster.  The first build therefore reported a coin flip on
-// six of its eight bands.  Latched here, each band means "ever true since reset",
-// which is the question being asked.
-(* keep *) reg [7:0] pix_ladder;
-// Same-domain release history: `gbaon` is generated on clk16 but the counter it
-// resets runs on clk50, so a narrow drop could in principle be missed by a
-// clk16-only latch.  This one samples on clk50 and therefore cannot miss a drop
-// that actually reached the generator.
-(* keep *) reg pix_high50, pix_fell50;
+// Bands 0 to 4 are LIVE LEVELS, re-sampled every clk50.  That is deliberate and
+// is the correction to the previous build of this test.  The previous build
+// latched everything, and the machine is stuck rather than transient, so the
+// steady state is the answer; a latch started sampling `drawstate` from the
+// instant reset released, which is how one build produced a strip that said
+// WAITHBLANK had been reached while `drawline` was clear -- an impossible pair
+// that identified the instrument, not the machine, as the fault.
+//
+// Band 5 to 10 are STICKY ever-true history, cleared on reset.  They are the
+// controls: each one is a fact that a healthy machine must have produced, so a
+// black control band means the premise of the whole picture is wrong rather than
+// that the fault moved.
+//
+//   band  0  drawstate[0]        live   \\  together these read the state
+//   band  1  drawstate[1]        live   /   0 IDLE 1 WAITHBLANK 2 DRAWING 3 MERGING
+//   band  2  busy_mode345        live   the mode 3/4/5 drawer has not finished
+//   band  3  vramfetch[0]        live   \\  the VRAM fetch state a hung line is
+//   band  4  vramfetch[1]        live   /   parked in: 0 IDLE 1 STARTREAD
+//                                           2 WAITREAD 3 FETCHDONE
+//   band  5  vramfetch reached FETCHDONE ever  (a fetch did complete once)
+//   band  6  pixel_out_we ever                 (control: known black)
+//   band  7  drawline ever                     (control: known white)
+//   band  8  busy_modeobj ever                 (the OBJ drawer ran at all)
+//   band  9  busy_allmod ever non-zero         (some drawer started)
+//   band 10  gbaon ever high                   (the machine was released)
+//   band 11  gbaon live
+//   band 12..15  unused, black
+//
+// Read bands 0 to 4 as the answer to "where is it now" and 5 to 10 as "did the
+// machinery ever work at all".  The discriminating pair is band 2 against bands
+// 3 and 4: `busy_mode345` high with `vramfetch` in WAITREAD names a fetch that
+// never collected its data, because `busy_mode345` only clears when a fetch
+// reaches FETCHDONE.  That state machine waits on `VRAM_Drawer_valid_Lo` / `_Hi`,
+// which are one-cycle strobes manufactured from a free-running counter, and the
+// WAITREAD branch spends a two-cycle `vram_readwait` countdown BEFORE it looks at
+// them -- so a strobe arriving inside that window is discarded and the poll then
+// waits for a pulse that has already gone.  Nothing in the Verilator model can
+// expose that, because the model's memory returns on an ideal schedule.
+//
+// `busy_modeobj` is read as a raw bit rather than through a whole-vector compare:
+// a comparison against a constant folds to a single constant when synthesis can
+// prove it, and one band of an earlier attempt did exactly that.
+//
+// Every band is registered on clk50, the drawer's own clock, so the picture is
+// taken in the domain that produces the signals.
+(* keep *) reg [15:0] pix_live;    // bands 0..4 and 11, live levels
+(* keep *) reg [5:0]  pix_hist;    // bands 5..10, ever-true since reset
 always @(posedge clk50) begin
     if (~resetn) begin
-        pix_ladder  <= 8'b0;
-        pix_high50  <= 1'b0;
-        pix_fell50  <= 1'b0;
+        pix_live <= 16'b0;
+        pix_hist <= 6'b0;
     end else begin
-        pix_ladder  <= pix_ladder | gpu_dbg[7:0];
-        if (gbaon)                  pix_high50 <= 1'b1;
-        else if (pix_high50)        pix_fell50 <= 1'b1;
-    end
-end
-// The drawer's line-start events, latched on the same clock as everything else.
-// The timing ladder above came back from the board with every rung set except the
-// one that is unreachable by construction: the raster runs, leaves VISIBLE and
-// its counter climbs past 700.  What still never happens is a pixel write, so the
-// question has moved one stage down and this byte answers it.
-//
-// Latching inside the drawer was tried first and the synthesiser removed the
-// registers, because nothing up there forced them onto a path to a displayed
-// output.  These three come from the top level instead.
-// The drawer's state machine, now that the chain above has narrowed to it.  The
-// last build established that `drawline` and `hblank_trigger` both fire and that
-// `pixel_out_we` never does, so the line reaches the drawer and dies there.  This
-// one shows where.
-//
-//   band 0  drawstate reached WAITHBLANK
-//   band 1  drawstate reached DRAWING
-//   band 2  drawstate reached MERGING
-//   band 3  `drawline` fired            (control, known white)
-//   band 4  `pixel_out_we` asserted     (control, known black)
-//   band 5  busy_allmod has been seen non-zero at all
-//   band 6  busy_allmod has been seen at zero
-//   band 7  a drawer has been stuck busy for a long time: the OR of busy_allmod
-//           over ~4096 consecutive clk50 cycles, which is longer than any drawer
-//           needs to finish a line, so a persistent bit names a hung drawer
-//
-// Every rung is latched on clk50, the drawer's own clock.
-(* keep *) reg [7:0] pix_drawer;
-(* keep *) reg [9:0] pix_busy_stuck;
-reg [11:0] drw_idle_ctr;
-always @(posedge clk50) begin
-    if (~resetn) begin
-        pix_drawer     <= 8'b0;
-        pix_busy_stuck <= 10'b0;
-        drw_idle_ctr   <= 12'b0;
-    end else begin
-        if (gpu_ds[1:0] == 2'd1)             pix_drawer[0] <= 1'b1;
-        if (gpu_ds[1:0] == 2'd2)             pix_drawer[1] <= 1'b1;
-        if (gpu_ds[1:0] == 2'd3)             pix_drawer[2] <= 1'b1;
-        if (gpu_ev[0])                       pix_drawer[3] <= 1'b1;
-        if (pixel_out_we)                    pix_drawer[4] <= 1'b1;
-        // Raw busy bits rather than `busy_allmod != 0`: a whole-vector comparison
-        // against a constant folds to a single constant when synthesis can prove
-        // it, and one band of the previous attempt did exactly that and would have
-        // read black for ever.  Individual bits cannot fold that way.
-        if (gpu_ds[9])                       pix_drawer[5] <= 1'b1;   // OBJ drawer
-        if (gpu_ds[8])                       pix_drawer[6] <= 1'b1;   // mode345 drawer
+        pix_live[0]  <= gpu_ds[0];      // drawstate[0]
+        pix_live[1]  <= gpu_ds[1];      // drawstate[1]
+        pix_live[2]  <= gpu_ds[8];      // busy_mode345
+        pix_live[3]  <= gpu_vf[0];      // vramfetch[0]
+        pix_live[4]  <= gpu_vf[1];      // vramfetch[1]
+        pix_live[11] <= gbaon;
 
-        // A busy bit that survives 4096 consecutive cycles while the machine is
-        // DRAWING is a drawer that never finishes.  The counter restarts whenever
-        // the vector clears, so this only accumulates on a genuine stall.
-        if (gpu_ds[9:2] == 8'h00) begin
-            drw_idle_ctr <= 12'b0;
-        end else if (drw_idle_ctr != 12'hFFF) begin
-            drw_idle_ctr <= drw_idle_ctr + 12'd1;
-        end
-        if (drw_idle_ctr == 12'hFFF)
-            pix_busy_stuck <= pix_busy_stuck | gpu_ds[9:2];
-        if (pix_busy_stuck != 10'b0)         pix_drawer[7] <= 1'b1;
+        if (gpu_vf == 2'd3)          pix_hist[0] <= 1'b1;   // FETCHDONE seen
+        if (pixel_out_we)            pix_hist[1] <= 1'b1;
+        if (gpu_ev[0])               pix_hist[2] <= 1'b1;   // drawline
+        if (gpu_ds[9])               pix_hist[3] <= 1'b1;   // OBJ drawer busy
+        if (gpu_ds[9:2] != 8'h00)    pix_hist[4] <= 1'b1;   // any drawer busy
+        if (gbaon)                   pix_hist[5] <= 1'b1;
     end
 end
-wire [7:0] DBG_gt_WORD = {pix_fell50, pix_ladder[6:0]};
-always @(posedge clk16) begin
-    if (~resetn) begin
-        pix_gbaon_high <= 1'b0;
-        pix_gbaon_fell <= 1'b0;
-    end else begin
-        if (gbaon)                       pix_gbaon_high <= 1'b1;
-        else if (pix_gbaon_high)         pix_gbaon_fell <= 1'b1;
-    end
-end
-assign dbg_bits = {7'b0, gbaon, pix_drawer};
+// Band 15 is the leftmost, so band 0 lands in bit 0 and the ordering below is
+// left to right on screen.
+wire [15:0] DBG_band_WORD = {4'b0, pix_live[11], pix_hist[5:0], pix_live[4:0]};
+assign dbg_bits = DBG_band_WORD;
 assign dbg_done = 1'b0;
 `else
 assign dbg_bits      = 16'h0000;
@@ -786,6 +753,7 @@ gba_gpu #(.FCLK_SPEED(3)) gpu (
     , .DBG_gt(gpu_dbg)
     , .DBG_ev(gpu_ev)
     , .DBG_ds(gpu_ds)
+    , .DBG_vf(gpu_vf)
 `endif
 );
 
