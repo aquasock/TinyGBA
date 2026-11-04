@@ -173,6 +173,77 @@ always @(posedge clk) begin
     mem_portA_addr  <= st_y * 240 + st_x;
     mem_portA_wdata <= st_colour(st_x, st_y);
 end
+`elsif TINYGBA_PIXTEST
+// TinyGBA: the GPU drawer's line-start chain drawn as eight bands.  Selected with
+// TINYGBA_DEFINES=-DTINYGBA_PIXTEST.
+//
+// The previous build of this test carried the timing generator's ladder, and it
+// came back with the raster proven: reset released, state machine left VISIBLE,
+// counter past 700, edge detector firing -- everything except the 1008 rung,
+// which is unreachable by construction.  Yet no pixel has ever been written, so
+// the fault is now inside the drawer's draw state machine and this build shows
+// how far through a line it gets.
+//
+// This build takes the framebuffer away from the GPU and sweeps its own raster
+// over the whole 240x160 array, so the display path is proven by the field
+// appearing at all and says nothing about the machine.
+//
+//   band 0 (x   0..29)  drawstate reached WAITHBLANK
+//   band 1 (x  30..59)  drawstate reached DRAWING
+//   band 2 (x  60..89)  drawstate reached MERGING
+//   band 3 (x  90..119) `drawline` fired            (control: known white)
+//   band 4 (x 120..149) `pixel_out_we` asserted     (control: known black)
+//   band 5 (x 150..179) busy_allmod[7] set -- the OBJ drawer reported busy
+//   band 6 (x 180..209) busy_allmod[6] set -- the mode 3/4/5 drawer reported busy
+//   band 7 (x 210..239) a drawer stayed busy for 4096 consecutive clk50 cycles,
+//                       which is longer than any drawer needs for a line
+//
+// The previous build established that `drawline` and `hblank_trigger` both fire
+// and that `pixel_out_we` never does: the line reaches the drawer and dies there.
+// Bands 0 to 2 say which state it stops in, and band 7 says whether a drawer
+// failed to finish (the DRAWING exit) rather than the machine never advancing.
+//
+// Every band is a latched "ever true since power-on", taken in the drawer's own
+// fclk domain.  An earlier build of this test showed the timing generator's taps
+// live instead of latched and six of its eight bands were a coin flip, because
+// the counter sweeps 0..1007 continuously; that build is superseded and its
+// reading must not be reused.
+//
+// The field itself is grey and unconditional.  If no field appears, the display
+// path is broken in this build and no earlier conclusion about the picture is
+// safe -- that is the case the unconditional write exists to make visible.
+//
+// `pixel_data`, `pixel_x` and `pixel_y` are folded into the low bit of the blue
+// channel rather than ignored.  Taking the framebuffer away from the GPU leaves
+// them unconsumed, and the first build of this test did exactly that: synthesis
+// pruned 2,509 flip-flops and 28 block RAMs out of the drawer's data path, so
+// `pixel_we` would have been measured in a machine that no longer contained the
+// logic which produces it.  A one-LSB tint is invisible on the picture and keeps
+// every one of those bits live, which is what makes the answer mean anything.
+wire px_tint = ^{pixel_data, pixel_x, pixel_y};
+
+// Eight bands across the top, each 30 source pixels wide, showing DBG_gt[0..7]
+// left to right.  White means set, black means clear, and the boundaries are at
+// fixed x so a shifted or mirrored scan cannot be mistaken for a different read.
+function [17:0] px_colour(input [7:0] x, input [7:0] y);
+    if (y < 8'd16)
+        px_colour = dbg_bits[x / 8'd30] ? {6'h3f, 6'h3f, 6'h3f} : {6'h00, 6'h00, 6'h00};
+    else
+        px_colour = {6'h20, 6'h20, {5'b10000, px_tint}};
+endfunction
+
+reg [7:0] px_x, px_y;
+always @(posedge clk) begin
+    if (px_x == 8'd239) begin
+        px_x <= 8'd0;
+        px_y <= (px_y == 8'd159) ? 8'd0 : px_y + 8'd1;
+    end else begin
+        px_x <= px_x + 8'd1;
+    end
+    mem_portA_we    <= 1'b1;
+    mem_portA_addr  <= px_y * 240 + px_x;
+    mem_portA_wdata <= px_colour(px_x, px_y);
+end
 `elsif TINYGBA_VIDEO_TEST
 // TinyGBA: video-path proof, selected with TINYGBA_DEFINES=-DTINYGBA_VIDEO_TEST.
 // Nothing in this port has produced a picture yet, and the SDRAM probe's answer

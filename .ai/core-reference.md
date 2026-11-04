@@ -410,3 +410,59 @@ Field meanings:
     - "This repository, `build/rf_4/tinygba.json`: `video.mem_portA_we` driven by `video.mem_portA_we_DFF_Q`, whose `D` is `gpu.igba_gpu_colorshade.pixel_out_we`"
     - "Standalone bench at /tmp/gt_cycle/tb_gt_phase.sv, 2026-11-03: twelve `clk16` phase offsets, 2 VBlanks at each"
   verification: "Measured 2026-11-03. The model render and its counters are from a completed 400,000,000-step run; the netlist trace is from the routed netlist of the deployed image `build/rf_4/tinygba.fs` (SHA-256 `752d933ee7bfa62410f954f5c0e19143650fe7e8a805f2d1051f9aaf3ff9ad19`); the phase result is a twelve-point sweep. The board's black picture is the operator's report across every image deployed this session."
+
+- record_id: BRD-017
+  kind: BOARD
+  topic_id: BRD
+  title: "The GPU raster runs on the board once the cycle counter's dead reset is fixed"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "A `TINYGBA_PIXTEST` build carrying the timing generator's ladder across the framebuffer read `white white white black white white white black` on the board, under commit `071e49f`'s fix to `gba_gpu_timing.v`. Decoded against the ladder in `gba_gpu_timing.v`: reset released, the state machine left VISIBLE, `cycles_reg` passed 100, the 1008 rung stayed black, the `mclk` rising-edge detector fired, and `cycles_reg` passed 400 and 700. The 1008 rung is black by construction -- the state machine subtracts 1008 in the same cycle it tests for it, so the register never holds that value -- and its darkness is therefore a check that the tap is reading the register and not a copy that could reach the threshold. The rungs were sticky, latched on `clk50` in `gbatang_top.sv`, so each means 'ever true since reset' rather than an instantaneous sample. This supersedes BRD-014's `left_visible=0` and `scanline_run=0`, which were taken from `build/tang_gpu`, built before `071e49f`. The next build in the same session read `drawline` and `hblank_trigger` both firing and `pixel_out_we` never asserting, so the generator completes lines and hands them to the drawer."
+  consequence: "The timing generator is no longer a suspect in the black picture and BRD-014's title, 'the GPU raster never completes a scanline', is settled by the fix it pointed at. The remaining fault is the drawer: lines arrive and no pixel comes out. Do not re-probe the generator's counters, its reset, or the `mclk` edge detector; all three are measured working. Note the instrument requirement that made the reading possible: the threshold comparisons in `DBG_gt` are live signals, and the counter sweeps 0 to 1007 continuously, so an unlatched sample reads 'below 100, in VISIBLE' roughly nine times in ten even on a healthy raster. A live tap of this ladder is uninformative and one build produced six coin-flip bands because of it."
+  sources:
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_timing.v`: the `DBG_gt` ladder and its sticky latch, and the reset-branch fix from commit `071e49f`"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: `pix_ladder`, the sticky-OR latch on `clk50` that carries the ladder to `dbg_bits`"
+    - "Standalone bench at /tmp/gt_cycle/tb_taps.sv, 2026-11-03, which shows a healthy run setting every rung except 1008"
+  verification: "Observed on the board 2026-11-03 by flashing with `openFPGALoader -b tangconsole` and streaming `build/test/test_logo.gba`, reading the eight bands as colours. The same stimulus in Verilator sets the identical rungs, so the pattern the board produced is the healthy one and not an artefact of the decode."
+
+- record_id: BRD-018
+  kind: BOARD
+  topic_id: BRD
+  title: "The drawer receives lines and never emits a pixel"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "On a `TINYGBA_PIXTEST` build whose eight bands carried `drawline`, `hblank_trigger`, `pixel_out_we` and four controls, the board read `white white black white white white black white`: `drawline` fires, `hblank_trigger` fires, `pixel_out_we` never asserts, the generator left VISIBLE, the counter passed 100 and 700, `gbaon` never fell and `gbaon` is high. So the timing generator hands a line to `gba_gpu_drawer` and the drawer never produces a pixel. That narrows the fault to the drawer's own state machine, whose only route to a pixel is IDLE -> WAITHBLANK on `drawline` and `linesDrawn < 160`, then DRAWING on `hblank_trigger`, then MERGING when `busy_allmod == 0`, with `pixel_we` assigned in the merge stage. Two of those three transitions are now measured to happen. A later build attempting to read the state machine directly produced a self-contradictory strip instead, reporting WAITHBLANK reached while `drawline` was clear, which cannot both be true."
+  consequence: "The next instrument must read the drawer's live state and its busy vector, not a latched history. `drawstate` in `gba_gpu_drawer.v` has no reset term anywhere -- it is declared as `reg [1:0] drawstate` and only ever assigned in the state machine -- so it powers up in an arbitrary state, and a sticky latch cleared by `~resetn` starts sampling that value the instant reset releases. For a machine that is stuck rather than transient the steady state is the answer and a live level is the correct instrument. If the state proves to be DRAWING with a busy bit set, the suspect becomes the memory path the drawers read through `gba_memory`'s GPU ports, which no build on this board has ever exercised and which the Verilator model replaces with plain arrays."
+  sources:
+    - "This repository, `fpga/gba/src/gba2hdmi.sv`: the `TINYGBA_PIXTEST` band definition and the eight-band renderer"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: `pix_drawer`, the latch that carries the bands to `dbg_bits`"
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_drawer.v`: the `tdrawstate_*` machine at lines 2005 to 2041, and the absence of any reset on `drawstate`"
+  verification: "Observed on the board 2026-11-03 on `build/drw2_1/tinygba.fs` (SHA-256 `b9fa26e945570f77d6db01c9938d769e0ee9ae207c74bc6562af4ec673f14d63`), read as eight band colours. The matching all-black strip from a different load of `build/drw2_6/tinygba.fs` is the bad state of the bimodality BRD-014 records, not a contradiction."
+
+- record_id: TCL-013
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "Synthesis deletes diagnostic registers that sit on no path to a displayed output"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "A set of eight sticky diagnostic registers placed inside `gba_gpu_drawer.v` and driven from `drawline`, `hblank_trigger`, `drawstate`, `busy_allmod` and `pixel_out_we` produced zero cells in the final netlist: `dr_taps` appeared in the synthesis log's process listing and was then removed, and the top-level consumer was left latched to a hard `VCC`. The registers were their own only consumer, because the module output they drove was itself consumed only by a net that later folded. Exporting the same raw signals as module outputs and latching them at the top level, where they reach `dbg_bits` and therefore the framebuffer, kept all eight. A second instance of the same hazard appeared as a band computed from `busy_allmod == 8'h00`, which folded to the constant-zero net and would have read black for ever regardless of the machine."
+  consequence: "A diagnostic register must reach a displayed output or it will be removed, and a green build says nothing about whether it survived. Verify by counting flip-flops against a known configuration and by confirming each tap bit is a distinct live net rather than a constant, and prefer individual bits over a whole-vector comparison against a constant when the value has to survive. Do not conclude a tap is wired to `VCC` from its `D` pin alone: `D=VCC` with a separate clock enable is how yosys implements `q <= q | signal`, so the enable carries the logic."
+  sources:
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_drawer.v` and `gba_gpu.v`, before and after exporting `DBG_ev` and `DBG_ds` as outputs"
+    - "This repository, `build/drw/tinygba.json` (zero tap cells) against `build/drw2/tinygba.json` (taps present, +13 flip-flops)"
+    - "This repository, `build/drw3/synth.log`: the `$dr_taps[7]` to `$dr_taps[3]` process listing, with no matching cells in the written netlist"
+  verification: "Measured 2026-11-03 by comparing flip-flop and LUT counts between consecutive syntheses of the same configuration, and by checking every tap bit's driving cell in the written netlist. Corrected twice after the first check wrongly read `D=VCC` as a constant."
+
+- record_id: TCL-014
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A reference before its declaration silently becomes an implicit wire, and preprocessor order swallows defines"
+  status: VERIFIED
+  verified_date: 2026-11-03
+  statement: "Two declaration-order faults produced confident wrong readings in one session. An `assign DBG_ds = {busy_allmod, drawstate};` placed beside the port declaration referenced `drawstate`, which is declared some ninety lines further down in `gba_gpu_drawer.v`; Verilog creates an implicit 1-bit wire instead of reading the register, so the concatenation folded and every consumer saw a constant. Separately, a `mclk_r` reference written above its declaration inside `gba_gpu_timing.v` would have tapped a different implicit wire than the register the edge detector uses. The preprocessor has the same hazard in the other direction: a `` `define TINYGBA_GPU_TAPS `` written below the `` `ifdef `` that tests it has no effect, which is what happened when the define was first added beside the overlay logic near the bottom of `gbatang_top.sv` and elaboration failed with 'use of undeclared identifier'."
+  consequence: "Put any continuous assignment after the declarations it reads, and put a conditionally-compiled define above the first `ifdef` that consumes it. Neither fault produces a warning on this flow: the implicit wire elaborates, synthesises, and folds to a constant, so the symptom is a tap that reads a fixed value rather than an error. The tell is the same in both cases -- a tap bit driven by `VCC` or `GND`, or an elaboration error naming an identifier that is defined further down the file."
+  sources:
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_drawer.v`: the `DBG_ds` assign moved from beside the port to the end of the module"
+    - "This repository, `fpga/gba/src/gpu/gba_gpu_timing.v`: `reg mclk_r;` hoisted above the tap block that reads it"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: `TINYGBA_GPU_TAPS` moved from line 948 to line 108, above the `gpu_dbg` declaration at line 282"
+  verification: "Measured 2026-11-03. The misplaced define failed elaboration outright with 'use of undeclared identifier gpu_dbg' and elaborated once moved. The misplaced assign produced a netlist whose tap bits were reported as `VCC`-driven until the assign was moved, after which the bits traced to the intended sources."

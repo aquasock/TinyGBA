@@ -653,3 +653,37 @@ Add `gba2hdmi` to the Verilator build, because the model and the board now agree
 - User Test: FAIL
 
 ---
+
+## 20 COMMIT Unreleased 2026-11-03T21:56:28-07:00
+
+#### Coming From:
+
+Unreleased 071e49f
+
+#### Purpose:
+
+Prove on the board whether the GPU's raster actually runs after the counter-reset fix, and if it does, follow the fault down to the stage that stops producing pixels, while building instruments that cannot report a plausible wrong answer.
+
+#### Outcome:
+
+The raster is proven running on the board and the fault is now localised to the drawer, and reaching that took four instrument defects, each of which produced a confident wrong reading first. The raster result is the session's durable one. A diagnostic build carrying the timing generator's ladder across the framebuffer read `white white white black white white white black` under `TINYGBA_PIXTEST`: reset released, state machine left VISIBLE, counter passed 100, unreachable 1008 rung black as designed, `mclk` edge detector fired, counter passed 400 and 700, and `gbaon` never fell. Every rung that a healthy raster sets was set, and the rung that cannot light by construction stayed dark, which is also a check on the instrument. That supersedes BRD-014's `left_visible=0`/`scanline_run=0`, which came from `build/tang_gpu` built before commit `071e49f`, so the dead `cycles_reg <= 0` in `gba_gpu_timing.v` was the raster fault and fixing it closed that record. The next build moved one stage down and read `white white black white white white black white`: `drawline` fires, `hblank_trigger` fires, and `pixel_out_we` never does, so the timing generator hands lines to the drawer and the drawer never emits a pixel. That chain is now the whole open question. Bimodality was also confirmed rather than assumed: two loads of the same bitstream `build/drw2_6/tinygba.fs` gave an all-black strip and then the good reading, which is BRD-014's warning arriving on schedule and which invalidates every single-sample conclusion taken earlier in the session. Four instrument defects are recorded because each one would have supported a wrong finding. First, the initial eight-band build wired `DBG_gt` live rather than latched; because the counter sweeps 0 to 1007 continuously, a live sample reads "below 100, in VISIBLE" about nine times in ten even on a healthy raster, so six of its eight bands were a coin flip, and the build was replaced with a sticky-OR latch. Second, tap registers placed inside `gba_gpu_drawer.v` were removed entirely by synthesis, because `pix_drawer` was their only consumer and sat on no path to a displayed output; the fix is to export raw signals and latch at the top level, where they reach `dbg_bits`. Third, an `assign` referencing `drawstate` before its declaration silently created an implicit wire, and the comparison folded to a constant. Fourth, a band computed as `busy_allmod == 8'h00` folded to the constant-zero net and would have read black for ever; it was replaced with individual busy bits. A fifth defect ended the session without an answer: the latest build's read `white black black black black white white white` is internally contradictory, because band 0 says the machine reached WAITHBLANK and band 3 says `drawline` never fired, and reaching WAITHBLANK requires `drawline`. The cause is that `drawstate` has no reset anywhere in `gba_gpu_drawer.v`, so it powers up in an arbitrary state, and sticky latches cleared by `~resetn` immediately begin sampling uninitialised values the moment reset releases. For a machine that is stuck rather than transient, a live level is the correct instrument and the latch is what introduced the ambiguity. One timing observation belongs with the handoff and is not explained: the drawer-ladder builds pass `clk67` at 32 to 38 MHz where the preceding family passed at 144 to 164, always inside the 59.70 ns multicycle budget and never a gate failure, with 1,683 fewer LUTs and 24 more flip-flops, which fits ABC choosing a different optimisation boundary as core-log entry 6 recorded rather than a design regression. Nothing is committed from the two seeds that were still routing; both were stopped by pid. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 19 were not rewritten, and validated this entry as entry 20 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of twenty against the 100-entry limit.
+
+#### Next Steps:
+
+Rebuild `TINYGBA_PIXTEST` with live levels instead of sticky latches, because the machine is stuck and its steady state is the answer while the latch is what produced the contradictory reading: bands 0 and 1 should show `drawstate` in binary directly, bands for `drawline`, `hblank_trigger` and `pixel_out_we` should be live levels, and two bands should show `busy_allmod[7]` and `busy_allmod[6]` individually along with an OR of the whole vector, so a stuck-DRAWING state names the busy module by bit position. Take every reading across at least three loads before believing it, since two loads of one bitstream have already disagreed, and treat a strip whose bands contradict each other -- reaching WAITHBLANK without `drawline` is impossible -- as a bad sample rather than a finding. Do not re-derive what this cycle settled: the raster runs, `drawline` and `hblank_trigger` fire, and `pixel_out_we` never asserts. Do not widen the search back to memory, clocks or the OSD. If the drawer turns out to be stuck in DRAWING with a busy drawer named, the memory path that the drawers read through `gba_memory`'s GPU ports is the next suspect, because those ports have never been exercised on this board while the simulator substitutes plain arrays, and that is the same model-versus-hardware gap that hid the `gb_bus_rst` fold. `TINYGBA_GPU_TAPS` now gates every GPU tap and is set by both `TINYGBA_STATUS_TEST` and `TINYGBA_PIXTEST`; a new diagnostic that needs the taps must set it explicitly and must declare it before the first `ifdef` that reads it, since preprocessor order silently swallowed an earlier attempt. The console's FT2232 disappears whenever it is in two-wire mode (BRD-015) and this recurred three times; check `lsusb | grep 0403:6010` before concluding anything about a load failure.
+
+#### Files Modified:
+
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gpu/gba_gpu.v
+- fpga/gba/src/gpu/gba_gpu_drawer.v
+- fpga/gba/src/gpu/gba_gpu_timing.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---

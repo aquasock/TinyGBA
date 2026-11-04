@@ -4,8 +4,10 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         //new_cycles, new_cycles_valid, 
         IRP_HBlank, IRP_VBlank, IRP_LCDStat, hblank_trigger_dma, vblank_trigger_dma, 
         videodma_start_dma, videodma_stop_dma, VRAM_Lo_addr, VRAM_Lo_datain, VRAM_Lo_dataout, VRAM_Lo_we, VRAM_Lo_be, VRAM_Hi_addr, VRAM_Hi_datain, VRAM_Hi_dataout, VRAM_Hi_we, VRAM_Hi_be, vram_blocked, OAMRAM_PROC_addr, OAMRAM_PROC_datain, OAMRAM_PROC_dataout, OAMRAM_PROC_we, PALETTE_BG_addr, PALETTE_BG_datain, PALETTE_BG_dataout, PALETTE_BG_we, PALETTE_OAM_addr, PALETTE_OAM_datain, PALETTE_OAM_dataout, PALETTE_OAM_we, DISPSTAT_debug
-`ifdef TINYGBA_STATUS_TEST
+`ifdef TINYGBA_GPU_TAPS
         , DBG_gt
+        , DBG_ev
+        , DBG_ds
 `endif
         );
     `include "pproc_bus_gba.sv"
@@ -108,8 +110,20 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
     wire                      IRP_HBlank_fclk;      // for converting to mclk
     wire                      IRP_VBlank_fclk;
     wire                      IRP_LCDStat_fclk;
-`ifdef TINYGBA_STATUS_TEST
-    output     [3:0]          DBG_gt;
+`ifdef TINYGBA_GPU_TAPS
+    output     [7:0]          DBG_gt;
+    // TinyGBA: the drawer's line-start events.  `drawline` and
+    // `hblank_trigger` are one-cycle pulses buried inside this module, and the
+    // question left on the board is whether a line ever reaches the drawer at
+    // all.  Latching inside the drawer was tried first and the synthesiser
+    // removed it, because nothing at that level forced the registers to survive;
+    // exporting the raw pulses and latching them at the top level keeps them on
+    // the path to a displayed output, which it cannot prune.
+    output     [1:0]          DBG_ev;   // [0] drawline, [1] hblank_trigger
+    // TinyGBA: the drawer's state machine and busy vector, exported raw for the
+    // top level to latch.  See gba_gpu_drawer.v, where latching locally was
+    // removed by synthesis.
+    output     [9:0]          DBG_ds;
 `endif
 
     gba_gpu_timing #(.is_simu(is_simu)) igba_gpu_timing(
@@ -125,7 +139,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         
         .IRP_HBlank(IRP_HBlank_fclk),
         .IRP_VBlank(IRP_VBlank_fclk),
-`ifdef TINYGBA_STATUS_TEST
+`ifdef TINYGBA_GPU_TAPS
         .DBG_gt(DBG_gt),
 `endif
         .IRP_LCDStat(IRP_LCDStat_fclk),
@@ -208,7 +222,14 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         .PALETTE_OAM_datain(PALETTE_OAM_datain),
         .PALETTE_OAM_dataout(PALETTE_OAM_dataout),
         .PALETTE_OAM_we(PALETTE_OAM_we)
+`ifdef TINYGBA_GPU_TAPS
+        , .DBG_ds(DBG_ds)
+`endif
     );
+
+`ifdef TINYGBA_GPU_TAPS
+    assign DBG_ev = {hblank_trigger, drawline};
+`endif
 
     // assign pixel_out_x = pixel_x;
     // assign pixel_out_2x = pixel_2x;

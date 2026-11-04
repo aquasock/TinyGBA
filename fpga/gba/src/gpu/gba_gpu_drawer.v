@@ -1,5 +1,9 @@
 module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rnw, gb_bus_ena, gb_bus_done, gb_bus_acc, gb_bus_be, gb_bus_rst, 
-        lockspeed, interframe_blend, maxpixels, hdmode2x_bg, hdmode2x_obj, bitmapdrawmode, vram_block_mode, pixel_out_x, pixel_out_2x, pixel_out_y, pixel_out_addr, pixel_out_data, pixel_out_we, pixel2_out_x, pixel2_out_data, pixel2_out_we, linecounter, pixelpos, drawline, refpoint_update, hblank_trigger, vblank_trigger, line_trigger, newline_invsync, VRAM_Lo_addr, VRAM_Lo_datain, VRAM_Lo_dataout, VRAM_Lo_we, VRAM_Lo_be, VRAM_Hi_addr, VRAM_Hi_datain, VRAM_Hi_dataout, VRAM_Hi_we, VRAM_Hi_be, OAMRAM_PROC_addr, OAMRAM_PROC_datain, OAMRAM_PROC_dataout, OAMRAM_PROC_we, PALETTE_BG_addr, PALETTE_BG_datain, PALETTE_BG_dataout, PALETTE_BG_we, PALETTE_OAM_addr, PALETTE_OAM_datain, PALETTE_OAM_dataout, PALETTE_OAM_we);
+        lockspeed, interframe_blend, maxpixels, hdmode2x_bg, hdmode2x_obj, bitmapdrawmode, vram_block_mode, pixel_out_x, pixel_out_2x, pixel_out_y, pixel_out_addr, pixel_out_data, pixel_out_we, pixel2_out_x, pixel2_out_data, pixel2_out_we, linecounter, pixelpos, drawline, refpoint_update, hblank_trigger, vblank_trigger, line_trigger, newline_invsync, VRAM_Lo_addr, VRAM_Lo_datain, VRAM_Lo_dataout, VRAM_Lo_we, VRAM_Lo_be, VRAM_Hi_addr, VRAM_Hi_datain, VRAM_Hi_dataout, VRAM_Hi_we, VRAM_Hi_be, OAMRAM_PROC_addr, OAMRAM_PROC_datain, OAMRAM_PROC_dataout, OAMRAM_PROC_we, PALETTE_BG_addr, PALETTE_BG_datain, PALETTE_BG_dataout, PALETTE_BG_we, PALETTE_OAM_addr, PALETTE_OAM_datain, PALETTE_OAM_dataout, PALETTE_OAM_we
+`ifdef TINYGBA_GPU_TAPS
+        , DBG_ds
+`endif
+        );
     `include "pproc_bus_gba.sv"
     `include "preg_gba_display.sv"
     parameter               is_simu = 0;
@@ -413,6 +417,22 @@ module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rn
     wire          busy_modeobj;
     wire          busy_modeobj_hd0;
     wire          busy_modeobj_hd1;
+
+`ifdef TINYGBA_GPU_TAPS
+    // TinyGBA: the draw state machine and its busy vector, exported raw and
+    // latched at the top level.  Latching inside this module was tried and the
+    // synthesiser removed the registers, because nothing here forces them onto a
+    // path to a displayed output; a raw output that reaches `dbg_bits` cannot be
+    // pruned that way.
+    //   DBG_ds[1:0]  drawstate: 0 IDLE, 1 WAITHBLANK, 2 DRAWING, 3 MERGING
+    //   DBG_ds[9:2]  busy_allmod: one bit per drawer, high while that drawer
+    //                has not finished with the line
+    // The assign sits at the END of this module, after `drawstate` is declared.
+    // Placing it here referenced `drawstate` before its declaration, which in
+    // Verilog silently creates an implicit 1-bit wire instead of reading the
+    // register: the comparison then folded to a constant and every tap read VCC.
+    output     [9:0]  DBG_ds;
+`endif
     
     wire [7:0]    busy_allmod;
     
@@ -2403,6 +2423,10 @@ end
             end 
         end 
     
+`ifdef TINYGBA_GPU_TAPS
+    assign DBG_ds = {busy_allmod, drawstate};
+`endif
+
 endmodule
 `undef pproc_bus_gba
 `undef preg_gba_display

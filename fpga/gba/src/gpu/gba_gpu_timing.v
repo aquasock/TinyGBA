@@ -2,7 +2,7 @@
 module gba_gpu_timing(fclk, mclk, reset, lockspeed, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rnw, gb_bus_ena, gb_bus_done, gb_bus_acc, gb_bus_be, gb_bus_rst, 
     //new_cycles, new_cycles_valid, 
     IRP_HBlank, IRP_VBlank, IRP_LCDStat, vram_block_mode, vram_blocked, videodma_start, videodma_stop, line_trigger, hblank_trigger, vblank_trigger, drawline, refpoint_update, newline_invsync, linecounter_drawer, pixelpos, DISPSTAT_debug
-`ifdef TINYGBA_STATUS_TEST
+`ifdef TINYGBA_GPU_TAPS
     , DBG_gt
 `endif
     );
@@ -91,23 +91,46 @@ module gba_gpu_timing(fclk, mclk, reset, lockspeed, gb_bus_din, gb_bus_dout, gb_
     
     assign REG_VCOUNT = {8'b0, linecounter};
     
-`ifdef TINYGBA_STATUS_TEST
+    reg mclk_r;
+
+`ifdef TINYGBA_GPU_TAPS
     // TinyGBA diagnostic taps.  The board reports the GPU's VCOUNT frozen while
     // clk50, clk16, the SDRAM path and the CPU all demonstrably work, so the
     // question is which part of this generator stopped.  These expose the
     // internal counters so the answer is measured instead of inferred, and they
     // exist only under the diagnostic define, which no shipped build sets.
-    //   DBG_gt[3]  cycles reached 1008 -- the VISIBLE->HBLANK threshold
+    //   DBG_gt[3]  cycles reached 1008 -- unreachable, the counter is held at or
+    //              below 1007 by the state machine's own subtraction.  Kept so
+    //              the status probe's sixteen-bit word does not move.
     //   DBG_gt[2]  cycles reached 100
     //   DBG_gt[1]  the generator has left VISIBLE
     //   DBG_gt[0]  this module has seen `reset` released
-    output     [3:0]       DBG_gt;
+    //   DBG_gt[4]  the mclk edge detector has fired at least once, which is what
+    //              advances the counter.  This is the bit that separates "the
+    //              counter is not counting" from "it counts and the threshold is
+    //              never reached", and no earlier tap could answer it.
+    //   DBG_gt[7:5] cycles reached 1000, 700 and 400 -- a ladder up to the 1008
+    //              threshold, so a single screenshot says how far the counter got
+    output     [7:0]       DBG_gt;
     reg dbg_rel;
     always @(posedge fclk) begin
         if (reset) dbg_rel <= 1'b0;
         else       dbg_rel <= 1'b1;
     end
-    assign DBG_gt = { (cycles_reg >= 12'd1008),
+    // Sticky: the edge is a single fclk-cycle pulse, so a level would almost
+    // never be sampled.  `mclk_r` is declared above this block on purpose: a
+    // reference before its declaration silently becomes an implicit wire, which
+    // would tap a signal that is never assigned and read as a constant zero.
+    reg dbg_edge;
+    always @(posedge fclk) begin
+        if (reset) dbg_edge <= 1'b0;
+        else if (mclk & ~mclk_r) dbg_edge <= 1'b1;
+    end
+    assign DBG_gt = { (cycles_reg >= 12'd1000),
+                      (cycles_reg >= 12'd700),
+                      (cycles_reg >= 12'd400),
+                      dbg_edge,
+                      (cycles_reg >= 12'd1008),
                       (cycles_reg >= 12'd100),
                       (gpustate != 2'b00),
                       dbg_rel };
@@ -116,8 +139,6 @@ module gba_gpu_timing(fclk, mclk, reset, lockspeed, gb_bus_din, gb_bus_dout, gb_
     assign DISPSTAT_debug = {REG_VCOUNT, REG_DISPSTAT_V_Count_Setting, 2'b00, REG_DISPSTAT_V_Counter_IRQ_Enable,
                              REG_DISPSTAT_H_Blank_IRQ_Enable, REG_DISPSTAT_V_Blank_IRQ_Enable, REG_DISPSTAT_V_Counter_flag, 
                              REG_DISPSTAT_H_Blank_flag, REG_DISPSTAT_V_Blank_flag};
-    
-    reg mclk_r;
 
     always @(posedge fclk)
          begin
