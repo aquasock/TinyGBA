@@ -11,6 +11,10 @@ module gba2hdmi (
     // TinyGBA diagnostics (fpga/gba/diag/).  Tied to zero in production builds.
     input [15:0] dbg_bits,
     input        dbg_done,
+    // TinyGBA fetch trace (TINYGBA_FETCHTRACE): entry/word select out, word in.
+    output [5:0]  tr_sel,
+    input  [31:0] tr_word,
+    input  [15:0] tr_valid,
 
     // gba video signals
     input [17:0] pixel_data,    // RGB6
@@ -200,6 +204,91 @@ always @(posedge clk) begin
     mem_portA_addr  <= st_y * 240 + st_x;
     mem_portA_wdata <= st_colour(st_x, st_y);
 end
+`elsif TINYGBA_FETCHTRACE
+// TinyGBA: the cartridge fetch trace, selected with TINYGBA_DEFINES=-DTINYGBA_FETCHTRACE.
+// The sixteen entries and their four words are defined beside the recorder in
+// gbatang_top.sv.  Each word is one row of 32 bit cells, bit 31 on the LEFT,
+// 7x5 source pixels per cell: white = 1; a 0 is black or dark grey (address
+// words) or dark blue (data words), alternating per nibble so the row reads as
+// hex.  An entry is four rows (20 lines) and a page is eight entries.
+//
+//   x   0..223   the 32 bit cells          y  0..159   entries 0..7 of the page
+//   x 224..231   white = this entry recorded
+//   x 232..239   page: black = entries 0..7, white = entries 8..15
+//
+// The page flips every 2^26 clk cycles, 1.34 s at clk50.  The GPU's pixel
+// stream is folded into the blue LSB for the reason given under PIXTEST below.
+wire ft_tint = ^{pixel_data, pixel_x, pixel_y};
+
+reg [7:0]  ft_x, ft_y;
+reg [2:0]  ft_bx;          // column within a bit cell, 0..6
+reg [4:0]  ft_bit;         // bit under the raster, 31 at the left
+reg [2:0]  ft_ry;          // line within a row, 0..4
+reg [1:0]  ft_wd;          // word within the entry
+reg [2:0]  ft_ent;         // entry within the page
+reg [26:0] ft_tick;
+always @(posedge clk) begin
+    ft_tick <= ft_tick + 1'b1;
+    if (ft_x == 8'd239) begin
+        ft_x   <= 8'd0;
+        ft_bx  <= 3'd0;
+        ft_bit <= 5'd31;
+        if (ft_y == 8'd159) begin
+            ft_y   <= 8'd0;
+            ft_ry  <= 3'd0;
+            ft_wd  <= 2'd0;
+            ft_ent <= 3'd0;
+        end else begin
+            ft_y <= ft_y + 8'd1;
+            if (ft_ry == 3'd4) begin
+                ft_ry <= 3'd0;
+                ft_wd <= ft_wd + 2'd1;
+                if (ft_wd == 2'd3) ft_ent <= ft_ent + 3'd1;
+            end else begin
+                ft_ry <= ft_ry + 3'd1;
+            end
+        end
+    end else begin
+        ft_x <= ft_x + 8'd1;
+        if (ft_bx == 3'd6) begin
+            ft_bx  <= 3'd0;
+            ft_bit <= ft_bit - 5'd1;
+        end else begin
+            ft_bx  <= ft_bx + 3'd1;
+        end
+    end
+end
+
+// Stage 1 registers the select; gbatang_top.sv returns `tr_word` for it.
+reg [5:0] ft_sel;
+reg [7:0] ft_x1, ft_y1;
+reg [4:0] ft_bit1;
+always @(posedge clk) begin
+    ft_sel  <= {ft_tick[26], ft_ent, ft_wd};
+    ft_x1   <= ft_x;
+    ft_y1   <= ft_y;
+    ft_bit1 <= ft_bit;
+end
+assign tr_sel = ft_sel;
+
+function [17:0] ft_colour(input [7:0] x, input [4:0] b);
+    if (x >= 8'd232)
+        ft_colour = ft_sel[5] ? {6'h3f, 6'h3f, 6'h3f} : 18'd0;
+    else if (x >= 8'd224)
+        ft_colour = tr_valid[ft_sel[5:2]] ? {6'h3f, 6'h3f, 6'h3f} : 18'd0;
+    else if (tr_word[b])
+        ft_colour = {6'h3f, 6'h3f, 6'h3f};
+    else if (ft_sel[0])
+        ft_colour = {6'h00, 6'h00, b[2] ? 6'h18 : 6'h0c};
+    else
+        ft_colour = b[2] ? {6'h0c, 6'h0c, 6'h0c} : 18'd0;
+endfunction
+
+always @(posedge clk) begin
+    mem_portA_we    <= 1'b1;
+    mem_portA_addr  <= ft_y1 * 240 + ft_x1;
+    mem_portA_wdata <= ft_colour(ft_x1, ft_bit1) ^ {17'd0, ft_tint};
+end
 `elsif TINYGBA_PIXTEST
 // TinyGBA: what the BIOS asked the display to show, drawn as sixteen bands.
 // Selected with TINYGBA_DEFINES=-DTINYGBA_PIXTEST.
@@ -307,6 +396,9 @@ always @(posedge clk) begin
     mem_portA_addr <= pixel_y * 240 + pixel_x;
     mem_portA_wdata <= pixel_data;
 end
+`endif
+`ifndef TINYGBA_FETCHTRACE
+assign tr_sel = 6'd0;
 `endif
 
 // audio stuff

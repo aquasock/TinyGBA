@@ -707,6 +707,75 @@ assign dbg_done      = 1'b0;
 `endif
 `endif
 
+// Fetch-trace readout port of gba2hdmi.  gba2hdmi drives `tr_sel` (entry in
+// [5:2], word in [1:0]) and draws `tr_word`; it is tied off outside
+// TINYGBA_FETCHTRACE.
+wire [5:0]  tr_sel;
+wire [31:0] tr_word;
+wire [15:0] tr_valid;
+`ifdef TINYGBA_FETCHTRACE
+// TinyGBA: the first sixteen CPU memory cycles from the cartridge, drawn as
+// words by gba2hdmi (BRD-022).  The official BIOS completes its intro and
+// jumps to 0x08000000, but neither the test cart nor a retail cart reaches its
+// first DISPCNT write.  The BIOS executes from block RAM, so the concurrent
+// "instruction fetch from SDRAM plus data access" path of gba_memory, which
+// returns the instruction through `rom_rdata_new`, is first used here.
+//
+// A memory cycle completes on the clk16 edge where the CPU has a request out
+// (`rom_en` or `ram_cen`) and `cpu_en & ~halt` is high, which is the CPU's own
+// enable; gba_memory presents `rom_data` and `ram_rdata` on the FOLLOWING
+// cycle, and that is where they are sampled here, as the CPU sees them.
+// Recording starts at the first completed cycle whose fetch address is 0x08000000
+// or above and takes sixteen consecutive completed cycles.  It clears while the
+// machine is held (`~gbaon`), so each cart load records afresh.
+//
+// Four words per entry:
+//   word 0  {rom_en, thumb, 2'b00, rom_addr[27:0]}
+//   word 1  rom_data as the CPU receives it
+//   word 2  {ram_cen, ram_wen, ram_be[3:0], ram_addr[27:24], ram_addr[21:0]}
+//   word 3  ram_wen ? ram_wdata : ram_rdata
+wire tr_cyc = (rom_en | ram_cen) & cpu_en & ~halt;
+(* keep *) reg [2047:0] tr_flat;          // entry e word w at bits (4e+w)*32
+(* keep *) reg [15:0]   tr_vld;
+reg  [4:0]  tr_n;                         // entries recorded, 16 = full
+reg         tr_pend;                      // an entry's read data arrives this cycle
+reg  [3:0]  tr_pidx;
+reg         tr_pwen;
+reg  [31:0] tr_pwdata;
+wire        tr_go = tr_cyc & ~tr_n[4] & ((tr_n != 5'd0) | (rom_en & rom_addr[27]));
+always @(posedge clk16) begin
+    if (~gbaon) begin
+        tr_n    <= 5'd0;
+        tr_pend <= 1'b0;
+        tr_vld  <= 16'd0;
+    end else begin
+        tr_pend <= tr_go;
+        if (tr_go) begin
+            tr_n      <= tr_n + 5'd1;
+            tr_pidx   <= tr_n[3:0];
+            tr_pwen   <= ram_wen;
+            tr_pwdata <= ram_wdata;
+            tr_flat[{tr_n[3:0], 2'd0}*32 +: 32] <= {rom_en, thumb, 2'b00, rom_addr};
+            tr_flat[{tr_n[3:0], 2'd2}*32 +: 32] <= {ram_cen, ram_wen, ram_be,
+                                                    ram_addr[27:24], ram_addr[21:0]};
+        end
+        if (tr_pend) begin
+            tr_flat[{tr_pidx, 2'd1}*32 +: 32] <= rom_data;
+            tr_flat[{tr_pidx, 2'd3}*32 +: 32] <= tr_pwen ? tr_pwdata : ram_rdata;
+            tr_vld[tr_pidx] <= 1'b1;
+        end
+    end
+end
+// Read by gba2hdmi on clk50.  The words are static once recorded, which is
+// microseconds after the cart jump, so the crossing only matters for the
+// first frame.
+assign tr_word  = tr_flat[tr_sel*32 +: 32];
+assign tr_valid = tr_vld;
+`else
+assign tr_word  = 32'd0;
+assign tr_valid = 16'd0;
+`endif
+
 `ifdef VERILATOR
 assign gba_on = gbaon;
 `endif
@@ -1116,6 +1185,9 @@ gba_joypad joypad (
 `ifdef TINYGBA_PIXTEST
   `define TINYGBA_DIAG_OVERLAY_OFF
 `endif
+`ifdef TINYGBA_FETCHTRACE
+  `define TINYGBA_DIAG_OVERLAY_OFF
+`endif
 `ifdef TINYGBA_CLKTEST
   `define TINYGBA_DIAG_OVERLAY_OFF
 `endif
@@ -1161,6 +1233,7 @@ gba2hdmi video (            // BRAM-based framebuffer
     .pixel_we(pixel_out_we),
     .sound_left(sound_out_left), .sound_right(sound_out_right),
     .dbg_bits(dbg_bits), .dbg_done(dbg_done),
+    .tr_sel(tr_sel), .tr_word(tr_word), .tr_valid(tr_valid),
 `ifdef TEST_LOADER
     .overlay(0),
 `else

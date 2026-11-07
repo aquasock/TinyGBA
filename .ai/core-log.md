@@ -830,3 +830,33 @@ Measure what the CPU fetches after the BIOS hands over. The next instrument shou
 - User Test: FAIL
 
 ---
+## 25 COMMIT Unreleased 2026-11-06T20:01:48-07:00
+
+#### Coming From:
+
+Unreleased c1fa94d
+
+#### Purpose:
+
+Build an instrument that records what the CPU fetches and accesses after the BIOS hands over to the cartridge, so the BRD-022 failure can be placed in the instruction-fetch path or beyond it.
+
+#### Outcome:
+
+A new diagnostic configuration, `TINYGBA_FETCHTRACE`, was added and built but not deployed, because the operator stopped the cycle after the build for an agent handoff. In `fpga/gba/src/gbatang_top.sv` a clk16 recorder starts at the first completed CPU memory cycle whose fetch address is `0x08000000` or above, a completed cycle being `(rom_en | ram_cen) & cpu_en & ~halt`, and stores sixteen consecutive completed cycles as four 32-bit words each in `tr_flat`: word 0 is `{rom_en, thumb, 2'b00, rom_addr[27:0]}`, word 1 is `rom_data` sampled on the following clk16 edge where gba_memory presents it, word 2 is `{ram_cen, ram_wen, ram_be, ram_addr[27:24], ram_addr[21:0]}` and word 3 is `ram_wdata` for a write or `ram_rdata` sampled on the following edge for a read, with a per-entry valid bit; the record clears while `gbaon` is low so each cart load records afresh, and the configuration also turns the OSD overlay off. In `fpga/gba/src/gba2hdmi.sv` the new `tr_sel`, `tr_word` and `tr_valid` ports feed a framebuffer writer that draws each word as one row of 32 bit cells, bit 31 on the left, 7 by 5 source pixels per cell, white for 1 and dark grey or black for 0 in address words and dark blue for 0 in data words, alternating shade per nibble, four rows per entry and eight entries per page, with an entry-valid strip at x 224 to 231 and a page strip at x 232 to 239 that is black for entries 0 to 7 and white for 8 to 15, flipping every 2^26 clk50 cycles, about 1.34 s; outside the configuration `tr_sel` is tied to zero and `tr_word` and `tr_valid` to zero. `build/ftr_s3`, seed 3 from a fresh directory with `TINYGBA_DEFINES` set to `-DTINYGBA_FETCHTRACE` and `-DTINYGBA_BIOS_HEX` given the quoted absolute path of `build/test/official_bios.hex` (an unquoted path fails elaboration in `gba_memory.sv`), passed synthesis with no new warnings in the edited files, the clock-edge gate, the clock-plane gate with every clock on dedicated lanes and `clk67` on measured-good spines, and timing with no relaxation and zero hold violations (`clk16` 20.215, `clk50` 65.334, `clk67` 115.768, `hclk` 100.695 MHz); its `.fs` SHA-256 is `341c31ab1bc12c458213e2471b1e95f7b2979dc2d47d8a715eaeccbb1edca73c`, and the register-parity gate had no baseline for this configuration. In `build/ftr_s3/tinygba.json` all 2,048 `tr_flat` bits, the 16 `tr_vld` bits and the five `tr_n` bits are `DFFRE` cells, and every `tr_flat` flop in all four word positions has a non-constant D and clock enable. The board was left running `build/fix_ov_s1` with Super Mario Advance loaded, in one-wire mode.
+
+#### Next Steps:
+
+On the operator's explicit deploy, flash `build/ftr_s3/tinygba.fs` with `openFPGALoader -b tangconsole`, load `build/test/test_logo.gba` over `/dev/ttyUSB1` with `tools/load_gba_rom.py`, and capture both pages from `/dev/video0`, then decode the rows against the cartridge bytes. The expected start is a fetch of `0x08000000` returning `ea00002e`, probably followed by pipeline fetches of `0x08000004` and `0x08000008` before the branch takes effect, then `0x080000C0` returning `e3a0b301`, `0x080000C4` returning `e3a00000` and `0x080000C8` returning `e1cb00b0`, and the `strh` to `DISPCNT` at `0x04000000` with data 0 arriving in the same memory cycle as a later cartridge fetch, which is the first use of gba_memory's concurrent SDRAM-fetch-plus-data path through `rom_rdata_new`, since the BIOS executes from block RAM. A wrong instruction word, a missing or misaddressed `DISPCNT` write, or a stall names the fault; a correct trace moves the search to the IO write path into the GPU. Write a decoder for the capture before reading it by eye, keep `build/fix_ov_s1` as the uninstrumented boot image, and do not remove `setundef -zero -init` from the build.
+
+#### Files Modified:
+
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
