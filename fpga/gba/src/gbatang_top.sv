@@ -115,6 +115,11 @@ module gbatang_top (
 `ifdef TINYGBA_PIXTEST
   `define TINYGBA_GPU_TAPS
 `endif
+// TINYGBA_FETCHTRACE draws the GPU's live DISPCNT fields on its status page, so
+// that a bus write is compared against the register rather than assumed to land.
+`ifdef TINYGBA_FETCHTRACE
+  `define TINYGBA_GPU_TAPS
+`endif
 
 // Clocking
 `ifndef VERILATOR
@@ -707,10 +712,11 @@ assign dbg_done      = 1'b0;
 `endif
 `endif
 
-// Fetch-trace readout port of gba2hdmi.  gba2hdmi drives `tr_sel` (entry in
-// [5:2], word in [1:0]) and draws `tr_word`; it is tied off outside
-// TINYGBA_FETCHTRACE.
-wire [5:0]  tr_sel;
+// Fetch-trace readout port of gba2hdmi.  gba2hdmi drives `tr_sel` as
+// {page[1:0], entry[2:0], word[1:0]} and draws `tr_word`; it is tied off
+// outside TINYGBA_FETCHTRACE.  Pages 0 and 1 are the completed-cycle trace,
+// page 2 the IO write ring, page 3 the status word.
+wire [6:0]  tr_sel;
 wire [31:0] tr_word;
 wire [15:0] tr_valid;
 `ifdef TINYGBA_FETCHTRACE
@@ -769,8 +775,82 @@ end
 // Read by gba2hdmi on clk50.  The words are static once recorded, which is
 // microseconds after the cart jump, so the crossing only matters for the
 // first frame.
-assign tr_word  = tr_flat[tr_sel*32 +: 32];
-assign tr_valid = tr_vld;
+//
+// ---------------------------------------------------------------- page 2
+// Every completed CPU write into the IO region, 0x04000000..0x04FFFFFF, in an
+// eight-entry ring.  The trace above answers whether the CPU received the right
+// instruction words; this answers the next question, which is whether execution
+// ever reached the store at the end of the cartridge and what that store
+// carried.  A ring rather than a log so a runaway CPU cannot push the answer
+// out of view: the newest writes are always the ones on the page.
+//
+// VRAM, palette and OAM writes are excluded on purpose.  The cartridge's fill
+// and blink loops write VRAM tens of thousands of times and would bury the two
+// IO writes this exists to catch, which is why eight entries suffice.
+//
+// 64 bits per entry:  {ram_be[3:0], ram_addr[27:0], ram_wdata[31:0]}
+//
+// ---------------------------------------------------------------- page 3
+// The live state a page 2 entry cannot answer on its own.  word 0 carries the
+// GPU's own DISPCNT fields, read from the drawer's registers rather than from
+// the bus, so a bus write that never lands is visible as a disagreement between
+// page 2 and page 3; words 1 to 3 carry the sticky DISPCNT writes, the IO ring
+// count, the trace count and the CPU's live halt and release.
+wire tr_iowr = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h4);
+(* keep *) reg [511:0] io_flat;
+(* keep *) reg [7:0]   io_vld;
+reg  [2:0] io_n;
+reg        io_wrapped;
+reg  [1:0] io_sticky;                     // [0] DISPCNT written with 0
+                                          // [1] DISPCNT written with 0x0403
+always @(posedge clk16) begin
+    if (~gbaon) begin
+        io_n       <= 3'd0;
+        io_wrapped <= 1'b0;
+        io_vld     <= 8'd0;
+        io_sticky  <= 2'b00;
+    end else if (tr_iowr) begin
+        io_flat[{io_n, 6'd0} +: 64] <= {ram_be, ram_addr[27:0], ram_wdata};
+        io_vld[io_n] <= 1'b1;
+        io_n         <= io_n + 3'd1;
+        if (io_n == 3'd7) io_wrapped <= 1'b1;
+        if (ram_addr[27:0] == 28'h0400_0000) begin
+            if (ram_wdata[15:0] == 16'h0000) io_sticky[0] <= 1'b1;
+            if (ram_wdata[15:0] == 16'h0403) io_sticky[1] <= 1'b1;
+        end
+    end
+end
+
+wire [2:0]  tr_page = tr_sel[6:5];
+wire [2:0]  tr_ent  = tr_sel[4:2];
+wire [1:0]  tr_wd   = tr_sel[1:0];
+wire [63:0] io_pick = io_flat[{tr_ent, 6'd0} +: 64];
+
+reg [31:0] tr_word_mux;
+always @(*) begin
+    tr_word_mux = 32'd0;
+    case (tr_page)
+        2'd0, 2'd1: tr_word_mux = tr_flat[tr_sel[5:0]*32 +: 32];
+        2'd2: case (tr_wd)
+                  2'd0: tr_word_mux = {4'h0,  io_pick[59:32]};   // address
+                  2'd1: tr_word_mux = io_pick[31:0];            // data
+                  2'd2: tr_word_mux = {28'h0, io_pick[63:60]};  // byte enables
+                  default: tr_word_mux = 32'd0;
+              endcase
+        default: case (tr_wd)
+                  2'd0: tr_word_mux = {25'h0, gpu_dc};                       // live DISPCNT
+                  2'd1: tr_word_mux = {26'h0, io_sticky, io_wrapped, io_n};
+                  2'd2: tr_word_mux = {27'h0, tr_n};
+                  default: tr_word_mux = {30'h0, halt, gbaon};
+                 endcase
+    endcase
+end
+
+assign tr_word  = tr_word_mux;
+// Page 3's status lives in entry 0, which sits at index 8 of the 16-entry view.
+assign tr_valid = (tr_page <= 2'd1) ? tr_vld
+                : (tr_page == 2'd2) ? {8'h00, io_vld}
+                :                     16'h0100;
 `else
 assign tr_word  = 32'd0;
 assign tr_valid = 16'd0;

@@ -12,7 +12,7 @@ module gba2hdmi (
     input [15:0] dbg_bits,
     input        dbg_done,
     // TinyGBA fetch trace (TINYGBA_FETCHTRACE): entry/word select out, word in.
-    output [5:0]  tr_sel,
+    output [6:0]  tr_sel,
     input  [31:0] tr_word,
     input  [15:0] tr_valid,
 
@@ -214,10 +214,18 @@ end
 //
 //   x   0..223   the 32 bit cells          y  0..159   entries 0..7 of the page
 //   x 224..231   white = this entry recorded
-//   x 232..239   page: black = entries 0..7, white = entries 8..15
+//   x 232..235   page bit 0
+//   x 236..239   page bit 1
 //
-// The page flips every 2^26 clk cycles, 1.34 s at clk50.  The GPU's pixel
-// stream is folded into the blue LSB for the reason given under PIXTEST below.
+// There are four pages, so the pair of strips at the right reads as a two-bit
+// page number: 00 the completed-cycle trace's entries 0..7, 01 its entries
+// 8..15, 10 the IO write ring, 11 the status word.  Page 1 (01) also keeps the
+// upper/lower-half meaning the strips had when there were only two pages, so an
+// older capture still decodes its entry numbering the same way.
+//
+// The page advances every 2^25 clk cycles, 0.67 s at clk50, and the whole cycle
+// takes 2.7 s.  The GPU's pixel stream is folded into the blue LSB for the
+// reason given under PIXTEST below.
 wire ft_tint = ^{pixel_data, pixel_x, pixel_y};
 
 reg [7:0]  ft_x, ft_y;
@@ -260,11 +268,11 @@ always @(posedge clk) begin
 end
 
 // Stage 1 registers the select; gbatang_top.sv returns `tr_word` for it.
-reg [5:0] ft_sel;
-reg [7:0] ft_x1, ft_y1;
-reg [4:0] ft_bit1;
+reg [6:0]  ft_sel;
+reg [7:0]  ft_x1, ft_y1;
+reg [4:0]  ft_bit1;
 always @(posedge clk) begin
-    ft_sel  <= {ft_tick[26], ft_ent, ft_wd};
+    ft_sel  <= {ft_tick[26:25], ft_ent, ft_wd};
     ft_x1   <= ft_x;
     ft_y1   <= ft_y;
     ft_bit1 <= ft_bit;
@@ -272,7 +280,9 @@ end
 assign tr_sel = ft_sel;
 
 function [17:0] ft_colour(input [7:0] x, input [4:0] b);
-    if (x >= 8'd232)
+    if (x >= 8'd236)
+        ft_colour = ft_sel[6] ? {6'h3f, 6'h3f, 6'h3f} : 18'd0;
+    else if (x >= 8'd232)
         ft_colour = ft_sel[5] ? {6'h3f, 6'h3f, 6'h3f} : 18'd0;
     else if (x >= 8'd224)
         ft_colour = tr_valid[ft_sel[5:2]] ? {6'h3f, 6'h3f, 6'h3f} : 18'd0;
