@@ -549,3 +549,31 @@ Field meanings:
     - "This repository, the PIXTEST band legend in `fpga/gba/src/gba2hdmi.sv` and the band sources in `fpga/gba/src/gbatang_top.sv`"
     - "HDMI captures through the USB capture device on this machine, 2026-11-06"
   verification: "Read 2026-11-06 from four captures four seconds apart and a 12-second capture from reset decoded at 4 Hz; every frame's field statistics and band strings were consistent with one another."
+
+- record_id: BRD-021
+  kind: BOARD
+  topic_id: BRD
+  title: "With undefined-init folding removed the official BIOS completes its intro and jumps to the cartridge"
+  status: VERIFIED
+  verified_date: 2026-11-06
+  statement: "`build/fix_ov_s1` (overlay off, official BIOS, `.fs` SHA-256 `ed96667551e0a512a5c99a5d1cc29484b05c19164c0b8a85d1561a66b3f5a9bb`) is the first image since the `setundef` fix of TCL-017 to show the GPU's own picture on the board, and it plays the complete BIOS intro: the GAME BOY wordmark sweeps in with its colour cycle above the Nintendo mark from about 1.5 s to 5.5 s after the cartridge load releases the machine, then the screen fades to solid white. The operator watched the same sequence live with `test_logo.gba` and with Super Mario Advance (USA, Europe). The PIXTEST build `build/dbg2_pix_s3` read the same intro from the registers: `DISPCNT` BG mode 2 with `BLDCNT` alpha blending, then BG3 enabled, then `BLDCNT` brighten, with palette RAM, VRAM and OAM all written. From about 6.5 s the sticky cartridge-fetch band, which is driven by the CPU's instruction-fetch port (`rom_en` with `rom_addr[27:24]` non-zero), is set, so the BIOS accepted the header and jumped to `0x08000000`. This supersedes BRD-020's reading that the BIOS never completes its intro: BRD-020's uniform grey field was the PIXTEST frame's own background, which `gba2hdmi.sv` writes in place of the GPU's picture, and it said nothing about what the machine drew. BRD-020's other band readings stand, except its cartridge-fetch band, which read 0 throughout in `build/fix_pix_s3` while the identical latch reads 1 in `build/dbg2_pix_s3`; the cause of that difference is not established."
+  consequence: "The CPU, the BIOS, interrupts, the GPU, palette, VRAM and OAM writes and the picture path all work end to end on the open flow. The fault has moved past the BIOS to the first instructions of the cartridge (BRD-022). A PIXTEST field is never evidence about the machine's picture; only an overlay-off image shows that."
+  sources:
+    - "This repository, `fpga/gba/src/gba2hdmi.sv`: the PIXTEST branch writes `{6'h20, 6'h20, ...}` below the bands from its own raster"
+    - "This repository, the PIXTEST band map and its sources in `fpga/gba/src/gbatang_top.sv`, build `build/dbg2_pix_s3` (`.fs` `af620647481fe950ce7322f885b3d17aaeeba5b1aeac87a0539c12ed64a39021`)"
+    - "HDMI captures through the USB capture device on this machine, 2026-11-06, and the operator's live observation of the same board"
+  verification: "Observed 2026-11-06 in a 16-second capture of `build/fix_ov_s1` decoded at 2 Hz, and in two 16-second captures of `build/dbg2_pix_s3`, one per cartridge, whose band strings agree frame for frame with the intro seen on the picture."
+
+- record_id: BRD-022
+  kind: BOARD
+  topic_id: BRD
+  title: "After the BIOS hands over, cartridge code does not run correctly: the first DISPCNT write never lands"
+  status: VERIFIED
+  verified_date: 2026-11-06
+  statement: "Once the cartridge-fetch band sets, `build/dbg2_pix_s3` holds a fixed state for the remaining ten seconds of every capture with CPU `halt` at 0, so the CPU is executing and not waiting for an interrupt. With `test_logo.gba`, whose entry point at `0x080000C0` writes `DISPCNT` 0 as its first store and then fills the framebuffer green or red within a frame, `DISPCNT` reads BG mode 0, forced blank set and BG0 to BG3 all enabled, which the cartridge never writes. With Super Mario Advance it reads BG mode 0 and forced blank with nothing enabled, the value the BIOS leaves at handover, and the game never enables its display, where real hardware shows the first screen within about a second. On `build/fix_ov_s1` both cartridges stay on solid white, which is forced blank. The BIOS read the cartridge header through the data port and accepted it, so data reads from the cartridge area return correct words at least for the header."
+  consequence: "The leading hypothesis, not yet a finding, is that instruction fetches from the cartridge SDRAM through the CPU's `rom_data` port return wrong words, so the CPU executes something other than the cartridge and either never reaches the first store or writes garbage. Both cartridges fail the same way, so the cartridge image is not the cause. The next measurement is the addresses and words of the first instruction fetches after handover, compared with the ROM file."
+  sources:
+    - "This repository, `build/test/test.s`: `_start` stores 0 to `DISPCNT` before any other IO write"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: the `gba_cpu` instance, whose `rom_addr`/`rom_en`/`rom_data` port is the instruction-fetch path"
+    - "HDMI captures through the USB capture device on this machine, 2026-11-06"
+  verification: "Read 2026-11-06 from two 16-second captures of `build/dbg2_pix_s3` decoded at 2 Hz, 24 consecutive identical frames each after handover, and from the operator's live observation of `build/fix_ov_s1` with Super Mario Advance."

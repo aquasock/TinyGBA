@@ -797,3 +797,36 @@ Find why the BIOS executes and takes interrupts but neither draws its logo nor j
 - User Test: FAIL
 
 ---
+
+## 24 COMMIT Unreleased 2026-11-06T19:18:37-07:00
+
+#### Coming From:
+
+Unreleased 1e4e3a8
+
+#### Purpose:
+
+Find out what the BIOS does to the display after the `setundef` fix, and whether it reaches the cartridge.
+
+#### Outcome:
+
+The machine boots the official BIOS on the board for the first time, and the fault has moved to the cartridge. The PIXTEST band map in `fpga/gba/src/gbatang_top.sv` was replaced with live `DISPCNT` BG mode, forced blank and BG0 to BG3 enables, the `BLDCNT` special-effect bits and CPU `halt`, plus sticky bits for palette RAM, VRAM and OAM writes and for a cartridge instruction fetch, which clear while `gbaon` is low so they describe only the current load, and `gbaon`; a new always-present `DBG_dc` tap carries the `DISPCNT` and `BLDCNT` fields out of `gba_gpu_drawer.v` through `gba_gpu.v`, and the `gba2hdmi.sv` legend was rewritten. `build/dbg2_pix_s3` (`.fs` SHA-256 `af620647481fe950ce7322f885b3d17aaeeba5b1aeac87a0539c12ed64a39021`) passed with no relaxation and zero hold violations (`clk16` 19.502, `clk50` 79.580, `clk67` 145.285, `hclk` 97.069 MHz), and every one of the sixteen band flops traced in `build/dbg2_pix_s3/tinygba.json` to a `DFFRE` with a non-constant driver. While reviewing the legend it became clear that the PIXTEST frame writes its own grey below the bands, so entry 23's uniform grey field and BRD-020's reading that the BIOS never completed its intro were measurements of the instrument, not the machine. `build/fix_ov_s1` was therefore deployed as the first overlay-off image since the fix, and with `test_logo.gba` it played the complete BIOS intro, the GAME BOY and Nintendo marks, between about 1.5 and 5.5 s after release and then held solid white. `build/dbg2_pix_s3` then read the intro from the registers and showed the sticky cartridge-fetch band set from about 6.5 s, so the BIOS accepts the header and jumps, but the cartridge's first store, `DISPCNT` 0, never lands: the register holds BG mode 0, forced blank and all four BG enables, a value the cartridge never writes, with `halt` at 0. The operator then asked for a retail cartridge from the MiSTer image, and Super Mario Advance (USA, Europe), 4 MiB loaded at 2 Mbaud in 21.7 s, failed the same way, holding the BIOS handover value of forced blank with nothing enabled, and on `build/fix_ov_s1` the operator watched the intro end on white, so the test cartridge is not the cause. These are recorded as BRD-021, which supersedes BRD-020's intro reading, and BRD-022. One discrepancy is unexplained: `build/fix_pix_s3` read its cartridge-fetch band as 0 throughout while the identical latch reads 1 here. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 23 and the existing reference records were not rewritten, and validated this entry as entry 24 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of twenty-four against the 100-entry limit.
+
+#### Next Steps:
+
+Measure what the CPU fetches after the BIOS hands over. The next instrument should latch the first cartridge instruction fetches after `gbaon` rises, recording each `rom_addr` and the `rom_data` word the memory path returns for it, and draw them so they can be compared against the bytes of `test_logo.gba` at the same offsets; a wrong word at `0x080000C0` or a fetch that never completes names the instruction-fetch path from the cartridge SDRAM, while correct words would move the search to execution and the IO write path. Running the same cartridge in the Verilator model gives the reference fetch sequence to compare against. Build from a fresh build directory and check the taps against the netlist before reading the board. Keep `build/fix_ov_s1` as the uninstrumented boot image and do not remove `setundef -zero -init` from the build.
+
+#### Files Modified:
+
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gpu/gba_gpu.v
+- fpga/gba/src/gpu/gba_gpu_drawer.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---

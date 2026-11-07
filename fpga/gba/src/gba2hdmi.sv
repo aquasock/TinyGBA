@@ -201,22 +201,20 @@ always @(posedge clk) begin
     mem_portA_wdata <= st_colour(st_x, st_y);
 end
 `elsif TINYGBA_PIXTEST
-// TinyGBA: which GPU drawer holds the line, drawn as sixteen bands.
+// TinyGBA: what the BIOS asked the display to show, drawn as sixteen bands.
 // Selected with TINYGBA_DEFINES=-DTINYGBA_PIXTEST.
 //
-// The raster is proven (BRD-017), and the bufg_pix_s3 load (core-log entry 23)
-// found `drawstate` held in DRAWING, which only exits when every drawer's busy
-// bit clears.  This frame names the drawer that does not finish.  It takes the
-// framebuffer away from the GPU and sweeps its own raster over the whole
-// 240x160 array, so the display path is proven by the field appearing at all and
-// says nothing about the machine.  The band map is defined beside its registers
-// in gbatang_top.sv; in short, bands 0..13 live, 14..15 sticky:
+// This frame takes the framebuffer away from the GPU and sweeps its own raster
+// over the whole 240x160 array: the field below the bands is this block's fixed
+// grey, not the GPU's picture, so it says nothing about what the machine drew.
+// The band map is defined beside its registers in gbatang_top.sv; in short,
+// bands 0..10 live, 11..15 sticky:
 //
-//   band  0..1   drawstate                 band 10  OBJ OAMFetch != IDLE
-//   band  2..5   busy BG0..BG3 text        band 11  OBJ PIXELGen != WAITOAM
-//   band  6..7   busy BG2/BG3 affine       band 12  DISPCNT OBJ enable
-//   band  8      busy mode 3/4/5           band 13  CPU halt
-//   band  9      busy OBJ                  band 14  CPU ever fetched the cart
+//   band  0..2   DISPCNT BG_Mode           band 10  CPU halt
+//   band  3      DISPCNT Forced_Blank      band 11  palette RAM ever written
+//   band  4..7   DISPCNT BG0..BG3 enable   band 12  VRAM ever written
+//   band  8..9   BLDCNT special effect     band 13  OAM ever written
+//                                          band 14  CPU ever fetched the cart
 //                                          band 15  gbaon ever high
 //
 // `pixel_data`, `pixel_x` and `pixel_y` are folded into the low bit of the blue

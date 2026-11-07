@@ -10,6 +10,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         , DBG_ds
         , DBG_vf
         , DBG_ob
+        , DBG_dc
 `endif
         );
     `include "pproc_bus_gba.sv"
@@ -133,6 +134,8 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
     output     [6:0]          DBG_vf;
     // TinyGBA: OBJ drawer machines and DISPCNT OBJ enable, see gba_gpu_drawer.v.
     output     [2:0]          DBG_ob;
+    // TinyGBA: DISPCNT forced blank and BG enables, BLDCNT effect, see gba_gpu_drawer.v.
+    output     [6:0]          DBG_dc;
 `endif
 
     gba_gpu_timing #(.is_simu(is_simu)) igba_gpu_timing(
@@ -235,6 +238,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         , .DBG_ds(DBG_ds)
         , .DBG_vf(DBG_vf)
         , .DBG_ob(DBG_ob)
+        , .DBG_dc(DBG_dc)
 `endif
     );
 

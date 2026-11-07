@@ -4,6 +4,7 @@ module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rn
         , DBG_ds
         , DBG_vf
         , DBG_ob
+        , DBG_dc
 `endif
         );
     `include "pproc_bus_gba.sv"
@@ -448,6 +449,11 @@ module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rn
     //   DBG_ob[2]  DISPCNT Screen_Display_OBJ
     output      [2:0]  DBG_ob;
     wire        [1:0]  DBG_ob_w;
+    // TinyGBA: what the BIOS has asked the display to show.
+    //   DBG_dc[0]    DISPCNT Forced_Blank
+    //   DBG_dc[4:1]  DISPCNT Screen_Display_BG0..BG3
+    //   DBG_dc[6:5]  BLDCNT Color_Special_Effect: 0 none, 1 alpha, 2 brighten, 3 darken
+    output      [6:0]  DBG_dc;
 `endif
     
     wire [7:0]    busy_allmod;
@@ -2451,6 +2457,12 @@ end
     // band shows the register the drawer's own decode sees.
     assign DBG_vf = {BG_Mode, DBG_vf_w};
     assign DBG_ob = {Screen_Display_OBJ[DISPCNT_Screen_Display_OBJ.upper], DBG_ob_w};
+    assign DBG_dc = {REG_BLDCNT_Color_Special_Effect,
+                     Screen_Display_BG3[DISPCNT_Screen_Display_BG3.upper],
+                     Screen_Display_BG2[DISPCNT_Screen_Display_BG2.upper],
+                     Screen_Display_BG1[DISPCNT_Screen_Display_BG1.upper],
+                     Screen_Display_BG0[DISPCNT_Screen_Display_BG0.upper],
+                     Forced_Blank[DISPCNT_Forced_Blank.upper]};
 `endif
 
 endmodule

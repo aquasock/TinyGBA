@@ -291,6 +291,7 @@ wire [1:0]  gpu_ev;         // GPU drawer line-start events, see gba_gpu.v
 wire [9:0]  gpu_ds;         // GPU drawer state machine + busy vector, see gba_gpu.v
 wire [6:0]  gpu_vf;         // GPU mode 3/4/5 fetch state, draw state, BG_Mode
 wire [2:0]  gpu_ob;         // GPU OBJ drawer machines + DISPCNT OBJ enable
+wire [6:0]  gpu_dc;         // DISPCNT forced blank + BG enables, BLDCNT effect
 `endif
 wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
                             //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
@@ -582,67 +583,61 @@ assign dbg_bits = st_dbg;
 assign dbg_done = gbaon;
 `else
 `ifdef TINYGBA_PIXTEST
-// TinyGBA: which drawer holds the GPU in DRAWING, drawn as sixteen bands across
-// the top of the test field in gba2hdmi, white = 1.
+// TinyGBA: what the BIOS has asked the display to show, drawn as sixteen bands
+// across the top of the test field in gba2hdmi, white = 1.
 //
-// The bufg_pix_s3 load (core-log entry 23) read `drawstate` solid DRAWING across
-// a whole line of samples in four captures over ~20 s, BG_Mode 0, `pixel_out_we`
-// never, the OBJ drawer busy at some point, and the machine released.  DRAWING
-// only exits when every bit of `busy_allmod` is clear (gba_gpu_drawer.v), so one
-// drawer never finishes its line and the merger that raises `pixel_out_we` never
-// runs.  `lockspeed` is 0, as upstream, so nothing cuts a drawer off at hblank.
-// The mode 3/4/5 fetch bands of the previous map are dropped: the drawer is in
-// mode 0, where that fetch machine never starts.
+// With unreset registers initialised to 0 (core-log entry 23, TCL-017) the drawer
+// cycles IDLE/WAITHBLANK/MERGING, the CPU halts and wakes on vblank, and the
+// field is a constant grey with no logo and no cart fetch (BRD-020).  This map
+// asks whether the BIOS ever loaded palette, VRAM and OAM and what DISPCNT and
+// BLDCNT hold, so a grey that is a blend or brightness setting can be told apart
+// from a grey that is an empty palette or a display that was never enabled.
 //
-// Bands 0 to 13 are LIVE levels.  Each band is 15x16 source pixels written over
+// Bands 0 to 10 are LIVE levels.  Each band is 15x16 source pixels written over
 // about one GBA line, so a cycling signal shows as stripes and a solid band is a
 // held level, not a frame-phase alias.
 //
-//   band  0  drawstate[0]              \  0 IDLE 1 WAITHBLANK
-//   band  1  drawstate[1]              /  2 DRAWING 3 MERGING
-//   band  2  busy_mode0_0   (BG0 text drawer)
-//   band  3  busy_mode0_1   (BG1 text drawer)
-//   band  4  busy_mode0_2   (BG2 text drawer)
-//   band  5  busy_mode0_3   (BG3 text drawer)
-//   band  6  busy_mode2_2   (BG2 affine drawer, any of the three)
-//   band  7  busy_mode2_3   (BG3 affine drawer, any of the three)
-//   band  8  busy_mode345
-//   band  9  busy OBJ       (any of the three OBJ drawers)
-//   band 10  OBJ OAMFetch != IDLE        the OAM walk has not finished
-//   band 11  OBJ PIXELGen != WAITOAM     the pixel generator has not drained
-//   band 12  DISPCNT Screen_Display_OBJ  (what starts the OBJ drawer)
-//   band 13  CPU `halt`
+//   band  0  DISPCNT BG_Mode[0]        \
+//   band  1  DISPCNT BG_Mode[1]         > the register the drawer decodes
+//   band  2  DISPCNT BG_Mode[2]        /
+//   band  3  DISPCNT Forced_Blank
+//   band  4  DISPCNT Screen_Display_BG0
+//   band  5  DISPCNT Screen_Display_BG1
+//   band  6  DISPCNT Screen_Display_BG2
+//   band  7  DISPCNT Screen_Display_BG3
+//   band  8  BLDCNT Color_Special_Effect[0]  \  0 none 1 alpha
+//   band  9  BLDCNT Color_Special_Effect[1]  /  2 brighten 3 darken
+//   band 10  CPU `halt`
 //
-// Bands 14 and 15 are STICKY ever-true.
+// Bands 11 to 15 are STICKY ever-true.  Bands 11 to 14 clear while the machine
+// is held (`~gbaon`), so they report only the current cart load; band 15 clears
+// only on board reset.
 //
+//   band 11  palette RAM written (BG or OBJ palette, CPU or DMA)
+//   band 12  VRAM written        (either half)
+//   band 13  OAM written
 //   band 14  the CPU fetched from 0x08000000 or above (it reached the cart)
 //   band 15  gbaon ever high              (control: the machine was released)
-//
-// Busy bits are read as raw bits, not through a whole-vector compare, so
-// synthesis cannot fold a band to a constant.
-(* keep *) reg [13:0] pix_live;   // bands 0..13
-(* keep *) reg [1:0]  pix_hist;   // bands 14..15
-(* keep *) reg        pix_cart;   // clk16 side of band 14
-always @(posedge clk16) begin
-    if (~resetn)                   pix_cart <= 1'b0;
-    else if (rom_en & (rom_addr[27:24] != 4'h0)) pix_cart <= 1'b1;
-end
+(* keep *) reg [10:0] pix_live;   // bands 0..10
+(* keep *) reg        pix_on;     // band 15
+(* keep *) reg [3:0]  pix_wr;     // clk16 side of bands 11..14, set further down
+(* keep *) reg [3:0]  pix_wr50;   // bands 11..14
 always @(posedge clk50) begin
     if (~resetn) begin
-        pix_live <= 14'b0;
-        pix_hist <= 2'b0;
+        pix_live <= 11'b0;
+        pix_on   <= 1'b0;
+        pix_wr50 <= 4'b0;
     end else begin
-        pix_live[1:0]  <= gpu_ds[1:0];   // drawstate
-        pix_live[9:2]  <= gpu_ds[9:2];   // busy_allmod[7:0]
-        pix_live[12:10] <= gpu_ob;       // OAMFetch, PIXELGen, OBJ enable
-        pix_live[13]   <= halt;
-        if (pix_cart)                  pix_hist[0] <= 1'b1;
-        if (gbaon)                     pix_hist[1] <= 1'b1;
+        pix_live[2:0]  <= gpu_vf[6:4];   // BG_Mode
+        pix_live[9:3]  <= gpu_dc;        // Forced_Blank, BG0..3, BLDCNT effect
+        pix_live[10]   <= halt;
+        pix_wr50       <= pix_wr;
+        if (gbaon)                     pix_on <= 1'b1;
     end
 end
 // Bit 15 is the leftmost, so band 0 lands in bit 0 and the order below reads left
 // to right on screen.
-assign dbg_bits = {pix_hist, pix_live};
+assign dbg_bits = {pix_on, pix_wr50, pix_live};
 assign dbg_done = 1'b0;
 `else
 `ifdef TINYGBA_CLKTEST
@@ -754,6 +749,20 @@ wire [3:0] palette_oam_we;
 
 wire phase = ~clk16;    // 0: internal GPU work, 1: get data from CPU
 
+`ifdef TINYGBA_PIXTEST
+// TinyGBA: clk16 side of PIXTEST bands 11..14 (see the map above).  It sits here
+// because the memory-mux strobes are declared just above.
+always @(posedge clk16) begin
+    if (~gbaon) pix_wr <= 4'b0;
+    else begin
+        if (|palette_bg_we | |palette_oam_we)        pix_wr[0] <= 1'b1;
+        if (vram_lo_we | vram_hi_we)                 pix_wr[1] <= 1'b1;
+        if (|oamram_we)                              pix_wr[2] <= 1'b1;
+        if (rom_en & (rom_addr[27:24] != 4'h0))      pix_wr[3] <= 1'b1;
+    end
+end
+`endif
+
 gba_gpu #(.FCLK_SPEED(3)) gpu (
     .fclk(clk50), .mclk(clk16), .phase(phase), .reset(~gbaon),
     `GB_BUS_PORTS_INST,
@@ -796,6 +805,7 @@ gba_gpu #(.FCLK_SPEED(3)) gpu (
     , .DBG_ds(gpu_ds)
     , .DBG_vf(gpu_vf)
     , .DBG_ob(gpu_ob)
+    , .DBG_dc(gpu_dc)
 `endif
 );
 
