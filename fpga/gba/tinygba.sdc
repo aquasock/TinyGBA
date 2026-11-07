@@ -13,9 +13,9 @@
 # under-constrains; if the SDRAM paths fail timing this is where to look.
 #
 #   pll_27   50 MHz    -> 50 * 27 / 50  = 27.000 MHz   (clk27, HDMI reference)
-#   pll_33   27 MHz    -> 27 * 67 / 36  = 50.250 MHz   (clk50, GPU)
-#                       27 * 67 / 108 = 16.750 MHz     (clk16, GBA CPU / mclk)
-#                       27 * 67 / 27  = 67.000 MHz     (clk67, SDRAM)
+#   pll_16   27 MHz    -> 27 * 67 / 36  = 50.250 MHz   (clk50, GPU, CLKOUT0)
+#                       27 * 67 / 27  = 67.000 MHz     (clk67, SDRAM, CLKOUT1)
+#                       27 * 67 / 108 = 16.750 MHz     (clk16, GBA CPU / mclk, CLKOUT2)
 #   pll_12   50 MHz    -> 50 * 18 / 75  = 12.000 MHz   (clk12, USB HID)
 #   pll_hdmi 27 MHz    -> 27 * 55 / 4   = 371.250 MHz  (hclk5, serialiser)
 #   div5     371.25    -> / 5           = 74.250 MHz   (hclk, 720p pixel clock)
@@ -27,14 +27,14 @@ create_clock -name clk27 -period 37.037 [get_pins {pll27.PLL_inst/CLKOUT0}]
 
 # GBA main clock, 16.75 MHz.  The GPU samples this clock's phase, and the SDRAM
 # controller needs exactly four of these per SDRAM clock.
-create_clock -name clk16 -period 59.701 [get_pins {pll16.PLL_inst/CLKOUT0}]
+create_clock -name clk16 -period 59.701 [get_pins {pll16.PLL_inst/CLKOUT2}]
 
-# GPU clock, one clk16 in three.
-create_clock -name clk50 -period 19.900 [get_pins {pll33.PLL_inst/CLKOUT0}]
+# GPU clock, three per clk16, from the same VCO.
+create_clock -name clk50 -period 19.900 [get_pins {pll16.PLL_inst/CLKOUT0}]
 
-# SDRAM clock, one clk16 in four.  O_sdram_clk is this clock's phase-shifted
+# SDRAM clock, four per clk16.  O_sdram_clk is this clock's phase-shifted
 # sibling (CLKOUT3), which is not constrained separately: it leaves the FPGA.
-create_clock -name clk67 -period 14.925 [get_pins {pll16.PLL_inst/CLKOUT2}]
+create_clock -name clk67 -period 14.925 [get_pins {pll16.PLL_inst/CLKOUT1}]
 
 # USB HID host clock.
 create_clock -name clk12 -period 83.333 [get_pins {pll12.PLL_inst/CLKOUT0}]

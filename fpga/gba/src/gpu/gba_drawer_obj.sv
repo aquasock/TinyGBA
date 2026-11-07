@@ -1,5 +1,5 @@
 
-module gba_drawer_obj (fclk, hblank, lockspeed, busy, drawline, ypos, ypos_mosaic, BG_Mode, one_dim_mapping, Mosaic_H_Size, hblankfree, maxpixels, pixel_we_color, pixeldata_color, pixel_we_settings, pixeldata_settings, pixel_x, pixel_objwnd, OAMRAM_Drawer_addr, OAMRAM_Drawer_data, PALETTE_Drawer_addr, PALETTE_Drawer_data, VRAM_Drawer_addr, VRAM_Drawer_data, VRAM_Drawer_valid);
+module gba_drawer_obj (fclk, hblank, lockspeed, busy, drawline, ypos, ypos_mosaic, BG_Mode, one_dim_mapping, Mosaic_H_Size, hblankfree, maxpixels, pixel_we_color, pixeldata_color, pixel_we_settings, pixeldata_settings, pixel_x, pixel_objwnd, OAMRAM_Drawer_addr, OAMRAM_Drawer_data, PALETTE_Drawer_addr, PALETTE_Drawer_data, VRAM_Drawer_addr, VRAM_Drawer_data, VRAM_Drawer_valid, DBG_ob);
 
     `include "pproc_bus_gba.sv"
     input            fclk;
@@ -7,6 +7,9 @@ module gba_drawer_obj (fclk, hblank, lockspeed, busy, drawline, ypos, ypos_mosai
     input            hblank;
     input            lockspeed;
     output reg       busy;
+    // TinyGBA: {PIXELGen != WAITOAM, OAMFetch != IDLE}, the two machines whose
+    // joint idle is the only way `busy` clears while `lockspeed` is 0.
+    output     [1:0] DBG_ob;
     
     input            drawline;
     input [7:0]      ypos;
@@ -829,5 +832,7 @@ module gba_drawer_obj (fclk, hblank, lockspeed, busy, drawline, ypos, ypos_mosai
         end 
     end
     
+    assign DBG_ob = {PIXELGen != WAITOAM, OAMFetch != IDLE};
+
 endmodule
 `undef pproc_bus_gba

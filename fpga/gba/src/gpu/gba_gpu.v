@@ -9,6 +9,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
         , DBG_ev
         , DBG_ds
         , DBG_vf
+        , DBG_ob
 `endif
         );
     `include "pproc_bus_gba.sv"
@@ -130,6 +131,8 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
     // machine back at NEXTPIXEL, and those two registers gate each other, so a
     // single one of them cannot name the fault.
     output     [6:0]          DBG_vf;
+    // TinyGBA: OBJ drawer machines and DISPCNT OBJ enable, see gba_gpu_drawer.v.
+    output     [2:0]          DBG_ob;
 `endif
 
     gba_gpu_timing #(.is_simu(is_simu)) igba_gpu_timing(
@@ -231,6 +234,7 @@ module gba_gpu(fclk, mclk, phase, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb
 `ifdef TINYGBA_GPU_TAPS
         , .DBG_ds(DBG_ds)
         , .DBG_vf(DBG_vf)
+        , .DBG_ob(DBG_ob)
 `endif
     );
 

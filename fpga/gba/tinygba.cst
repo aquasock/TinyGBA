@@ -17,21 +17,25 @@
 // in the right side's HCLK block (block 1, lane 0); left to the placer it lands
 // in block 0, from where the pixel clock does not route to the OSER10s.
 // pll_27 (50 MHz -> 27 MHz) is the 27 MHz reference, so it takes PLL_R[1].
-// pll_33 (16.75 / 50.25 / 67 MHz) takes PLL_R[0] and pll_12 (USB) PLL_R[2],
-// which are the two remaining sites TinySNES left free; those two are this
-// project's choice, not an inherited one.
+// PLL_R[0] and PLL_R[2] are the two remaining right-side sites TinySNES left
+// free.  pll_33 no longer exists in this build (see pll16 below), so both are
+// unused.
 INS_LOC "pll27.PLL_inst" PLL_R[1];
-INS_LOC "pll33.PLL_inst" PLL_R[0];
 // pll12 is not built: USB HID is disabled in src/boards/console138k.v, so
 // there is no 12 MHz domain and PLL_R[2] stays free for the placer.
 INS_LOC "pll_hdmi.PLL_inst" PLL_R[3];
-// pll16 carries the GBA main clock.  This placement is load-bearing: a PLL
-// output reaches the clock spine only through a clock-plane wire, and only
-// CLKOUT0 has a pip to one on this device.  PLL_L[0]'s CLKOUT0 owns
-// TLPLL0CLK0; PLL_R[0]'s is already taken by clk50.  Do not move it to a site
-// whose only plane wire is in use, and do not move clk16 back to CLKOUT1.
-// The left-side site costs nothing else here: no pin depends on it.
+// pll16 carries the whole GBA clock family from one VCO: clk50 on CLKOUT0
+// (TLPLL0CLK0), clk67 on CLKOUT1 (BUFG into a logic-to-clock gate), clk16 on CLKOUT2
+// (TLPLL0CLK2).  The clocks must share a PLL because GBATang crosses between
+// them with no synchronisers (core-log entry 23).  Only CLKOUT0 and CLKOUT2
+// have clock-plane wires on this device, so do not move clk16 or clk50 to
+// CLKOUT1.  The left-side site costs nothing else here: no pin depends on it.
 INS_LOC "pll16.PLL_inst" PLL_L[0];
+// clk67 has no direct plane wire from CLKOUT1, and on general routing it shows
+// 1.2-1.8 ns of skew and seed-dependent `sdram.rst_cnt` hold misses.  Marking
+// it CLOCK makes the packer insert a BUFG, so the global router takes it
+// through fabric into a logic-to-clock gate and onto the plane from there.
+CLOCK_LOC "clk67" BUFG;
 INS_LOC "div5" RIGHTSIDE[4];
 
 IO_LOC "sysclk" V22;

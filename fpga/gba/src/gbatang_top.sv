@@ -129,24 +129,18 @@ wire clk16;         // main clock: 16.7Mhz GBA CPU clock
 wire clk50;         // ppu clock:  3 x 16.7Mhz
 wire clk67, clk67_p;// ram clock:  67.2Mhz
 wire hclk;          // 74.25Mhz hdmi 720p pixel clock
-// TinyGBA: clk16 and clk67 share pll16 on PLL_L[0].  A PLL output reaches the
-// global clock spine only through a clock-plane wire (`T[LR]PLL<n>CLK<lane>`),
-// and the lane number follows the output number: CLKOUT0 uses lane 0, CLKOUT2
-// uses lane 2.  clk16 was on pll33's CLKOUT1, which has no plane wire at all,
-// so it reached none of its 2381 sinks globally and nextpnr fell back to 2381
-// point-to-point arcs whose -5.38 ns of skew failed hold on all 24 placements
-// tried; clk67 on CLKOUT2 had the same defect at 255 sinks and 1.2 to 1.9 ns,
-// and cost several clean seeds on every netlist change.
-//
-// Both now sit on one PLL because they share a VCO: 1809 = 108 x 16.75 =
-// 27 x 67, so CLKOUT0 divides to 16.75 MHz and CLKOUT2 to 67.00 MHz from the
-// same loop.  clk50 keeps pll33, which owns the other plane wire, and pll33's
-// second and third outputs are left unconnected on purpose.  See
+// TinyGBA: clk50, clk67 and clk16 all come from pll16 on PLL_L[0], one VCO,
+// as upstream's pll_33 made them.  GBATang crosses between these clocks with
+// no synchronisers and depends on their fixed phase; two PLLs on one
+// reference are frequency-locked but come up at a different relative phase on
+// every configuration load (core-log entry 23).  A PLL output reaches the
+// global clock spine only through a clock-plane wire, and only CLKOUT0 and
+// CLKOUT2 have one, so the two big clocks take those -- clk50 on CLKOUT0,
+// clk16 on CLKOUT2 -- and clk67 takes CLKOUT1 on general routing.  See
 // fpga/gba/src/pll/pll_16.v and .ai/core-reference.md TCL-001.
-wire clk16_unused, clk67_unused, clk67p_unused;
-pll_33 pll33(.clkin(clk27), .clkout0(clk50), .clkout1(clk16_unused),
-             .clkout2(clk67_unused), .clkout3(clk67p_unused));
-pll_16 pll16(.clkin(clk27), .clkout0(clk16), .clkout2(clk67), .clkout3(clk67_p));
+wire pll16_lock;
+pll_16 pll16(.clkin(clk27), .clkout0(clk50), .clkout1(clk67), .clkout2(clk16),
+             .clkout3(clk67_p), .lock(pll16_lock));
 assign O_sdram_clk = clk67_p;
 
 // TinyGBA: HDMI clocks.  One output on the PLL and a CLKDIV for the pixel
@@ -163,13 +157,26 @@ wire [7:0]  loader_do;
 reg resetn = 0;
 
 `ifndef VERILATOR
+`ifdef TINYGBA_CLKTEST
+// TinyGBA clock diagnostic: release the pixel-clock divider from clk27, so the
+// HDMI output comes up even when clk16, and with it `resetn`, never runs.
+reg [7:0] hdmi_rst_cnt = 8'd0;
+reg       hdmi_resetn  = 1'b0;
+always @(posedge clk27)
+    if (&hdmi_rst_cnt) hdmi_resetn  <= 1'b1;
+    else               hdmi_rst_cnt <= hdmi_rst_cnt + 1'b1;
+`endif
 // TinyGBA: the pixel clock, divided from the 5x serialiser clock.  `div5` is
 // pinned to RIGHTSIDE[4] in fpga/gba/tinygba.cst; left to the placer it lands in
 // block 0, from where the pixel clock does not route to the OSER10s.
 CLKDIV #(.DIV_MODE("5")) div5 (
     .CLKOUT(hclk),              // 74.25Mhz
     .HCLKIN(hclk5),
+`ifdef TINYGBA_CLKTEST
+    .RESETN(hdmi_resetn),
+`else
     .RESETN(resetn),
+`endif
     .CALIB(1'b0)
 );
 `endif
@@ -283,6 +290,7 @@ wire [7:0]  gpu_dbg;        // GPU timing generator internals, see gba_gpu_timin
 wire [1:0]  gpu_ev;         // GPU drawer line-start events, see gba_gpu.v
 wire [9:0]  gpu_ds;         // GPU drawer state machine + busy vector, see gba_gpu.v
 wire [6:0]  gpu_vf;         // GPU mode 3/4/5 fetch state, draw state, BG_Mode
+wire [2:0]  gpu_ob;         // GPU OBJ drawer machines + DISPCNT OBJ enable
 `endif
 wire [31:0] dispstat_dbg;   // {REG_VCOUNT[23:16], V_Count_Setting, 2'b0,
                             //  IRQ enables, flags}: [0] VBlank flag, [1] HBlank
@@ -574,108 +582,62 @@ assign dbg_bits = st_dbg;
 assign dbg_done = gbaon;
 `else
 `ifdef TINYGBA_PIXTEST
-// TinyGBA: the GPU drawer's live state and its history, drawn as sixteen bands
-// across the top of the test field in gba2hdmi.  The status probe's sixteen bits
-// answered "what state is the machine in" and cost a decoder; this answers
-// questions a decoder cannot mis-state, because every answer is the colour of a
-// band:
+// TinyGBA: which drawer holds the GPU in DRAWING, drawn as sixteen bands across
+// the top of the test field in gba2hdmi, white = 1.
 //
-//   bands 0..15 (x 0..239, 15 source pixels each)   DBG_bits, left to right
+// The bufg_pix_s3 load (core-log entry 23) read `drawstate` solid DRAWING across
+// a whole line of samples in four captures over ~20 s, BG_Mode 0, `pixel_out_we`
+// never, the OBJ drawer busy at some point, and the machine released.  DRAWING
+// only exits when every bit of `busy_allmod` is clear (gba_gpu_drawer.v), so one
+// drawer never finishes its line and the merger that raises `pixel_out_we` never
+// runs.  `lockspeed` is 0, as upstream, so nothing cuts a drawer off at hblank.
+// The mode 3/4/5 fetch bands of the previous map are dropped: the drawer is in
+// mode 0, where that fetch machine never starts.
 //
-// The timing generator's ladder used to live in this frame and is not repeated,
-// because its answer is already recorded -- BRD-017: the raster runs, the state
-// machine leaves VISIBLE, and every reachable rung sets -- and carrying it would
-// cost half the bands this build needs.  The generator is not in question.  The
-// drawer is.
+// Bands 0 to 13 are LIVE levels.  Each band is 15x16 source pixels written over
+// about one GBA line, so a cycling signal shows as stripes and a solid band is a
+// held level, not a frame-phase alias.
 //
-// The 2026-11-03 build established that `drawline` and `hblank_trigger` both fire
-// and that `pixel_out_we` never does, so a line reaches the drawer and dies
-// there.
+//   band  0  drawstate[0]              \  0 IDLE 1 WAITHBLANK
+//   band  1  drawstate[1]              /  2 DRAWING 3 MERGING
+//   band  2  busy_mode0_0   (BG0 text drawer)
+//   band  3  busy_mode0_1   (BG1 text drawer)
+//   band  4  busy_mode0_2   (BG2 text drawer)
+//   band  5  busy_mode0_3   (BG3 text drawer)
+//   band  6  busy_mode2_2   (BG2 affine drawer, any of the three)
+//   band  7  busy_mode2_3   (BG3 affine drawer, any of the three)
+//   band  8  busy_mode345
+//   band  9  busy OBJ       (any of the three OBJ drawers)
+//   band 10  OBJ OAMFetch != IDLE        the OAM walk has not finished
+//   band 11  OBJ PIXELGen != WAITOAM     the pixel generator has not drained
+//   band 12  DISPCNT Screen_Display_OBJ  (what starts the OBJ drawer)
+//   band 13  CPU `halt`
 //
-// Two instrument faults are corrected here, and both were mine.
+// Bands 14 and 15 are STICKY ever-true.
 //
-// The first is that the whole frame used to be latched.  A latch started sampling
-// `drawstate` from the instant reset released, which is how one build produced a
-// strip claiming WAITHBLANK had been reached while `drawline` was clear -- an
-// impossible pair that named the instrument, not the machine.
+//   band 14  the CPU fetched from 0x08000000 or above (it reached the cart)
+//   band 15  gbaon ever high              (control: the machine was released)
 //
-// The second is subtler and cost the 2026-11-04 reading its standing.  Bands 0 to
-// 4 were made live levels, which is correct for a genuinely stuck register -- but
-// `vramfetch` is a PER-LINE CYCLING register, not a stuck one, and 48 identical
-// frames across 8 seconds could equally be a real freeze or the capture landing at
-// the same line phase every frame, because clk50 and the pixel clock are locked.
-// That is the same aliasing class BRD-014 and TCL-010 record, and a live sample
-// of a cycling register cannot distinguish the two.  The fetch questions are
-// therefore asked as STICKY facts from here on, which aliasing cannot fake.
-//
-// Bands 0 to 6 are live levels, and every one of them is a register that either
-// never moves or is the answer to a mode question:
-//
-//   band  0  drawstate[0]        live  \  the outer machine's state
-//   band  1  drawstate[1]        live  /   0 IDLE 1 WAITHBLANK 2 DRAWING 3 MERGING
-//   band  2  busy_mode345        live   the mode 3/4/5 drawer has not finished
-//   band  3  DrawState[0]        live  \  the pixel machine inside that drawer
-//   band  4  DrawState[1]        live  /   0 NEXTPIXEL 1 WAITREAD
-//   band  5  BG_Mode[2]          live  \  the mode the drawer decodes:
-//   band  6  BG_Mode[1]          live  /   3 = 0,1   4 = 1,0   5 = 1,0
-//
-// Bands 7 to 15 are STICKY ever-true since the first `drawline`, which is the
-// arming condition: before a line is drawn the fetch machine legitimately sits in
-// IDLE, so recording IDLE unarmed would be recording the reset value.  This is the
-// trap the sibling project records as its TCL-013.
-//
-//   band  7  vramfetch reached STARTREAD
-//   band  8  vramfetch reached WAITREAD
-//   band  9  vramfetch reached FETCHDONE
-//   band 10  vramfetch returned to IDLE after a line started   <- the discriminator
-//   band 11  `pixel_out_we` ever            (control: expected black, BRD-018)
-//   band 12  `drawline` ever                (control and arming bit)
-//   band 13  busy_modeobj ever              (the OBJ drawer ran at all)
-//   band 14  busy_allmod ever non-zero      (some drawer started)
-//   band 15  gbaon ever high                (the machine was released)
-//
-// The discriminator is band 10 against band 9.  A fetch machine that cycles
-// normally reaches FETCHDONE and then returns to IDLE every line, so both set.  A
-// machine frozen at FETCHDONE -- which is what bands 3 and 4 then have to explain,
-// since FETCHDONE only advances when DrawState is NEXTPIXEL -- sets band 9 and
-// never band 10.  That distinction is immune to frame-phase aliasing because
-// neither bit ever clears.
-//
-// `gpu_ds[8]` and `gpu_ds[9]` are read as raw bits rather than through a
-// whole-vector compare: a comparison against a constant folds to a single constant
-// when synthesis can prove it, and one band of an earlier attempt did exactly that
-// and would have read black for ever.
-(* keep *) reg [6:0] pix_live;    // bands 0..6, live levels
-(* keep *) reg [8:0] pix_hist;    // bands 7..15, ever-true after arming
-(* keep *) reg        pix_armed;  // a `drawline` has been seen
+// Busy bits are read as raw bits, not through a whole-vector compare, so
+// synthesis cannot fold a band to a constant.
+(* keep *) reg [13:0] pix_live;   // bands 0..13
+(* keep *) reg [1:0]  pix_hist;   // bands 14..15
+(* keep *) reg        pix_cart;   // clk16 side of band 14
+always @(posedge clk16) begin
+    if (~resetn)                   pix_cart <= 1'b0;
+    else if (rom_en & (rom_addr[27:24] != 4'h0)) pix_cart <= 1'b1;
+end
 always @(posedge clk50) begin
     if (~resetn) begin
-        pix_live  <= 7'b0;
-        pix_hist  <= 9'b0;
-        pix_armed <= 1'b0;
+        pix_live <= 14'b0;
+        pix_hist <= 2'b0;
     end else begin
-        pix_live[0] <= gpu_ds[0];      // drawstate[0]
-        pix_live[1] <= gpu_ds[1];      // drawstate[1]
-        pix_live[2] <= gpu_ds[8];      // busy_mode345
-        pix_live[3] <= gpu_vf[2];      // DrawState[0] (bit 1 is constant 0)
-        pix_live[4] <= gpu_vf[4];      // BG_Mode[0]
-        pix_live[5] <= gpu_vf[5];      // BG_Mode[1]
-        pix_live[6] <= gpu_vf[6];      // BG_Mode[2]
-
-        if (gpu_ev[0])                 pix_armed <= 1'b1;
-
-        if (pix_armed) begin
-            if (gpu_vf[1:0] == 2'd1)     pix_hist[0] <= 1'b1;   // STARTREAD
-            if (gpu_vf[1:0] == 2'd2)     pix_hist[1] <= 1'b1;   // WAITREAD
-            if (gpu_vf[1:0] == 2'd3)     pix_hist[2] <= 1'b1;   // FETCHDONE
-            if (gpu_vf[1:0] == 2'd0)     pix_hist[3] <= 1'b1;   // back to IDLE
-        end
-
-        if (pixel_out_we)              pix_hist[4] <= 1'b1;
-        if (gpu_ev[0])                 pix_hist[5] <= 1'b1;   // drawline
-        if (gpu_ds[9])                 pix_hist[6] <= 1'b1;   // OBJ drawer busy
-        if (gpu_ds[9:2] != 8'h00)      pix_hist[7] <= 1'b1;   // any drawer busy
-        if (gbaon)                     pix_hist[8] <= 1'b1;
+        pix_live[1:0]  <= gpu_ds[1:0];   // drawstate
+        pix_live[9:2]  <= gpu_ds[9:2];   // busy_allmod[7:0]
+        pix_live[12:10] <= gpu_ob;       // OAMFetch, PIXELGen, OBJ enable
+        pix_live[13]   <= halt;
+        if (pix_cart)                  pix_hist[0] <= 1'b1;
+        if (gbaon)                     pix_hist[1] <= 1'b1;
     end
 end
 // Bit 15 is the leftmost, so band 0 lands in bit 0 and the order below reads left
@@ -683,8 +645,69 @@ end
 assign dbg_bits = {pix_hist, pix_live};
 assign dbg_done = 1'b0;
 `else
+`ifdef TINYGBA_CLKTEST
+// TinyGBA clock diagnostic (core-log entry 23).  With clk50, clk67 and clk16
+// moved onto one PLL, the board drew no HDMI sync at all, which is what a
+// `resetn` that never rises looks like: its counter runs on clk16.  This
+// measures every GBA clock from clk27, which feeds the HDMI PLL and is known
+// good, and draws the result through a framebuffer writer that also runs on
+// clk27, so nothing in the readout depends on a clock under test.
+//
+// Each clock drives a free-running /16 counter.  Its top bit is synchronised
+// into clk27 and its rising edges counted over 2^20 clk27 cycles (38.836 ms).
+// Expected counts: clk16 40,656; clk50 121,971; clk67 162,626.  "ok" is +/-2%.
+//   bar 0  pll16 LOCK ever high          bar 1  pll16 LOCK now
+//   bar 2  `resetn` now (the clk16 reset counter released)
+//   bar 3  clk16 ever toggled            bar 4  clk16 frequency ok
+//   bar 5  clk50 ever toggled            bar 6  clk50 frequency ok
+//   bar 7  clk67 ever toggled            bar 8  clk67 frequency ok
+//   bars 9..15  clk16 count[17:11], LSB at bar 9; 40,656 reads 19 (0010011)
+// The top band is always green: it proves the readout itself is running.
+reg [3:0] ck16_div = 4'd0, ck50_div = 4'd0, ck67_div = 4'd0;
+always @(posedge clk16) ck16_div <= ck16_div + 1'b1;
+always @(posedge clk50) ck50_div <= ck50_div + 1'b1;
+always @(posedge clk67) ck67_div <= ck67_div + 1'b1;
+
+reg [2:0]  ck_s16 = 3'd0, ck_s50 = 3'd0, ck_s67 = 3'd0;
+reg [1:0]  ck_slock = 2'd0, ck_srst = 2'd0;
+reg [19:0] ck_win = 20'd0;
+reg [17:0] ck_n16 = 18'd0, ck_n50 = 18'd0, ck_n67 = 18'd0;
+reg [17:0] ck_m16 = 18'd0, ck_m50 = 18'd0, ck_m67 = 18'd0;
+reg        ck_alive16 = 1'b0, ck_alive50 = 1'b0, ck_alive67 = 1'b0, ck_lock_ever = 1'b0;
+wire ck_e16 = ck_s16[1] & ~ck_s16[2];
+wire ck_e50 = ck_s50[1] & ~ck_s50[2];
+wire ck_e67 = ck_s67[1] & ~ck_s67[2];
+always @(posedge clk27) begin
+    ck_s16   <= {ck_s16[1:0], ck16_div[3]};
+    ck_s50   <= {ck_s50[1:0], ck50_div[3]};
+    ck_s67   <= {ck_s67[1:0], ck67_div[3]};
+    ck_slock <= {ck_slock[0], pll16_lock};
+    ck_srst  <= {ck_srst[0], resetn};
+    ck_win   <= ck_win + 1'b1;
+    if (&ck_win) begin
+        ck_m16 <= ck_n16 + ck_e16;  ck_n16 <= 18'd0;
+        ck_m50 <= ck_n50 + ck_e50;  ck_n50 <= 18'd0;
+        ck_m67 <= ck_n67 + ck_e67;  ck_n67 <= 18'd0;
+    end else begin
+        ck_n16 <= ck_n16 + ck_e16;
+        ck_n50 <= ck_n50 + ck_e50;
+        ck_n67 <= ck_n67 + ck_e67;
+    end
+    if (ck_e16)      ck_alive16   <= 1'b1;
+    if (ck_e50)      ck_alive50   <= 1'b1;
+    if (ck_e67)      ck_alive67   <= 1'b1;
+    if (ck_slock[1]) ck_lock_ever <= 1'b1;
+end
+wire ck_ok16 = (ck_m16 >= 18'd39843)  & (ck_m16 <= 18'd41469);
+wire ck_ok50 = (ck_m50 >= 18'd119532) & (ck_m50 <= 18'd124410);
+wire ck_ok67 = (ck_m67 >= 18'd159373) & (ck_m67 <= 18'd165879);
+assign dbg_bits = {ck_m16[17:11], ck_ok67, ck_alive67, ck_ok50, ck_alive50,
+                   ck_ok16, ck_alive16, ck_srst[1], ck_slock[1], ck_lock_ever};
+assign dbg_done = 1'b1;
+`else
 assign dbg_bits      = 16'h0000;
 assign dbg_done      = 1'b0;
+`endif
 `endif
 `endif
 `endif
@@ -772,6 +795,7 @@ gba_gpu #(.FCLK_SPEED(3)) gpu (
     , .DBG_ev(gpu_ev)
     , .DBG_ds(gpu_ds)
     , .DBG_vf(gpu_vf)
+    , .DBG_ob(gpu_ob)
 `endif
 );
 
@@ -1082,6 +1106,9 @@ gba_joypad joypad (
 `ifdef TINYGBA_PIXTEST
   `define TINYGBA_DIAG_OVERLAY_OFF
 `endif
+`ifdef TINYGBA_CLKTEST
+  `define TINYGBA_DIAG_OVERLAY_OFF
+`endif
 wire overlay_iosys;
 `ifdef TINYGBA_DIAG_OVERLAY_OFF
 wire overlay = 1'b0;
@@ -1115,7 +1142,11 @@ gba2hdmi_ddr3 video (       // DDR3-based framebuffer
 assign led = ~{joy_usb1[2:0], init_calib_complete, overlay, usb_conerr, usb_type};
 `else
 gba2hdmi video (            // BRAM-based framebuffer
+`ifdef TINYGBA_CLKTEST
+	.clk(clk27), .clk27(clk27), .resetn(resetn), .clk_pixel(hclk), .clk_pixel_x5(hclk5),
+`else
 	.clk(clk50), .clk27(clk27), .resetn(resetn), .clk_pixel(hclk), .clk_pixel_x5(hclk5),
+`endif
     .pixel_data(pixel_out_data), .pixel_x(pixel_out_x), .pixel_y(pixel_out_y),
     .pixel_we(pixel_out_we),
     .sound_left(sound_out_left), .sound_right(sound_out_right),

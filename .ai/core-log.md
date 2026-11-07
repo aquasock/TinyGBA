@@ -758,3 +758,42 @@ Deploy `build/pix17_s2/tinygba.fs` when the operator releases the board, and rea
 - User Test: NOT RUN
 
 ---
+
+## 23 COMMIT Unreleased 2026-11-06T18:34:12-07:00
+
+#### Coming From:
+
+Unreleased c81eef1
+
+#### Purpose:
+
+Remove the board-only faults that kept the machine from drawing a picture, from the two-PLL clock split through to the GPU drawer hang that the PIXTEST bands exposed.
+
+#### Outcome:
+
+The GPU now draws on the board, and the fault that blocked it for entries 18 to 22 was synthesis, not logic. The cycle began on the clocks. `clk16` and `clk50` came from two PLLs with no phase relationship while the GPU samples `clk16` state in `clk50` and the SDRAM samples `mclk` raw in `clk67`, so all GBA clocks were moved onto one PLL, `pll16` at `PLL_L[0]`, from a 1809 MHz VCO: `CLKOUT0` divide 36 for `clk50`, `CLKOUT1` divide 27 for `clk67`, `CLKOUT2` divide 108 for `clk16`, and `CLKOUT3` divide 27 for the SDRAM pin clock. A `TINYGBA_CLKTEST` build proved every clock alive and on frequency on the board, but the boot test `pll1ov_s3` stayed black, and a PIXTEST seed sweep then showed the one-PLL move had pushed `clk67` onto general routing, because apicula carries no plane pip for `CLKOUT1`, with hold misses on `sdram.rst_cnt`. Vendor probe builds showed the vendor reaches the plane from `CLKOUT1` and `CLKOUT3` through centre-bridge muxes apicula does not model, so instead `CLOCK_LOC "clk67" BUFG;` was added to `fpga/gba/tinygba.cst`, which makes the nextpnr fork route `clk67` through a `BUFG` and a logic-to-clock gate onto `SPINE16/TOP0` and `SPINE25/TOP1`, both measured good; `clk67` went back into `tools/clock_plane_report.py`'s `REQUIRED_PLANE`, and the finding is TCL-018. `build/bufg_pix_s3` (`.fs` SHA-256 `8566e3e1585f90df75f3b46a2d1822a2cb657dc8fbbdb7bf8d188a508681fc5b`) passed with zero hold violations and on the board held `drawstate` at DRAWING in every capture with `pixel_out_we` never asserting. A new instrument, `build/obj_pix_s3` (`19dde6b5f69d945eec7856c301bcb4ed745d80b31435b4b63bdf539d0927f71d`), added an always-present `DBG_ob` tap of the OBJ drawer's `OAMFetch` and `PIXELGen` states and remapped the sixteen bands to `drawstate`, each drawer's `busy`, the OBJ states, `DISPCNT` OBJ enable, CPU `halt`, a sticky cartridge-fetch bit and `gbaon`. It read every drawer busy, including both affine drawers and mode 3-5 while in BG mode 0, and every drawer busy before the CPU had even been released, which no `drawline` could have caused. The netlist explained it: the upstream RTL leaves `busy`, `vramfetch` and `palettefetch` without reset or initialiser and relies on the vendor flow's power-up at 0, while yosys treats them as undefined, folded `busy_mode2_2 | busy_mode2_2_hd0 | busy_mode2_2_hd1` to a `VCC` cell so that `busy_allmod` could never reach 0, and mapped the other `busy` flops to `DFFSE`, which powers up at 1. `tools/build_tinygba.sh` now runs `setundef -zero -init` before `synth_gowin`, recorded as TCL-017 with the earlier `gb_bus_rst` fold of TCL-011 as the same class. `build/fix_pix_s3` (`.fs` `9c4fe8900f3be710b9be31671d52f9c37203e2ab6fc7dcc4d0c3466492effc81`, `.bin` `e3a648ae55b397b3e7a7b4e082c52faf4c047d4bdafe293af6b2f1b52b7b50bc`) passed with no relaxation and zero hold violations (`clk16` 19.725, `clk50` 80.769, `clk67` 103.210, `hclk` 98.678 MHz) at 48,247 LUTs, 12,038 flip-flops and 226,079 routing arcs, every drawer `busy` is now `DFFRE`, and the 86 remaining `DFFSE` all come from explicit initialisers or reset values of 1. On the board it reads all-zero bands before release, and after the cartridge loads `drawstate` cycles, the bands flicker as the operator saw, and the GBA field is a uniform grey instead of black, which also explains BRD-018. The machine still does not boot: across 48 frames over 12 seconds from reset the field never changes, `halt` toggles so the BIOS is taking V-Blank interrupts, and the cartridge-fetch bit never sets, which is BRD-020. The overlay-off reseeds behaved as TCL-009 predicts and exposed one limit of the `BUFG` route: `build/fix_ov_s1` (`.fs` `ed96667551e0a512a5c99a5d1cc29484b05c19164c0b8a85d1561a66b3f5a9bb`) and `fix_ov_s3` both built with zero hold violations but pass `clk67` only through the documented GBATang four-cycle readback path, at 36.8 and 37.7 MHz, while `fix_ov_s2` routed but was refused by the clock-plane gate because `clk67` fell back to general routing at that seed, so the `BUFG` route is a per-placement result rather than a guarantee and the gate is what catches it. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 22 and the existing reference records were not rewritten, and validated this entry as entry 23 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of twenty-three against the 100-entry limit.
+
+#### Next Steps:
+
+Find why the BIOS executes and takes interrupts but neither draws its logo nor jumps to the cartridge. The next instrument should replace the GPU-internal bands, which have answered their question, with what the BIOS is doing to the display: live `DISPCNT` BG mode, forced blank and the four BG enables, the `BLDCNT` effect bits, and `halt`, plus sticky bits for the CPU having written palette RAM, VRAM and OAM and for the cartridge fetch. Those decide between a BIOS that never loads its graphics and one that loads them but is stuck in its fade or blend state. Build from a fresh build directory, take at least three loads, and check every tap against the netlist for constant or undefined drivers before reading the board, since TCL-017 shows a band can be folded without the source looking wrong. When `fix_ov_s1` is wanted as an uninstrumented boot image it is the clean one of the three overlay-off seeds; `fix_ov_s2` must not be deployed. Do not remove `setundef -zero -init` from the build: every register this tree leaves unreset depends on it.
+
+#### Files Modified:
+
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gpu/gba_drawer_obj.sv
+- fpga/gba/src/gpu/gba_gpu.v
+- fpga/gba/src/gpu/gba_gpu_drawer.v
+- fpga/gba/src/pll/pll_16.v
+- fpga/gba/tinygba.cst
+- fpga/gba/tinygba.sdc
+- tools/build_tinygba.sh
+- tools/clock_plane_report.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---

@@ -508,3 +508,44 @@ Field meanings:
     - "This repository, the two netlists' `gbatang_top` cell censuses: LUTs 40,778 against 41,294, flip-flops 11,535 against 11,538"
     - "This repository, `tools/gatelevel_report.py` output for `pix_live`, `pix_hist` and `pix_armed`, which shows the added registers are only three"
   verification: "Measured 2026-11-04 from the build logs of six placements and the cell census of two synthesised netlists. Not a hypothesis: the arc, LUT and flip-flop counts are read out of the artifacts, and the clean-seed yield is the outcome of five attempted placements, three of them stopped by pid while still oscillating at 42 minutes. The `build/pix17_s2` placement completed with zero hold violations and every clock passing, so the changed netlist is placeable, just less often."
+
+- record_id: TCL-017
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "yosys treats a register with neither reset nor initialiser as undefined and folds it, where the vendor flow powers it up at 0"
+  status: VERIFIED
+  verified_date: 2026-11-06
+  statement: "The upstream GBATang RTL leaves many registers with no reset and no initialiser, among them every GPU drawer's `busy`, `vramfetch` and `palettefetch`, and relies on the Gowin vendor flow powering every flop up at 0. yosys gives such a flop an undefined initial value and uses that freedom in two ways that both break the machine. First, it folds logic through the undefined value: `busy_allmod[4]` is `busy_mode2_2 | busy_mode2_2_hd0 | busy_mode2_2_hd1`, the two HD instances never receive `drawline` in this configuration so their `busy` can never leave its initial value, and yosys resolved the OR of an undefined term to constant 1, deleted `busy_mode2_2` and drove `gpu.DBG_ds[6]` and `[7]` from a `VCC` cell (`build/obj_pix_s3/tinygba.json`, net 931). `busy_allmod` could therefore never reach 0 and `gba_gpu_drawer.v`'s `tdrawstate_DRAWING` could never exit. Second, it maps flops whose next-state logic contains a synchronous one onto `DFFSE`, which powers up at 1: in the same netlist all eight drawer `busy` flops and `vramfetch[0]` were `DFFSE`, and the board showed every drawer busy before the CPU had been released. Running `setundef -zero -init` between `read_slang` and `synth_gowin` gives every such flop init 0; in `build/fix_pix_s3/tinygba.json` the `VCC` driver is gone, all eight drawer `busy` flops are `DFFRE`, and the 86 remaining `DFFSE` all trace to an explicit `= 1` initialiser (`rstCnt`, the UART idle-high pair, `dma_idle`), a reset value of 1 (`DISPCNT` forced blank, the BG2/BG3 affine `DX`/`DMY`), or the HDMI serialiser."
+  consequence: "Any register in this tree without a reset is a hardware-only fault waiting to happen under the open flow, while Verilator, which zeroes uninitialised state, runs the same RTL correctly. `tools/build_tinygba.sh` now runs `setundef -zero -init` before `synth_gowin`, which reproduces the vendor power-up convention for the whole design rather than patching registers one at a time. TCL-011's `gb_bus_rst` fold is the same class seen earlier. Do not remove the `setundef` step, and when a netlist shows a constant where a register should be, check for an undefined initial value before suspecting the logic."
+  sources:
+    - "This repository, `build/obj_pix_s3/tinygba.json`: `pix_live` bits 6 and 7 driven from cell `gpu.DBG_ds_VCC_V`; drawer `busy` flops of type `DFFSE`"
+    - "This repository, `build/fix_pix_s3/tinygba.json`: the same nets driven by `gpu.drawer.igba_drawer_mode2_2.busy_DFFRE_Q` and siblings; `DFFSE` census 86"
+    - "This repository, `fpga/gba/src/gpu/gba_drawer_mode2.v` and `gba_drawer_mode0.v`: `busy` declared `reg` with no reset or initialiser"
+  verification: "Measured 2026-11-06 on both netlists and on the board: `build/obj_pix_s3` held `drawstate` at DRAWING with every busy band at 1 in twelve samples across four captures, and `build/fix_pix_s3`, differing only by the `setundef` step, reads all-zero bands before release and cycles `drawstate` through IDLE, WAITHBLANK and MERGING after it, with the GBA field rendered as a solid colour instead of black."
+
+- record_id: TCL-018
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A PLL output without a clock-plane pip reaches the spine through a BUFG and a logic-to-clock gate"
+  status: VERIFIED
+  verified_date: 2026-11-06
+  statement: "TCL-001 holds: apicula carries plane pips only for `CLKOUT0` of the PLLs at `PLL_L[0]` and `PLL_R[0]` and for `CLKOUT2` at `PLL_L[0]`, so with all GBA clocks on one PLL at `PLL_L[0]` `clk67` on `CLKOUT1` fell to general routing and hold failed on `sdram.rst_cnt` with 1.2 to 1.84 ns of skew. The vendor flow does reach the plane from `CLKOUT1` and `CLKOUT3`, but through centre-bridge muxes at (27,87) and (27,94) sourced from `CBRIDGEOUT_BOTTOM4..7`, a path apicula does not model and whose decode depends on an unconfirmed fuse polarity; modelling it is reverse-engineering work. The nextpnr-himbaechel fork already supports the alternative: a net carrying the `CLOCK` attribute gets a `BUFG` from the packer, and the global router takes the `BUFG` output through fabric into a logic-to-clock gate and onto the plane. The CST line `CLOCK_LOC \"clk67\" BUFG;` sets that attribute. With it, `clk67` routes in the global phase with no general-routing fallback on `SPINE16/TOP0` and `SPINE25/TOP1`, both measured good, at a cost of one `BUFG`."
+  consequence: "Use `CLOCK_LOC \"<net>\" BUFG;` for any PLL output that apicula cannot put on the plane directly, and keep the net in `tools/clock_plane_report.py`'s `REQUIRED_PLANE` so the gate catches a fall back to general routing. The route is per placement, not guaranteed: `build/fix_ov_s2` routed with `clk67` on general routing despite the `BUFG` and was refused by the gate."
+  sources:
+    - "This repository, `fpga/gba/tinygba.cst`: `CLOCK_LOC \"clk67\" BUFG;`"
+    - "nextpnr-himbaechel fork `himbaechel/uarch/gowin/pack.cc` (BUFG insertion on `CLOCK` nets), `cst.cc` (`CLOCK_LOC ... BUFG`), `globals.cc` (logic-to-clock gate routing)"
+    - "Vendor probe builds of `CLKOUT1` alone and `CLKOUT3` alone at `PLL_L[0]`, decoded from the vendor bitstreams on this machine 2026-11-05"
+  verification: "Measured 2026-11-06 on `build/bufg_pix_s3`, `build/obj_pix_s3`, `build/bufg_ov_s1`, `build/bufg_ov_s2`, `build/fix_pix_s3` and `build/fix_ov_s3`: zero hold violations in every one and `clk67` on measured-good spine pips in every plane report; `build/bufg_pix_s3` and `build/fix_pix_s3` ran on the board."
+
+- record_id: BRD-020
+  kind: BOARD
+  topic_id: BRD
+  title: "With undefined-init folding removed the GPU draws, but the BIOS never completes its intro or fetches the cartridge"
+  status: VERIFIED
+  verified_date: 2026-11-06
+  statement: "`build/fix_pix_s3` (SHA-256 `9c4fe8900f3be710b9be31671d52f9c37203e2ab6fc7dcc4d0c3466492effc81`) running the official BIOS with `test_logo.gba` loaded renders the GBA field as a uniform grey, luminance 136 plus or minus 0.5 with no structure, constant across 48 frames sampled at 4 Hz over 12 seconds from reset. The drawer cycles through IDLE, WAITHBLANK and MERGING, the OBJ drawer and occasionally the BG3 affine drawer report busy, `DISPCNT` OBJ enable is set, CPU `halt` toggles throughout, and the sticky cart-fetch band never sets. This explains BRD-018: `pixel_out_we` never asserted because the drawer could never leave DRAWING (TCL-017), not because of any fault in the pixel path. The overlay-off build made before the fix, `build/bufg_ov_s1`, showed a black field."
+  consequence: "The picture path now works end to end and the fault has moved to the CPU side: the BIOS is executing and taking V-Blank interrupts, but it neither draws its logo nor jumps to `0x08000000` within 12 seconds, where real hardware does so in about 2.5. The grey is consistent with the BIOS's white backdrop held partway through its brightness fade, which is a hypothesis and not a finding."
+  sources:
+    - "This repository, the PIXTEST band legend in `fpga/gba/src/gba2hdmi.sv` and the band sources in `fpga/gba/src/gbatang_top.sv`"
+    - "HDMI captures through the USB capture device on this machine, 2026-11-06"
+  verification: "Read 2026-11-06 from four captures four seconds apart and a 12-second capture from reset decoded at 4 Hz; every frame's field statistics and band strings were consistent with one another."

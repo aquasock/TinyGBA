@@ -3,6 +3,7 @@ module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rn
 `ifdef TINYGBA_GPU_TAPS
         , DBG_ds
         , DBG_vf
+        , DBG_ob
 `endif
         );
     `include "pproc_bus_gba.sv"
@@ -442,6 +443,11 @@ module gba_gpu_drawer(fclk, mclk, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rn
     //   DBG_vf[6:4]  BG_Mode: the register the drawer decodes, not DISPCNT
     output      [6:0]  DBG_vf;
     wire        [3:0]  DBG_vf_w;
+    // TinyGBA: the OBJ drawer's two machines and the DISPCNT bit that starts it.
+    //   DBG_ob[0]  OAMFetch != IDLE    DBG_ob[1]  PIXELGen != WAITOAM
+    //   DBG_ob[2]  DISPCNT Screen_Display_OBJ
+    output      [2:0]  DBG_ob;
+    wire        [1:0]  DBG_ob_w;
 `endif
     
     wire [7:0]    busy_allmod;
@@ -1349,6 +1355,9 @@ end
         .VRAM_Drawer_addr(VRAM_Drawer_addrobj),
         .VRAM_Drawer_data(VRAM_Drawer_data_Hi),
         .VRAM_Drawer_valid(VRAM_Drawer_valid_Hi[1])
+`ifdef TINYGBA_GPU_TAPS
+        , .DBG_ob(DBG_ob_w)
+`endif
     );
     
     gba_drawer_obj #(2, 480) igba_drawer_obj_hd0(
@@ -2441,6 +2450,7 @@ end
     // TinyGBA: BG_Mode is read here rather than inside gba_drawer_mode345 so the
     // band shows the register the drawer's own decode sees.
     assign DBG_vf = {BG_Mode, DBG_vf_w};
+    assign DBG_ob = {Screen_Display_OBJ[DISPCNT_Screen_Display_OBJ.upper], DBG_ob_w};
 `endif
 
 endmodule

@@ -138,6 +138,33 @@ always @(posedge clk) begin
     mem_portA_addr  <= pt_y * 240 + pt_x;
     mem_portA_wdata <= pt_colour(pt_x, pt_y);
 end
+`elsif TINYGBA_CLKTEST
+// TinyGBA: clock diagnostic readout, selected with -DTINYGBA_CLKTEST.  Same bar
+// layout as the status readout (bar i is bit i, green = 1, red = 0), but `clk`
+// is clk27 in this build, so the readout runs whether or not the GBA clocks do.
+// Bit meanings are at the measurement block in gbatang_top.sv.
+reg [7:0] ct_x, ct_y;
+
+function [17:0] ct_colour(input [7:0] x, input [7:0] y);
+    if (y < 8'd8)
+        ct_colour = dbg_done ? {6'h00, 6'h3f, 6'h00} : {6'h00, 6'h00, 6'h3f};
+    else if (x < 8'd232)
+        ct_colour = dbg_bits[x / 8'd15] ? {6'h00, 6'h3f, 6'h00} : {6'h3f, 6'h00, 6'h00};
+    else
+        ct_colour = {6'h20, 6'h20, 6'h20};
+endfunction
+
+always @(posedge clk) begin
+    if (ct_x == 8'd239) begin
+        ct_x <= 8'd0;
+        ct_y <= (ct_y == 8'd159) ? 8'd0 : ct_y + 8'd1;
+    end else begin
+        ct_x <= ct_x + 8'd1;
+    end
+    mem_portA_we    <= 1'b1;
+    mem_portA_addr  <= ct_y * 240 + ct_x;
+    mem_portA_wdata <= ct_colour(ct_x, ct_y);
+end
 `elsif TINYGBA_STATUS_TEST
 // TinyGBA: sticky status readout, selected with -DTINYGBA_STATUS_TEST.  Sixteen
 // bars, bit 0 on the left, green where the bit is set.  Bits 0..5 are sticky and
@@ -174,48 +201,23 @@ always @(posedge clk) begin
     mem_portA_wdata <= st_colour(st_x, st_y);
 end
 `elsif TINYGBA_PIXTEST
-// TinyGBA: the GPU drawer's live state and history drawn as sixteen bands.
+// TinyGBA: which GPU drawer holds the line, drawn as sixteen bands.
 // Selected with TINYGBA_DEFINES=-DTINYGBA_PIXTEST.
 //
-// The raster is proven (BRD-017) and the line reaches the drawer (BRD-018), so
-// the question this frame answers is where inside the drawer a line stops.  It
-// takes the framebuffer away from the GPU and sweeps its own raster over the
-// whole 240x160 array, so the display path is proven by the field appearing at
-// all and says nothing about the machine.
+// The raster is proven (BRD-017), and the bufg_pix_s3 load (core-log entry 23)
+// found `drawstate` held in DRAWING, which only exits when every drawer's busy
+// bit clears.  This frame names the drawer that does not finish.  It takes the
+// framebuffer away from the GPU and sweeps its own raster over the whole
+// 240x160 array, so the display path is proven by the field appearing at all and
+// says nothing about the machine.  The band map is defined beside its registers
+// in gbatang_top.sv; in short, bands 0..13 live, 14..15 sticky:
 //
-// Bands 0 to 6 are LIVE levels and bands 7 to 15 are STICKY.  The split is the
-// correction to the previous build, which sampled the per-line fetch state live:
-// `vramfetch` cycles every line, so a live sample of it cannot tell a frozen
-// machine from a capture that lands at the same line phase every frame, because
-// clk50 and the pixel clock are locked.  Sticky questions are immune to that.
-//
-//   band  0 (x   0..14) drawstate[0]         live  } 0 IDLE 1 WAITHBLANK
-//   band  1 (x  15..29) drawstate[1]         live  } 2 DRAWING 3 MERGING
-//   band  2 (x  30..44) busy_mode345         live
-//   band  3 (x  45..59) DrawState             live  0 NEXTPIXEL 1 WAITREAD
-//   band  4 (x  60..74) BG_Mode[0]            live  } display mode the drawer
-//   band  5 (x  75..89) BG_Mode[1]            live  } decodes, all three bits:
-//   band  6 (x  90..104) BG_Mode[2]           live  } 3 = 011  4 = 100  5 = 101
-//   band  7 (x 105..119) vramfetch reached STARTREAD   (sticky, after drawline)
-//   band  8 (x 120..134) vramfetch reached WAITREAD    (sticky)
-//   band  9 (x 135..149) vramfetch reached FETCHDONE  (sticky)
-//   band 10 (x 150..164) vramfetch returned to IDLE    (sticky) <- discriminator
-//   band 11 (x 165..179) `pixel_out_we` ever           (control: expected black)
-//   band 12 (x 180..194) `drawline` ever               (control and arming bit)
-//   band 13 (x 195..209) busy_modeobj ever
-//   band 14 (x 210..224) busy_allmod ever non-zero
-//   band 15 (x 225..239) gbaon ever high
-//
-// Bands 9 and 10 together are the question.  A fetch machine that cycles normally
-// reaches FETCHDONE and returns to IDLE every line, so both are white.  A machine
-// frozen at FETCHDONE sets band 9 and never band 10 -- and neither bit can clear,
-// so no capture artefact can fake it.  Bands 3 and 4 then say whether the pixel
-// machine is the reason, since FETCHDONE only advances when DrawState is
-// NEXTPIXEL.
-//
-// The sticky fetch bands only begin recording once a `drawline` has been seen.
-// Before that the machine legitimately sits in IDLE, so an unarmed latch would be
-// recording the reset value -- the arming trap of TCL-013.
+//   band  0..1   drawstate                 band 10  OBJ OAMFetch != IDLE
+//   band  2..5   busy BG0..BG3 text        band 11  OBJ PIXELGen != WAITOAM
+//   band  6..7   busy BG2/BG3 affine       band 12  DISPCNT OBJ enable
+//   band  8      busy mode 3/4/5           band 13  CPU halt
+//   band  9      busy OBJ                  band 14  CPU ever fetched the cart
+//                                          band 15  gbaon ever high
 //
 // `pixel_data`, `pixel_x` and `pixel_y` are folded into the low bit of the blue
 // channel rather than ignored.  Taking the framebuffer away from the GPU leaves

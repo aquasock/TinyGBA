@@ -210,9 +210,15 @@ dnames=$(grep -rhoE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*' "$src/src" \
 bb=$(comm -12 <(echo "$libmods") <(echo "$dnames")) || true
 bbflags=$(echo "$bb" | sed 's/^/--blackboxed-module /' | paste -sd' ')
 
+# The upstream RTL leaves many registers with neither reset nor initialiser and
+# relies on the vendor flow powering every flop up at 0.  Yosys treats them as
+# undefined: it folded the GPU drawers' busy OR to constant 1 and mapped other
+# busy flops to set-type DFFSE that power up at 1, hanging the drawer in
+# DRAWING.  setundef gives every such flop init 0 before synthesis.
 yosys -Q -T -q -l "$out/synth.log" -p "
     read_verilog -lib $shim/cells_xtra_gw5a.v
     read_slang --std 1800-2017 --single-unit -U SYNTHESIS $defines --allow-use-before-declare --allow-lib-module-redef $bbflags -v $shim/cells_sim_nospecify.v -v $shim/cells_xtra_gw5a.v -I $src/src/common -I $src/src/gpu ${sources[*]} ${hdmi_slang[*]} $root/tools/cells_behavioral.v
+    setundef -zero -init
     synth_gowin -family gw5a -top gbatang_top
     write_json $out/tinygba.json
 " 2>&1 | tee "$out/synth.err" | tail -30
@@ -243,8 +249,8 @@ fi
 # TINYGBA_BIOS_HEX is excluded deliberately: it selects which image is loaded
 # into the BIOS block RAM and changes no logic, so a different BIOS must not read
 # as a different design.
-cfg=$(printf '%s' "${TINYGBA_DEFINES:-}" | grep -oE -- '-DTINYGBA_[A-Z0-9_]+' \
-      | sed 's/^-D//' | grep -v '^TINYGBA_BIOS_HEX$' | sort -u | paste -sd'+' -)
+cfg=$(printf '%s' "${TINYGBA_DEFINES:-}" | { grep -oE -- '-DTINYGBA_[A-Z0-9_]+' || true; } \
+      | sed 's/^-D//' | { grep -v '^TINYGBA_BIOS_HEX$' || true; } | sort -u | paste -sd'+' -)
 cfg="${cfg:-default}"
 echo "=== 1b. register-parity gate (config: $cfg) ==="
 parity=0

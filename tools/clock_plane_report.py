@@ -117,7 +117,10 @@ NO_PLANE_EXPECTED = {"sysclk", "clk27", "clk67_p", "hclk5"}
 
 # The clocks fpga/gba/tinygba.sdc constrains and that must reach the plane.  A net
 # here with no bridge pip is on general routing, which is the fault the clk67 work
-# of core-log entry 4 removed and which no timing report shows.
+# of core-log entry 4 removed and which no timing report shows.  In core-log
+# entry 23 clk50, clk16 and clk67 moved onto one PLL, whose plane wires are on
+# CLKOUT0 and CLKOUT2 only; clk67 rides CLKOUT1 and reaches the plane through a
+# BUFG and a logic-to-clock gate (`CLOCK_LOC "clk67" BUFG` in tinygba.cst).
 REQUIRED_PLANE = ("clk16", "clk50", "clk67", "hclk")
 
 
