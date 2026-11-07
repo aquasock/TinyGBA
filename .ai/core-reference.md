@@ -664,3 +664,32 @@ Field meanings:
     - "This repository, `build/test/litprobe.gba`, `build/test/threecase.gba` and `build/test/shiftpool.gba`: the three cartridges that pass"
     - "Captures `/tmp/f8_*.png`, `/tmp/pa_*.png`, `/tmp/lp_*.png`, `/tmp/tc_*.png` and `/tmp/sp_*.png`, 2026-11-07, MJPEG pinned at 1920x1080"
   verification: "Not verified. The contradiction was reproduced but not resolved, and no configuration was found that separates the failing cartridges from the passing ones. Recorded so the next cycle starts from the contradiction instead of rediscovering it."
+
+- record_id: BRD-027
+  kind: BOARD
+  topic_id: BRD
+  title: "The 0x080000F8 literal-load anomaly was a defect in the test cartridges and is withdrawn"
+  status: VERIFIED
+  verified_date: 2026-11-07
+  statement: "`tools/make_addr_probe_rom.py` builds a cartridge that loads three cartridge words by explicit `ldr Rd,[pc,#imm]` offset -- no literal pool is emitted, so the assembler cannot relocate anything -- from `0x080000F8`, `0x08000104` and `0x08000110`, with the code ending at `0x080000EC` so the first target is separated from the last instruction by three words. The build script decodes each instruction back out of the finished image and refuses to write it unless every load targets the address and constant it claims, and the result was confirmed independently with `arm-linux-gnueabihf-objdump`. On the board all three loads returned their constants: `0x11112222` from `0x080000F8`, `0x33334444` from `0x08000104`, `0x55556666` from `0x08000110`, each reported to its own ring slot and each single-valued across every page-0 frame of a ten-second capture that also showed all four pages cycling. This supersedes BRD-026, which recorded the same address returning zero in two earlier cartridges and named the isolation test that would settle it. The literal-load path is correct at `0x080000F8`; the earlier results were artefacts of those two cartridges, both of which placed the target word where the code tail also sat."
+  consequence: "BRD-026 is withdrawn and must not be cited as evidence of an address-dependent read fault. With it closed, every path this cycle can measure agrees: cartridge instruction fetches are byte-exact, cartridge data reads are correct including repeat and adjacent reads, literal loads are correct at every address tested, IO register decode separates DISPCNT, DISPSTAT, VCOUNT and BLDCNT, and DMA and WAITCNT are observed working. No cartridge completes its display-enable, and the fault therefore lies past everything the MMIO ring can observe. The lesson worth carrying is about test construction as much as about the machine: three hypotheses this project has now formed from cartridge behaviour were wrong, and each was wrong in a way its own instrument could have caught, so a cartridge built to test the machine must first be shown to test what it claims -- which is why this one verifies its own loads from the assembled image rather than from its source."
+  sources:
+    - "This repository, `tools/make_addr_probe_rom.py`: the cartridge, its `verify()` that decodes the image back, and its refusal to write an image whose loads do not match"
+    - "This repository, `build/test/addrprobe.gba`, disassembled with `arm-linux-gnueabihf-objdump -b binary -m armv5te`: `80000cc` loads from `0x80000f8`, `80000d0` from `0x8000104`, `80000d4` from `0x8000110`"
+    - "This repository, BRD-026, the lead this resolves, and `build/test/readf8.gba` and `build/test/pairread.gba`, the cartridges it withdrew"
+    - "Captures `/tmp/ap3_001.png` and `/tmp/ap4_*.png`, 2026-11-07, MJPEG pinned at 1920x1080"
+  verification: "Observed on the board 2026-11-07: all three ring slots matched their constants, and a ten-second capture across all four pages showed no variation in any of them. Read through `tools/decode_fetchtrace.py` with the marker present in every slot."
+
+- record_id: TCL-021
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A power cycle clears the bitstream, and a capture from an unconfigured board looks like a stalled design"
+  status: VERIFIED
+  verified_date: 2026-11-07
+  statement: "The Tang Console holds its configuration in volatile memory, so switching it off for a mode change and back on leaves the FPGA unconfigured until a bitstream is loaded again. The symptom is not an error: the capture device still receives a picture, the probe frame still draws, and the board looks like a design that has stopped. Measured 2026-11-07: after the console was power-cycled for a mode switch, a cartridge was loaded without a reflash and three consecutive capture cycles showed the ring empty and every one of sixteen frames on page 0. The page advances every 2^25 `clk50` cycles, about 0.67 s, so sixteen frames covering eight seconds cannot all be page 0 in a running design -- that inconsistency was the tell. After `openFPGALoader -b tangconsole build/gx_s4/tinygba.fs`, the same cartridge loaded and the same capture showed all four pages cycling in the order 0, 1, 2, 3."
+  consequence: "Reflash after every power cycle, including one taken to switch the console between one-wire and two-wire mode. `tools/cap_tang.sh` exists for this and does both in one step; calling `tools/load_gba_rom.py` directly on a board whose configuration state is unknown is the mistake, and it cost three capture cycles here. The general rule this joins is the one BRD-003 already records: the board's silent failures produce plausible pictures rather than errors, so the cheapest defence is a readout whose own internal consistency can be checked -- a page that never advances, a ring whose marker is absent, or a counter that contradicts its own latch is evidence about the instrument before it is evidence about the machine."
+  sources:
+    - "This repository, session 2026-11-07: three capture cycles with the ring empty and all sixteen frames on page 0 after a power cycle and before a reflash"
+    - "`tools/cap_tang.sh`, which flashes and captures together for exactly this reason"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: the ring's clear while `~gbaon`, which is why an unconfigured or unreleased board reads all-zero rather than stale"
+  verification: "Measured 2026-11-07 by the same cartridge producing an empty ring before the reflash and correct values after it, with the page distribution changing from sixteen page-0 frames to a four-page cycle."

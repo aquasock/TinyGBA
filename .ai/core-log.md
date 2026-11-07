@@ -927,3 +927,32 @@ Resolve the `0x080000F8` contradiction before drawing any further conclusion abo
 - User Test: FAIL
 
 ---
+## 28 COMMIT Unreleased 2026-11-07T14:53:40-07:00
+
+#### Coming From:
+
+Unreleased 8524905
+
+#### Purpose:
+
+Settle the one measurement from entry 27 that disagreed with the others, so the cycle can close with a consistent evidence base instead of an open contradiction.
+
+#### Outcome:
+
+The contradiction was in the instrument and is withdrawn: the literal-load path is correct at `0x080000F8`, and BRD-026's lead does not describe the machine. Entry 27 left two cartridges returning zero for a literal load targeting that address while a data read of it returned the correct constant, and named the isolation test that would settle it. That test is `tools/make_addr_probe_rom.py`, and it avoids the failure mode which spoiled the earlier pair: it uses explicit `ldr Rd,[pc,#imm]` offsets rather than `ldr Rd,=value`, so no literal pool is emitted and the assembler cannot relocate the target, and it puts three words of distance between the last instruction at `0x080000EC` and the first target at `0x080000F8`. The build script decodes each instruction back out of the finished image and refuses to write a cartridge unless every load targets the address and constant it claims, which matters because the earlier failures were exactly a case of an instrument not doing what its source said; the result was then confirmed independently with `objdump`, which showed the three loads at `0x080000CC`, `0x080000D0` and `0x080000D4` reaching `0x080000F8`, `0x08000104` and `0x08000110`. On the board all three returned their constants, `0x11112222`, `0x33334444` and `0x55556666`, each to its own ring slot, and a ten-second capture across all four pages showed no variation in any of them. So BRD-026 is superseded by BRD-027 and must not be cited as evidence of an address-dependent read fault. With that closed, every path this cycle can measure now agrees: cartridge instruction fetches are byte-exact, cartridge data reads are correct including repeat and adjacent reads, literal loads are correct at every address tested, IO register decode separates DISPCNT, DISPSTAT, VCOUNT and BLDCNT, and DMA and WAITCNT are observed working on Super Mario Advance. No cartridge completes its display-enable, so the fault lies past everything the MMIO ring can observe. Two operational faults in my own procedure cost time this cycle and are recorded as TCL-021. The first is that a power cycle clears the bitstream: after the console was switched off for a mode change and back on, a cartridge was loaded without a reflash and three capture cycles were spent examining a design that was not running, with an empty ring and all sixteen frames on page 0 -- which is impossible in a running design, because the page advances every 0.67 s, and that inconsistency was the only thing that revealed it. `tools/cap_tang.sh` flashes and captures together for exactly this reason, and calling the loader directly on a board of unknown configuration state is the mistake. The second is smaller and was caught by reading the ring rather than the screen: an early attempt to read the `addrprobe` results filtered on the three expected IO offsets and found nothing, because the ring holds the newest eight IO writes and the BIOS had already pushed the probe's writes out of it; the fix was to dump every slot rather than the ones the test expected, which is the same mistake as assuming a page rather than reading the page strip. Nothing was deployed as an artifact of this cycle: `build/gx_s4` was already the deployed image from entry 27 and was reflashed unchanged, `.fs` SHA-256 `ad3bc68d8635f54a6743b9f87b21eb17fa6655b8b07da691a00305e6dc9c227f`. The board was left running it with `build/test/addrprobe.gba` loaded and was then returned to two-wire mode by the operator. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 27 and the existing reference records were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 28 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of twenty-eight against the 100-entry limit.
+
+#### Next Steps:
+
+Build the instrument that can see past the ring, because the ring has now been checked against every path it can observe and all of them are correct. The specific gap is IWRAM execution: the ring records only writes into `0x04000000` to `0x04FFFFFF` and the counter counts only cartridge instruction fetches, so both go blind the moment a cartridge copies itself to `0x03000000` and runs from there, which is what Super Mario Advance does after its DMA3 transfer and is where a retail game spends most of its time. The next readout should latch the first few completed instruction fetches with `ram_addr[27:24] == 3` alongside the existing cartridge counter, and a sticky record of whether `0x03000000` execution was ever seen at all, so the question becomes whether a cartridge reaches its own IWRAM code and what it fetches there. Before spending a build, run the same cartridges in the Verilator model with a watchpoint on `ram_addr` and on `DISPCNT`, because the model can single-step and the board cannot; its known limit must travel with any result, since it substitutes an array for the SDRAM controller and, with this cartridge, does not boot it at all. Do not re-test the memory path, the fetch path, the literal path, the IO decode, the clock plan or the SDRAM, all six of which are measured and recorded. Do not cite BRD-026. Do not decode a capture without the marker present in every slot, and do not read a capture from a board whose configuration state is unknown -- reflash first, and prefer `tools/cap_tang.sh`, which does both. One item remains open from earlier cycles and is unaffected by this one: `clk16` still reaches its sinks on pips this board has never measured (BRD-019), so every hardware result remains contingent on that caveat until a build lands on a measured-good spine.
+
+#### Files Modified:
+
+- tools/make_addr_probe_rom.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: FAIL
+
+---
