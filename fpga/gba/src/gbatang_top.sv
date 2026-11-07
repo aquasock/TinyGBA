@@ -715,7 +715,8 @@ assign dbg_done      = 1'b0;
 // Fetch-trace readout port of gba2hdmi.  gba2hdmi drives `tr_sel` as
 // {page[1:0], entry[2:0], word[1:0]} and draws `tr_word`; it is tied off
 // outside TINYGBA_FETCHTRACE.  Pages 0 and 1 are the completed-cycle trace,
-// page 2 the IO write ring, page 3 the status word.
+// page 2 the MMIO write ring, page 3 the status pages.  The pages above 1 are
+// generated further down, after the `gb_bus_*` declarations.
 wire [6:0]  tr_sel;
 wire [31:0] tr_word;
 wire [15:0] tr_valid;
@@ -740,6 +741,16 @@ wire [15:0] tr_valid;
 //   word 1  rom_data as the CPU receives it
 //   word 2  {ram_cen, ram_wen, ram_be[3:0], ram_addr[27:24], ram_addr[21:0]}
 //   word 3  ram_wen ? ram_wdata : ram_rdata
+//
+// This recorder is compiled only under `TINYGBA_BOOTTRACE`, which is separate
+// from `TINYGBA_FETCHTRACE` on purpose.  It answered its question in BRD-023 --
+// fifteen of fifteen cartridge fetches returned byte-exact words -- and it costs
+// 2,064 registers, more than every other tap in this readout combined.  Carrying
+// it into a build that is asking a different question made place and route slow
+// and fragile: six seeds of the resulting netlist produced two hard `hclk5`
+// routing aborts, one clock-plane refusal and one long grind.  The MMIO ring
+// below is what the misrouting question needs, and it fits without this.
+`ifdef TINYGBA_BOOTTRACE
 wire tr_cyc = (rom_en | ram_cen) & cpu_en & ~halt;
 (* keep *) reg [2047:0] tr_flat;          // entry e word w at bits (4e+w)*32
 (* keep *) reg [15:0]   tr_vld;
@@ -772,85 +783,7 @@ always @(posedge clk16) begin
         end
     end
 end
-// Read by gba2hdmi on clk50.  The words are static once recorded, which is
-// microseconds after the cart jump, so the crossing only matters for the
-// first frame.
-//
-// ---------------------------------------------------------------- page 2
-// Every completed CPU write into the IO region, 0x04000000..0x04FFFFFF, in an
-// eight-entry ring.  The trace above answers whether the CPU received the right
-// instruction words; this answers the next question, which is whether execution
-// ever reached the store at the end of the cartridge and what that store
-// carried.  A ring rather than a log so a runaway CPU cannot push the answer
-// out of view: the newest writes are always the ones on the page.
-//
-// VRAM, palette and OAM writes are excluded on purpose.  The cartridge's fill
-// and blink loops write VRAM tens of thousands of times and would bury the two
-// IO writes this exists to catch, which is why eight entries suffice.
-//
-// 64 bits per entry:  {ram_be[3:0], ram_addr[27:0], ram_wdata[31:0]}
-//
-// ---------------------------------------------------------------- page 3
-// The live state a page 2 entry cannot answer on its own.  word 0 carries the
-// GPU's own DISPCNT fields, read from the drawer's registers rather than from
-// the bus, so a bus write that never lands is visible as a disagreement between
-// page 2 and page 3; words 1 to 3 carry the sticky DISPCNT writes, the IO ring
-// count, the trace count and the CPU's live halt and release.
-wire tr_iowr = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h4);
-(* keep *) reg [511:0] io_flat;
-(* keep *) reg [7:0]   io_vld;
-reg  [2:0] io_n;
-reg        io_wrapped;
-reg  [1:0] io_sticky;                     // [0] DISPCNT written with 0
-                                          // [1] DISPCNT written with 0x0403
-always @(posedge clk16) begin
-    if (~gbaon) begin
-        io_n       <= 3'd0;
-        io_wrapped <= 1'b0;
-        io_vld     <= 8'd0;
-        io_sticky  <= 2'b00;
-    end else if (tr_iowr) begin
-        io_flat[{io_n, 6'd0} +: 64] <= {ram_be, ram_addr[27:0], ram_wdata};
-        io_vld[io_n] <= 1'b1;
-        io_n         <= io_n + 3'd1;
-        if (io_n == 3'd7) io_wrapped <= 1'b1;
-        if (ram_addr[27:0] == 28'h0400_0000) begin
-            if (ram_wdata[15:0] == 16'h0000) io_sticky[0] <= 1'b1;
-            if (ram_wdata[15:0] == 16'h0403) io_sticky[1] <= 1'b1;
-        end
-    end
-end
-
-wire [2:0]  tr_page = tr_sel[6:5];
-wire [2:0]  tr_ent  = tr_sel[4:2];
-wire [1:0]  tr_wd   = tr_sel[1:0];
-wire [63:0] io_pick = io_flat[{tr_ent, 6'd0} +: 64];
-
-reg [31:0] tr_word_mux;
-always @(*) begin
-    tr_word_mux = 32'd0;
-    case (tr_page)
-        2'd0, 2'd1: tr_word_mux = tr_flat[tr_sel[5:0]*32 +: 32];
-        2'd2: case (tr_wd)
-                  2'd0: tr_word_mux = {4'h0,  io_pick[59:32]};   // address
-                  2'd1: tr_word_mux = io_pick[31:0];            // data
-                  2'd2: tr_word_mux = {28'h0, io_pick[63:60]};  // byte enables
-                  default: tr_word_mux = 32'd0;
-              endcase
-        default: case (tr_wd)
-                  2'd0: tr_word_mux = {25'h0, gpu_dc};                       // live DISPCNT
-                  2'd1: tr_word_mux = {26'h0, io_sticky, io_wrapped, io_n};
-                  2'd2: tr_word_mux = {27'h0, tr_n};
-                  default: tr_word_mux = {30'h0, halt, gbaon};
-                 endcase
-    endcase
-end
-
-assign tr_word  = tr_word_mux;
-// Page 3's status lives in entry 0, which sits at index 8 of the 16-entry view.
-assign tr_valid = (tr_page <= 2'd1) ? tr_vld
-                : (tr_page == 2'd2) ? {8'h00, io_vld}
-                :                     16'h0100;
+`endif
 `else
 assign tr_word  = 32'd0;
 assign tr_valid = 16'd0;
@@ -877,6 +810,194 @@ wire gb_bus_done;
 wire [1:0] gb_bus_acc;
 wire [3:0] gb_bus_be;
 wire gb_bus_rst;
+
+// ---------------------------------------------------------------- pages 2, 3
+// The MMIO write ring and the status pages.  This block sits after the
+// `gb_bus_*` declarations on purpose: naming those wires above their
+// declaration makes Verilog create implicit 1-bit wires that fold to constants,
+// which is TCL-014 and has already produced two wrong readings in this project.
+//
+// The ring records what the MMIO register file ACTUALLY received, on
+// `gb_bus_ena & ~gb_bus_rnw`, beside what the CPU asked for.  The alignment
+// between those two is NOT assumed here, because `gb_memory` has two paths to
+// the register file and they are one cycle apart.  `bram_addr` is assigned in an
+// `always @*` block, so in `state == MAIN` it IS `ram_addr` in the same cycle and
+// `gb_bus_adr = {bram_addr[11:2], 2'b0}` is combinational from it.  In every
+// other state `bram_addr` takes the registered `bram_addr_buf`, which was loaded
+// from `ram_addr` one cycle earlier.  So a write can reach the register file with
+// either the current address or the previous one, and a ring that recorded only
+// one of them would call the buffered case a mismatch.
+//
+// Both are therefore stored, and the decoder reports which one the register file's
+// address agrees with.  That is a measurement of the alignment as well as of the
+// address, which is what BRD-023 needed and did not have.
+//
+// Four words per entry, eight entries:
+//   word 0  {4'h0, gb_bus_adr}    address the register file saw
+//   word 1  gb_bus_din            data the register file saw
+//   word 2  ram_addr[27:0]        address the CPU has out this cycle
+//   word 3  ram_addr_d1[27:0]     the previous cycle's, i.e. bram_addr_buf
+
+// ---------------------------------------------------------------- page 3
+// Four entries:
+//   entry 0  live GPU DISPCNT and sticky DISPCNT writes, ring position, halt
+//   entry 1  counters: CPU-side IO writes, VRAM writes, MMIO writes the register
+//            file received, cartridge fetches
+//   entry 2  the last completed cartridge fetch, so an offending store can be
+//            located in `build/test/test.s` by disassembly rather than inferred
+//            from its data, and the VRAM phase bits
+//   entry 3  the last VRAM store, address and data as the CPU issued them
+`ifdef TINYGBA_FETCHTRACE
+wire tr_iowr   = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h4);
+wire tr_vramwr = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h6);
+wire tr_cart   = rom_en & cpu_en & ~halt & rom_addr[27];
+wire tr_mmio   = gb_bus_ena & ~gb_bus_rnw;
+
+reg  [27:0] ram_addr_d1;
+always @(posedge clk16) ram_addr_d1 <= ram_addr[27:0];
+
+(* keep *) reg [1023:0] mm_flat;          // entry e word w at bits (4e+w)*32
+(* keep *) reg [7:0]    mm_vld;
+(* keep *) reg [4:0]    s_vram;           // VRAM store ever carried
+                                          // {7FFF, 0000, FFE0, 001F, 03E0}
+(* keep *) reg [2:0]    s_dc;             // DISPCNT written with {FFE0, 0403, 0000}
+(* keep *) reg [27:0]   last_cart_addr;
+(* keep *) reg          last_cart_thumb;
+(* keep *) reg [27:0]   last_vram_addr;
+(* keep *) reg [31:0]   last_vram_data;
+reg  [2:0]  mm_n;
+reg         mm_wrapped;
+reg  [15:0] io_total;                     // stores the CPU decoded as IO space
+reg  [15:0] mmio_wr;                      // writes the register file received
+reg  [23:0] vram_wr;
+reg  [15:0] dc_wr;
+reg  [31:0] cart_fetch;
+always @(posedge clk16) begin
+    if (~gbaon) begin
+        mm_n            <= 3'd0;
+        mm_wrapped      <= 1'b0;
+        mm_vld          <= 8'd0;
+        io_total        <= 16'd0;
+        mmio_wr         <= 16'd0;
+        vram_wr         <= 24'd0;
+        dc_wr           <= 16'd0;
+        cart_fetch      <= 32'd0;
+        s_vram          <= 5'd0;
+        s_dc            <= 3'd0;
+        last_cart_addr  <= 28'd0;
+        last_cart_thumb <= 1'b0;
+        last_vram_addr  <= 28'd0;
+        last_vram_data  <= 32'd0;
+    end else begin
+        if (tr_cart) begin
+            cart_fetch      <= cart_fetch + 32'd1;
+            last_cart_addr  <= rom_addr[27:0];
+            last_cart_thumb <= thumb;
+        end
+        if (tr_vramwr) begin
+            vram_wr        <= vram_wr + 24'd1;
+            last_vram_addr <= ram_addr[27:0];
+            last_vram_data <= ram_wdata;
+            case (ram_wdata[15:0])
+                16'h03E0: s_vram[0] <= 1'b1;   // fill: every check passed
+                16'h001F: s_vram[1] <= 1'b1;   // fill: a check failed
+                16'hFFE0: s_vram[2] <= 1'b1;   // failure column
+                16'h7FFF: s_vram[3] <= 1'b1;   // blink square, white phase
+                16'h0000: s_vram[4] <= 1'b1;   // blink square, black phase
+                default:  ;
+            endcase
+        end
+        if (tr_iowr) begin
+            io_total <= io_total + 16'd1;
+            if (ram_addr[27:0] == 28'h0400_0000) begin
+                dc_wr <= dc_wr + 16'd1;
+                case (ram_wdata[15:0])
+                    16'h0000: s_dc[0] <= 1'b1;
+                    16'h0403: s_dc[1] <= 1'b1;
+                    16'hFFE0: s_dc[2] <= 1'b1;
+                    default:  ;
+                endcase
+            end
+        end
+        if (tr_mmio) begin
+            // Four words, 32 bits each, totalling exactly 128, which is what the
+            // `+:` slice takes.  This is worth spelling out because the first two
+            // attempts got it wrong in ways Verilog does not complain about: the
+            // first was 108 bits into 128 and was silently zero-extended, shifting
+            // every field by 20 bits; the second was 144 bits and was silently
+            // truncated.  Both produced plausible-looking words and both were
+            // caught only by checking the width by hand.  Each word is padded to
+            // its own 32-bit boundary, and `gb_bus_adr` is cut to the 12 bits that
+            // carry the IO-window offset -- the rest of it is a constant zero by
+            // construction (`{bram_addr[11:2], 2'b0}`).
+            //   4 + 16 + 12 = 32    marker and register-side address
+            //       32              register-side data
+            //   4 + 28      = 32    CPU address
+            //   4 + 28      = 32    CPU address one cycle earlier
+            // Entry stride.  `{mm_n, 7'd0}` is `mm_n * 128`, which is the entry
+            // size; the first version of this line used `{mm_n, 6'd0}`, which is
+            // `mm_n * 64`, so every entry overwrote the upper half of its
+            // predecessor and half the ring decoded as a blend of two writes.
+            // The marker constant caught it: entries 1 and 4 carried `0xA5C3` and
+            // the rest did not, which is only possible if the layout is wrong.
+            // The read side always used `{tr_ent, 7'd0}`, so only this line was
+            // wrong -- the symptom looked like a decoder fault and was not.
+            mm_flat[{mm_n, 7'd0} +: 128] <= {4'h0,  16'hA5C3, gb_bus_adr[11:0],
+                                             gb_bus_din,
+                                             4'h0,  ram_addr[27:0],
+                                             4'h0,  ram_addr_d1[27:0]};
+            mm_vld[mm_n] <= 1'b1;
+            mm_n         <= mm_n + 3'd1;
+            if (mm_n == 3'd7) mm_wrapped <= 1'b1;
+            mmio_wr <= mmio_wr + 16'd1;
+        end
+    end
+end
+
+wire [2:0]   tr_page = tr_sel[6:5];
+wire [2:0]   tr_ent  = tr_sel[4:2];
+wire [1:0]   tr_wd   = tr_sel[1:0];
+wire [6:0]   mm_off  = {tr_wd, 5'd0};     // 0, 32, 64, 96
+wire [127:0] mm_pick = mm_flat[{tr_ent, 7'd0} +: 128];
+
+reg [31:0] tr_word_mux;
+always @(*) begin
+    tr_word_mux = 32'd0;
+    case (tr_page)
+        // Page 0: the MMIO write ring, eight entries of four words.
+        2'd0: tr_word_mux = mm_pick[mm_off +: 32];
+        // Page 1: the status pages, four entries.
+        2'd1: case (tr_ent)
+                  3'd0: case (tr_wd)
+                            2'd0: tr_word_mux = {25'h0, gpu_dc};      // live DISPCNT
+                            2'd1: tr_word_mux = {26'h0, s_dc, mm_wrapped, mm_n};
+                            2'd2: tr_word_mux = {16'h0, dc_wr};
+                            default: tr_word_mux = {30'h0, halt, gbaon};
+                        endcase
+                  3'd1: case (tr_wd)
+                            2'd0: tr_word_mux = {16'h0, io_total};
+                            2'd1: tr_word_mux = {8'h0,  vram_wr};
+                            2'd2: tr_word_mux = {16'h0, mmio_wr};
+                            default: tr_word_mux = cart_fetch;
+                        endcase
+                  3'd2: case (tr_wd)
+                            2'd0: tr_word_mux = {3'h0, last_cart_thumb, last_cart_addr};
+                            default: tr_word_mux = {27'h0, s_vram};
+                        endcase
+                  default: case (tr_wd)
+                            2'd0: tr_word_mux = {4'h0, last_vram_addr};
+                            2'd1: tr_word_mux = last_vram_data;
+                            default: tr_word_mux = 32'd0;
+                        endcase
+                 endcase
+    endcase
+end
+
+assign tr_word  = tr_word_mux;
+assign tr_valid = (tr_page == 2'd0) ? {8'h00, mm_vld}
+                : (tr_page == 2'd1) ? 16'h0F00
+                :                     16'h0000;
+`endif
 
 wire [13:0] vram_lo_addr;
 wire [31:0] vram_lo_din, vram_lo_dout;

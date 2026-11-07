@@ -43,6 +43,7 @@ stream, which is why nothing here compares colours for equality.
 
 Usage:
     tools/decode_fetchtrace.py CAPTURE.png [CAPTURE.png ...]
+    tools/decode_fetchtrace.py --layout v3 CAPTURE.png    # pre-trim builds
     tools/decode_fetchtrace.py --window 420,180 CAPTURE.png
     tools/decode_fetchtrace.py --expect tools/../build/test/test_logo.gba CAPTURE.png
 
@@ -202,19 +203,90 @@ def page_index(size, px, win):
     return lo | (hi << 1)
 
 
-PAGE_NAMES = {
-    0: "completed-cycle trace, entries 0..7",
-    1: "completed-cycle trace, entries 8..15",
-    2: "IO write ring, entries 0..7",
-    3: "status word",
+# Two page layouts exist in capture history, and a decoder that guesses between
+# them mislabels every page -- the failure TCL-010 and TCL-019 both describe.
+# The layout is therefore named on the command line, never inferred.
+#
+#   v3  pages 0,1 = boot trace (entries 0..15); 2 = MMIO ring; 3 = status
+#       build/mm_s* and build/mm2_s* -- the boot trace was still compiled in
+#   v4  page 0 = MMIO ring; 1 = status; 2,3 unused
+#       build/fast_s* -- boot trace behind its own TINYGBA_BOOTTRACE define
+LAYOUTS = {
+    "v3": {
+        0: "boot trace, entries 0..7",
+        1: "boot trace, entries 8..15",
+        2: "MMIO write ring, entries 0..7",
+        3: "status pages",
+    },
+    "v4": {
+        0: "MMIO write ring, entries 0..7",
+        1: "status pages",
+        2: "unused in this layout",
+        3: "unused in this layout",
+    },
 }
+LAYOUT = "v4"
+PAGE_NAMES = LAYOUTS[LAYOUT]
+
+# Which page carries the MMIO ring and which carries the status entries, per layout.
+MMIO_PAGE = {"v3": 2, "v4": 0}
+STATUS_PAGE = {"v3": 3, "v4": 1}
 
 
-def decode_io(word_addr, word_data, word_be):
-    addr = word_addr & 0x0FFFFFFF
-    data = word_data
-    be = word_be & 0xF
-    return (f"io write 0x{addr:08X} <= 0x{data:08X} be={be:04b}")
+def decode_mmio(words):
+    """Page entry: what the register file saw, against both candidate CPU addresses.
+
+    Word order is fixed by how a concatenation packs: the leftmost term of
+    `{a, b, c, d}` lands in the most significant bits, so the word selected by
+    the lowest index is the RIGHTMOST term.  The failing build packed
+
+        {4'h0, 16'hA5C3, gb_bus_adr[11:0],   // word 3
+         gb_bus_din,                          // word 2
+         4'h0, ram_addr[27:0],                // word 1
+         4'h0, ram_addr_d1[27:0]}             // word 0
+
+    and this function originally read it in the source order, which inverted
+    every field.  The marker caught it, which is the whole reason it is there.
+
+    `gb_memory` has two paths to the register file, one cycle apart: in state
+    MAIN `bram_addr` is `ram_addr` combinationally, and in every other state it
+    is the registered `bram_addr_buf`, loaded one cycle earlier.  Both CPU
+    addresses are therefore in the entry and this reports which one the register
+    file's address agrees with instead of assuming it.
+
+    The comparison is on the low 12 bits because that is all `gb_bus_adr` carries:
+    `{bram_addr[11:2], 2'b0}` is the offset inside the 1 KB IO window, never a
+    0x04xxxxxx address.
+    """
+    w_prev, w_cpu, w_data, w_reg = words
+    # Word 0 is {4'h0, 16'hA5C3, gb_bus_adr[11:0]}, so the marker occupies bits
+    # [27:12] and the IO offset bits [11:0].  A first version of this masked at
+    # [31:16] and read 0x0A5C, one nibble low; the field position is part of the
+    # packing and must be read off it, not guessed.
+    marker = (w_reg >> 12) & 0xFFFF
+    if marker != 0xA5C3:
+        raise AssertionError(
+            f"marker reads 0x{marker:04X}, expected 0xA5C3; the ring's word "
+            f"packing or this decoder's word order is wrong")
+    reg_off = w_reg & 0xFFF
+    cpu_addr = w_cpu & 0x0FFFFFFF
+    prev_addr = w_prev & 0x0FFFFFFF
+    # `gb_bus_adr` is `{bram_addr[11:2], 2'b0}`, so the register file's address is
+    # word-aligned and the low two bits of the CPU's are not carried.  Compare on
+    # the word, or a correct halfword store to 0x06 reads as a mismatch against
+    # the register file's 0x04.
+    cpu_off = cpu_addr & 0xFFC
+    prev_off = prev_addr & 0xFFC
+    if reg_off == cpu_off and (cpu_addr >> 24) == 0x4:
+        align = "same cycle"
+    elif reg_off == prev_off and (prev_addr >> 24) == 0x4:
+        align = "buffered, 1 cycle"
+    elif reg_off == cpu_off or reg_off == prev_off:
+        align = "matches, but CPU address was not IO space"
+    else:
+        align = "NEITHER -- misrouted"
+    return (f"reg got IO+0x{reg_off:03X} <= 0x{w_data:08X} | "
+            f"cpu 0x{cpu_addr:08X} / prev 0x{prev_addr:08X}  -> {align}")
 
 
 def decode_status(w0, w1, w2, w3):
@@ -223,8 +295,7 @@ def decode_status(w0, w1, w2, w3):
     bld = (w0 >> 5) & 0x3
     io_n = w1 & 0x7
     wrapped = (w1 >> 3) & 1
-    saw_zero = (w1 >> 4) & 1
-    saw_0403 = (w1 >> 5) & 1
+    s_dc = (w1 >> 4) & 0x7
     trace_n = w2 & 0x1F
     gbaon = w3 & 1
     halted = (w3 >> 1) & 1
@@ -232,11 +303,43 @@ def decode_status(w0, w1, w2, w3):
     return [
         f"DISPCNT (GPU register): forced_blank={fb} BG0={bgs & 1} BG1={(bgs >> 1) & 1} "
         f"BG2={(bgs >> 2) & 1} BG3={(bgs >> 3) & 1} BLDCNT={bld_names[bld]}",
-        f"IO ring: {io_n} entries written, wrapped={wrapped}, "
-        f"saw DISPCNT<=0x0000 {saw_zero}, saw DISPCNT<=0x0403 {saw_0403}",
-        f"completed-cycle trace: {trace_n} of 16 recorded",
+        f"IO ring position {io_n}, wrapped={wrapped}, "
+        f"DISPCNT written with 0x0000 {s_dc & 1}, 0x0403 {(s_dc >> 1) & 1}, "
+        f"0xFFE0 {(s_dc >> 2) & 1}",
+        f"writes to 0x04000000: {trace_n}",
         f"CPU: gbaon={gbaon} halt={halted}",
     ]
+
+
+def decode_counts(w0, w1, w2, w3):
+    gap = w0 - w2
+    return [
+        f"CPU stores decoded as IO : {w0}",
+        f"VRAM writes              : {w1}",
+        f"writes the register file received: {w2}"
+        + (f"   <-- {gap} CPU IO stores never became register writes" if gap else ""),
+        f"completed cartridge fetches: {w3}",
+    ]
+
+
+def decode_fetch_and_phases(w0, w1, w2, w3):
+    thumb = (w0 >> 28) & 1
+    addr = w0 & 0x0FFFFFFF
+    names = ["0x03E0 fill green", "0x001F fill red", "0xFFE0 failure column",
+             "0x7FFF blink white", "0x0000 blink black"]
+    parts = [f"{n} {1 if (w1 >> i) & 1 else 0}" for i, n in enumerate(names)]
+    return [
+        f"last cartridge fetch: rom_addr=0x{addr:08X} thumb={thumb}",
+        "VRAM writes ever carried: " + ", ".join(parts),
+    ]
+
+
+def decode_last_vram(w0, w1, w2, w3):
+    return [
+        f"last VRAM store address : 0x{w0 & 0x0FFFFFFF:08X}",
+        f"last VRAM store data    : 0x{w1:08X}",
+    ]
+
 
 
 def field_of(word, kind):
@@ -284,26 +387,7 @@ def report(name, capture):
     pg = page_index(size, px, win)
     print(f"page {pg}: {PAGE_NAMES[pg]}")
 
-    if pg in (0, 1):
-        entries = decode_page(size, px, win, pg)
-        for ent in entries:
-            words = ent["words"]
-            # Internal consistency: word 0 and word 2 are address words, 1 and 3
-            # data words.  A decode that disagrees with itself is a bad sample.
-            expect = ["addr", "data", "addr", "data"]
-            for i, want in enumerate(expect):
-                got = ent["shades"][i]
-                if got is not None and got != want:
-                    problems.append(
-                        f"entry {ent['index']} word {i}: shade reads '{got}' where the "
-                        f"renderer draws '{want}'")
-            flag = "V" if ent["valid"] else "-"
-            print(f"  [{flag}] entry {ent['index']:2d}")
-            print(f"        w0 {words[0]:08X}  {field_of(words[0], 'addr')}")
-            print(f"        w1 {words[1]:08X}  {field_of(words[1], 'data32')}")
-            print(f"        w2 {words[2]:08X}  {field_of(words[2], 'ramctl')}")
-            print(f"        w3 {words[3]:08X}  {field_of(words[3], 'ramdata')}")
-    elif pg == 2:
+    if pg == MMIO_PAGE[LAYOUT]:
         # Ring entries carry no order of their own; each is self-describing.
         entries = decode_page(size, px, win, pg, base=0)
         for ent in entries:
@@ -312,18 +396,35 @@ def report(name, capture):
             if not ent["valid"]:
                 print(f"  [{flag}] slot {ent['index']}")
                 continue
-            print(f"  [{flag}] slot {ent['index']}  "
-                  f"{decode_io(words[0], words[1], words[2])}")
-    else:
+            print(f"  [{flag}] slot {ent['index']}  {decode_mmio(words)}")
+    elif pg == STATUS_PAGE[LAYOUT]:
         entries = decode_page(size, px, win, pg, base=0)
-        ent = entries[0]
-        words = ent["words"]
-        flag = "V" if ent["valid"] else "-"
-        print(f"  [{flag}] status")
-        for line in decode_status(*words):
-            print(f"        {line}")
-        if not ent["valid"]:
-            problems.append("status page entry 0 is not marked valid")
+        for ent in entries[:4]:
+            words = ent["words"]
+            flag = "V" if ent["valid"] else "-"
+            idx = ent["index"]
+            print(f"  [{flag}] " + ("status" if idx == 0 else "counters" if idx == 1
+                                     else "last cart fetch / VRAM phases" if idx == 2
+                                     else "last VRAM store"))
+            if idx == 0:
+                for line in decode_status(*words):
+                    print(f"        {line}")
+            elif idx == 1:
+                for line in decode_counts(*words):
+                    print(f"        {line}")
+            elif idx == 2:
+                for line in decode_fetch_and_phases(*words):
+                    print(f"        {line}")
+            else:
+                for line in decode_last_vram(*words):
+                    print(f"        {line}")
+            if not ent["valid"]:
+                problems.append(f"status page entry {idx} is not marked valid")
+    elif LAYOUT == "v3" and pg <= 1:
+        problems.append(f"page {pg} is the boot trace, which this decoder does "
+                        f"not render; the boot trace answered its question in BRD-023")
+    else:
+        problems.append(f"page {pg} is not used by layout {LAYOUT}")
     if problems:
         print("--- problems")
         for p in problems:
@@ -337,7 +438,7 @@ WINDOW_OVERRIDE = None
 
 
 def main(argv):
-    global WINDOW_OVERRIDE
+    global WINDOW_OVERRIDE, LAYOUT, PAGE_NAMES
     args = argv[1:]
     expect = None
     if not args:
@@ -348,6 +449,13 @@ def main(argv):
         if flag == "--window":
             x0, y0, w, h = (int(v) for v in args.pop(0).split(","))
             WINDOW_OVERRIDE = (x0, y0, w, h)
+        elif flag == "--layout":
+            name = args.pop(0)
+            if name not in LAYOUTS:
+                print(f"unknown layout {name}; known: {', '.join(LAYOUTS)}", file=sys.stderr)
+                return 2
+            LAYOUT = name
+            PAGE_NAMES = LAYOUTS[name]
         elif flag == "--expect":
             expect = args.pop(0)
         else:

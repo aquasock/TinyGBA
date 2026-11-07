@@ -205,23 +205,27 @@ always @(posedge clk) begin
     mem_portA_wdata <= st_colour(st_x, st_y);
 end
 `elsif TINYGBA_FETCHTRACE
-// TinyGBA: the cartridge fetch trace, selected with TINYGBA_DEFINES=-DTINYGBA_FETCHTRACE.
-// The sixteen entries and their four words are defined beside the recorder in
-// gbatang_top.sv.  Each word is one row of 32 bit cells, bit 31 on the LEFT,
-// 7x5 source pixels per cell: white = 1; a 0 is black or dark grey (address
-// words) or dark blue (data words), alternating per nibble so the row reads as
-// hex.  An entry is four rows (20 lines) and a page is eight entries.
+// TinyGBA: the cartridge readout, selected with TINYGBA_DEFINES=-DTINYGBA_FETCHTRACE.
+// What each page and word means is defined beside the recorder in gbatang_top.sv;
+// the two layouts that have existed are told apart there and by the decoder's
+// `--layout` flag, so this comment states only the geometry, which has not changed.
+//
+// Each word is one row of 32 bit cells, bit 31 on the LEFT, 7x5 source pixels
+// per cell: white = 1; a 0 is black or dark grey (address words) or dark blue
+// (data words), alternating shade per nibble so the row reads as hex.  An entry
+// is four rows (20 lines) and a page is eight entries.
 //
 //   x   0..223   the 32 bit cells          y  0..159   entries 0..7 of the page
 //   x 224..231   white = this entry recorded
 //   x 232..235   page bit 0
 //   x 236..239   page bit 1
 //
-// There are four pages, so the pair of strips at the right reads as a two-bit
-// page number: 00 the completed-cycle trace's entries 0..7, 01 its entries
-// 8..15, 10 the IO write ring, 11 the status word.  Page 1 (01) also keeps the
-// upper/lower-half meaning the strips had when there were only two pages, so an
-// older capture still decodes its entry numbering the same way.
+// The pair of strips at the right is a two-bit page number, read before any row:
+// a decoder that assumed a page would mislabel every field.  The layout in force
+// is the one `gbatang_top.sv` implements -- currently page 0 the MMIO write ring
+// and page 1 the status pages, with pages 2 and 3 unused because the boot trace
+// moved behind its own define.  Older captures used pages 2 and 3 for those and
+// carry a different numbering; `tools/decode_fetchtrace.py --layout` names which.
 //
 // The page advances every 2^25 clk cycles, 0.67 s at clk50, and the whole cycle
 // takes 2.7 s.  The GPU's pixel stream is folded into the blue LSB for the

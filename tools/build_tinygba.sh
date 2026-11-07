@@ -162,6 +162,17 @@ echo "=== 0. probe field map ==="
 "$suite/py3bin/python3" "$root/tools/probe_map.py" --map-id > "$out/probe-map.id" \
     || { echo "could not record the probe field map" >&2; exit 1; }
 
+# The diagnostic packings in gbatang_top.sv are concatenations assigned to `+:`
+# part-selects, and Verilog neither errors nor warns when the two widths differ:
+# too few bits and it zero-extends, too many and it truncates.  Both happened in
+# one cycle on the MMIO ring and both produced words that decoded to plausible
+# values, so the widths are counted on every build rather than trusted.  See
+# tools/check_ring_width.py for why the check lives in a gate.
+echo "=== 0b. diagnostic packing widths ==="
+"$suite/py3bin/python3" "$root/tools/check_ring_width.py" \
+    -c "$src/src/common/pproc_bus_gba.sv" "$src/src/gbatang_top.sv" \
+    || { echo "a diagnostic packing does not match its slice width" >&2; exit 1; }
+
 # --------------------------------------------------------------- 1. synthesis
 if [[ ! -f "$out/tinygba.json" || "${TINYGBA_FORCE_SYNTH:-0}" == 1 ]]; then
 echo "=== 1. synthesis ==="
