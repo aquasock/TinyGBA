@@ -611,7 +611,7 @@ int main(int argc, char **argv, char **env)
 				// CPU saw; a trace sampled anywhere else reports whatever was on
 				// the bus at that instant and produces believable nonsense.
 				if (cpu_en_r && ram_cen_r && !ram_wen_r &&
-				    ((ram_addr_r >> 24) == 8) && n_cartread < 200) {
+				    ((ram_addr_r >> 24) == 8) && n_cartread < 4000) {
 					n_cartread++;
 					printf("CARTREAD: addr=%08x be=%x data=%08x\n",
 					       ram_addr_r, ram_be_r, gba->ram_rdata);

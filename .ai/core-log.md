@@ -1016,3 +1016,33 @@ Find why control never transfers into IWRAM, because that is now the single ques
 - User Test: FAIL
 
 ---
+
+## 31 COMMIT Unreleased 2026-11-08T09:29:57-07:00
+
+#### Coming From:
+
+Unreleased 2b0e20d
+
+#### Purpose:
+
+Reproduce the board's blank display on demand under the real SDRAM controller and localise the cartridge read-path fault that the array model does not share.
+
+#### Outcome:
+
+The failure now reproduces on demand in the model and is bounded to a single cycle, but its mechanism is not established and no fix was shipped. Two builds of the same tree, same ROM and same 3000-million-step budget differ categorically: with the behavioural array, `build/test/test_logo.gba` renders its pass screen as two colours at a mean of 85, and RetroRegen reaches its menu at 3,420 colours; with `-DTINYGBA_SDRAM_RTL`, both cartridges render one colour for all 889 frames, `test_logo` white at a mean of 252, and RetroRegen white at a mean of 252 against 139,636,806 cartridge fetch cycles in the array build. The controller build reports 18,375,892 cartridge fetch cycles, the identical figure BRD-028 records from the deployed board image, so the model and the board are the same fault. A cycle-level contract trace at the read of the literal-pool word `0x080002B0` records the only difference found: at the cycle the acknowledgement is visible, the array presents `sdram_rdata` `08000400` while the controller presents `e1540400`, and one cycle later both builds present `08000400` in `sdram_rdata` and `ram_rdata` with the same next address, so the divergence is confined to the ack cycle and does not survive its own trace. That convergence is why the mechanism is recorded as a lead rather than a finding, and why the patch the evidence first suggested was reverted rather than shipped: delaying the controller's 32-bit read acknowledgement until the high halfword is collected does make `sdram_rdata` correct at the ack, but `ram_rdata` remained stale because `gba_memory` only sources `sdram_rdata` when the FSM is in `MAIN`, so the frames changed from white to black and the cartridge fetch count rose from 18,375,892 to 26,185,631, which is a different broken behaviour and not progress. Reading the source also confirmed that entry 14's deliberately deferred DMA defect is still present, since the DMA path still enters `REQ1_START` and `dma_done` is gated on the single-cycle `sdram_ready` pulse, but `test_logo` issues no DMA, so it cannot be this blocker. One instrument defect was found and fixed: `tools/sim/sim_main.cpp` capped the `CARTREAD` log at 200 entries, so a truncated log read as a request stream that stopped, and the cap is now 4000. Three of this session's own analytical failures are worth carrying forward because all three were confident conclusions drawn from an instrument that had not been validated: a stale-read claim was withdrawn on the strength of a 1500-million-step run that never reached the literal pool and then reinstated when the 3000-million-step run did, a capped log was read as a stall, and a contract trace stalled because this build's redirected stdout is block-buffered, which was fixed by writing to a file with `$fflush`. Nothing was deployed and the Tang was not connected to; it is in two-wire mode and enumerates as `ffff:5454 TinyTang CDC`. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 30 and the existing reference records were not rewritten, confirmed the three new records carry unique ids and the canonical field order, and validated this entry as entry 31 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-one against the 100-entry limit.
+
+#### Next Steps:
+
+Trace the assembly path rather than the controller handoff, because the contract trace shows the two builds converge one cycle after the acknowledgement and therefore cannot explain a permanent difference from the ack cycle alone: instrument `double_req`, `rom_rdata_new` and the `rom_data`/`ram_data` output mux across a concurrent rom-and-ram access in both builds, since that is the logic that differs between them and the only place a wrong word could be latched into the CPU without appearing at the raw controller interface. Do not re-run the array-versus-controller A/B or re-derive the reproduction; it is measured and recorded. Do not patch `sdram_gba` or `gba_memory` again until a trace survives its own test, because the one attempted patch produced a different failure (white frames becoming black and fetch cycles rising to 26,185,631) while its own probe showed only a partial correction, and it was reverted for that reason. Every simulation in this cycle that carried weight ran to 3000 million steps; a shorter run does not reach the cartridge handover for this ROM under this controller and has already produced two wrong conclusions in this project. When the assembly path is settled, require the array-equivalent result before anything else: two colours at a mean of 85 for `test_logo` and 3,420 colours for the RetroRegen menu. Only then build a bitstream, and note that the board is in two-wire mode and must be returned to one-wire before it can be flashed. The DMA `REQ1_START` defect remains open as its own change and is not on this path, and every hardware result remains attributable to the design only under BRD-019's unmeasured-`clk16`-pip caveat.
+
+#### Files Modified:
+
+- tools/sim/sim_main.cpp
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
