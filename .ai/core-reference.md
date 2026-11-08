@@ -864,3 +864,32 @@ Field meanings:
     - "This repository, `build/run_bt6/bt6.log`: per-die `DIE c=... size=... cs=... oen=... dq_out=...` lines around the `0x0800009c` read"
     - "This repository, `build/run_fin/fn.log` and `build/run_mfix2/m2.log`: the corrected model at 3000 million steps"
   verification: "Measured 2026-11-08. The bus window shows both dies driving at once with the selected die holding the correct word; after the one-line change a clean rebuild reports 753 of 764 reads matching the ROM against 112 of 4,000 before, and the retry count at `0x0800009c` falls from 3,881 to zero. The frames remain a single colour at a mean of 252, so the fix is real and insufficient."
+
+- record_id: BRD-036
+  kind: BOARD
+  topic_id: BRD
+  title: "With correct read timing the BIOS boot logo renders through the real SDRAM controller"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "With the pin-level model's deselected-die bus defect corrected (BRD-035) and the 32-bit read acknowledgement moved to the high-halfword collection, `-DTINYGBA_SDRAM_RTL` runs the official BIOS far enough to render its boot screen: frames 300 to 700 of a 3000-million-step run show the GAME BOY wordmark and the Nintendo mark with the logo's colour cycle animating, then the field goes white at frame 800. `tools/check_cartread.py` reports 448 of 448 cartridge data reads matching the ROM with zero failures, against 753 of 764 before the acknowledgement change and 112 of 4,000 before the bus fix. The cartridge fetch cycle count falls from 18,375,892 to 18, which is close to the fifteen accesses BRD-023 records from the board with the same cartridge. A `DISPCNT <= 0x0403` store is never issued, so the display is never enabled and the cartridge's own self-checks are not reached."
+  consequence: "The controller's read path is sound once the acknowledgement coincides with the complete word, so the memory system is no longer a suspect in the model and the read timing question is closed. The stopping point is now shared with the board rather than being a model artefact, which makes it worth solving once for both. It also means BRD-033's claim that the model is not the board's failure needs re-testing: that record was written when the model was reading corrupted data and diverging by six orders of magnitude in fetch count, and a fetch count that now tracks the board's within a few accesses does not support the same conclusion. Wording rule: the model renders the BIOS logo, and the cartridge still does not run in the model or on the board."
+  sources:
+    - "This repository, `build/run_ack/ak.log` and frames `build/run_ack/ak_frame0300..0800.ppm`, 3000 million steps"
+    - "This repository, `build/run_wt/wt.log`: the 32-bit collect trace showing `hi=0` producing `e1540400` and `hi=1` producing `08000400` four clocks later"
+    - "This repository, `fpga/gba/src/memory/sdram_gba.v` and `gba_memory.sv`: the acknowledgement move and the output-mux window"
+    - "This repository, BRD-023 for the board's fifteen accesses with the same cartridge"
+  verification: "Measured 2026-11-08 at 3000 million steps: 448 of 448 reads match, the frame dumps show the animated GAME BOY logo between frames 300 and 700, and the fetch-cycle counter reads 18. The frames were inspected as images rather than by colour count alone."
+
+- record_id: TCL-026
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A simulation-only source list means a model fix cannot reach the board, and the build script is the place to check"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "`fpga/gba/diag/sdram_model.v` and `fpga/gba/diag/gba_sdram_rtl.v` are compiled by `tools/sim/build_gba_sim.sh` and are absent from `tools/build_tinygba.sh`'s synthesis source list, whose only `diag/` entry is `sdram_probe.v`. `gba_sdram_rtl.v` is reached from `gbatang_top.sv` only under `TINYGBA_SDRAM_RTL`, a define no synthesised build sets. A bitstream built from a tree whose only changes are in those files is therefore byte-identical to one built before them, and flashing it tests nothing about the change. This was confirmed by reading the two source lists rather than by building: a build-and-diff would have cost about fifty minutes to demonstrate a fact already visible in the file lists." 
+  consequence: "Before proposing a board session for a fix, check which source list compiles the changed files. A model-only change is still worth making, because the model is the only instrument that can be single-stepped, but it cannot be validated on hardware and no bitstream should be built on its account. The converse also holds: a board result cannot confirm a model fix, and the two instruments answer different questions. On this design the board has a real part that tri-states when deselected, so a class of model defect cannot exist there at all."
+  sources:
+    - "This repository, `tools/build_tinygba.sh`: the synthesis source list and its single `diag/sdram_probe.v` entry"
+    - "This repository, `tools/sim/build_gba_sim.sh`: `sdram_gba.v`, `gba_sdram_rtl.v` and `sdram_model.v` in the Verilator list"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: the `TINYGBA_SDRAM_RTL` gate around the `gba_sdram_rtl` instance"
+  verification: "Confirmed 2026-11-08 by listing the `diag/` files each script references and by grepping the synthesis script for the model's filename, which appears only inside a comment in `sdram_gba.v`. No build was run to establish this."

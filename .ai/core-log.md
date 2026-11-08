@@ -1167,3 +1167,34 @@ Attack the eleven remaining word-read failures, because they are now the only re
 - User Test: NOT RUN
 
 ---
+
+## 36 COMMIT Unreleased 2026-11-08T15:32:56-07:00
+
+#### Coming From:
+
+Unreleased cf240f8
+
+#### Purpose:
+
+Fix the one-word lag that remained after the model's two-die bus defect was corrected, and see whether the machine then boots through the real SDRAM controller.
+
+#### Outcome:
+
+The lag is fixed, every cartridge read is now correct, and the BIOS boot logo renders through the real controller for the first time in this port. The mechanism was measured on one clock domain before any code changed: instrumenting `sdram_gba`'s collect at `build/run_wt` showed a 32-bit read of `0x080002b0` collecting its low halfword with `hi=0`, which assigns `{stale_high, new_low}` and produced the intermediate `e1540400`, and collecting the high halfword four clocks later to produce the correct `08000400`. The acknowledgement was issued at the low-halfword slot, so the consumer latched the splice. The repair is two parts, applied together because each is insufficient alone: `sdram_gba.v` no longer acknowledges a 32-bit read at the low-halfword continuation and instead acknowledges it on the cycle the high halfword is collected, while `gba_memory.sv` now drives `rom_data` and `ram_rdata` from the controller on that acknowledgement cycle rather than only in `MAIN`. The earlier attempts at exactly this pair failed because they were measured through the corrupt bus of BRD-035, where a deselected die was overriding nearly every read; with that defect fixed the change takes effect and the result is categorical. `tools/check_cartread.py` reports 448 of 448 cartridge reads matching the ROM with zero failures, against 753 of 764 before this change and 112 of 4,000 before BRD-035. The picture confirms it: frames 300 to 700 render the GAME BOY wordmark and Nintendo mark with the logo's colour cycle animating, then the screen goes white at frame 800 where the BIOS hands over. The cartridge fetch count falls from 18,375,892 to 18, which is very close to the fifteen accesses BRD-023 records from the board with the same cartridge, so the model has moved from diverging wildly from the board to matching its stopping point. What has not changed is the destination: no `DISPCNT <= 0x0403` store is issued, the display is never enabled, and the cartridge's own checks are still not reached, so the machine does not boot. Nothing was deployed and the Tang was not connected to, at the operator's instruction; note that `sdram_model.v` and `gba_sdram_rtl.v` are never compiled into a bitstream, so no board image was possible from this change and the board session the operator offered would have tested nothing. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 35 and the existing reference records were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 36 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-six against the 100-entry limit.
+
+#### Next Steps:
+
+Establish whether the model now reproduces the board, because the fetch count dropping from eighteen million to eighteen in step with BRD-023's fifteen changes what this instrument can be used for: run the same cartridge on the board and compare the two read streams address by address, since BRD-033's claim that the model is not the board's failure was written when the model was reading garbage and may now be too strong. Then attack the stopping point, which is shared with the board and is therefore worth solving once: the cartridge's first store `DISPCNT <= 0x0000` lands, the entry code then loads its literal pool and writes `0x0403` to `DISPCNT`, and that second store is never issued in either the model or on the board. Now that reads are correct, find the last address the CPU fetches and what it does with it, because the earlier belief that the cartridge wedges on stale literals is no longer available as an explanation. Do not re-test the byte path, the two-die contention, the DQM handling or the read timing; all are measured and recorded, and every cartridge read now matches the ROM. Keep every read claim going through `tools/check_cartread.py` and every weight-bearing run at 3000 million steps. Do not attempt a board build from this tree expecting a change: the files fixed here are simulation-only, and a bitstream from it is identical to the last one flashed.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/memory/sdram_gba.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
