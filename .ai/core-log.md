@@ -1077,3 +1077,33 @@ Find where the cartridge word is latched rather than whether it is wrong, becaus
 - User Test: NOT RUN
 
 ---
+
+## 33 COMMIT Unreleased 2026-11-08T12:27:26-07:00
+
+#### Coming From:
+
+Unreleased 295b769
+
+#### Purpose:
+
+Compare this port against the upstream GBATang checkout to find how upstream crosses the memory boundary this project is stuck at, and correct the record where that comparison showed a recorded claim to be wrong.
+
+#### Outcome:
+
+The comparison withdraws a claim this project has been resting on, and it is a claim I made rather than one the log already contained: the model does not reproduce the board's fault. Entries 31 and 32 and records BRD-030 and BRD-032 assert that the controller build's 18,375,892 cartridge fetch cycles are the same figure as the deployed board image, and they are not. BRD-028 is a simulation record; the board record is BRD-029, which measures 84 cartridge fetches on Super Mario Advance. The model therefore gets far further than the board, executing eighteen million cartridge fetches where the board executes eighty-four, so the Verilator reproduction is an instrument for the controller's logic and not a reproduction of the board's failure, and every conclusion that leaned on that equivalence has to be re-read accordingly. The upstream checkout at `/run/media/vash/GIT/tangcore/gbatang` is confirmed at the pinned `77fd0714a426ada76aee612f1192c704e89762e4`. Three structural differences were found in it. First, upstream never compiles `sdram_gba.v` under Verilator at all: `gbatang_top.sv` instantiates the real controller behind `ifndef VERILATOR` and the behavioural array behind `else`, so nand2mario's simulation has never crossed this boundary and the real controller has only ever run on vendor-built Gowin hardware; entry 14's changes exist because this port chose to compile the controller in simulation, which upstream deliberately does not. Second, `sdram_gba.v` is upstream's apart from slang-required cosmetic changes and the documented `[31:15]` to `[31:16]` repair, so its acknowledgement timing is upstream's and the port did not diverge there. Third, upstream generates all four GBA clocks from one `pll_33` at 27 MHz with `clk50` on `CLKOUT0`, `clk16` on `CLKOUT1`, `clk67` on `CLKOUT2` and `clk67_p` on `CLKOUT3`, while this port moved `clk67` to `CLKOUT1` and `clk16` to `CLKOUT2` on `pll16` and added `CLOCK_LOC "clk67" BUFG`, a reordering forced by apicula modelling plane pips only for `CLKOUT0` and `CLKOUT2` and not measured against upstream's assignment on hardware. One suspect was tested and eliminated rather than left as a theory: reverting the two entry-14 changes in `gba_memory.sv` to upstream's exact semantics, `REQ2_START: state <= REQ2_WAIT` and `cpu_en = state == REQ2_BRAM | state == REQ2_WAIT & sdram_ready`, made the design worse rather than better, giving a white field for all 889 frames with zero cartridge reads, so that change is load-bearing in this port and is not the cause. A fourth difference is recorded for the next cycle rather than acted on: upstream's `build.tcl` sets `GW5AST-LV138PG484AC1/I0` with `-device_version B` on every 138K board, while this port targets device revision C. Nothing was deployed and the Tang was not connected to, at the operator's instruction. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 32 and the existing reference records were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 33 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-three against the 100-entry limit.
+
+#### Next Steps:
+
+Test upstream's exact clock assignment rather than continuing to reason about it, because it is the one structural difference from upstream that sits on this boundary and that upstream validated on hardware: move `clk16` back to `CLKOUT1` and `clk67` back to `CLKOUT2` on the PLL, drop `CLOCK_LOC "clk67" BUFG`, and see whether the cartridge reads come back correct, noting that the vendor flow reaches the plane from `CLKOUT1` through the centre-bridge muxes TCL-018 describes and that this will therefore build only if the clock-plane gate is satisfied by those pips or the gate is run non-strict. Treat a simulation-only run as insufficient for this question, because the harness generates all clocks from one counter and so cannot show a phase relationship that the real PLL output assignment decides; if the simulation result is unchanged, that is evidence the difference is not phase and the test must move to a bitstream and the board. Correct the record first in any later cycle that cites the reproduction: BRD-030 and BRD-032 both overstate it, and BRD-028's 18,375,892 is a model figure with no board counterpart, the board's being BRD-029's 84. Do not re-test the entry-14 revert, which is measured and eliminated. Do not patch `sdram_gba` or `gba_memory` again without a trace that explains why the three reverted attempts left the symptom unchanged. Keep every cartridge-read claim going through `tools/check_cartread.py`, keep simulations that carry weight at 3000 million steps, and note that the board is in two-wire mode and must be returned to one-wire before it can be flashed.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

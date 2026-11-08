@@ -806,3 +806,31 @@ Field meanings:
     - "This repository, `tools/check_cartread.py`: `score()` and the calibration step in `main()`"
     - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the port comment stating that `rom_data` and `ram_rdata` are available the cycle after `cpu_en`"
   verification: "Measured 2026-11-08: the calibration scores 184 against 11 on the array build, and the tool reports 112 of 4,000 for the controller build using the calibrated column. Cross-checked against the independent RTL-level traces in `build/run_aa` and `build/run_ac`, which showed the array delivering `08000400` on the edge after the `cpu_en` for `0x080002B0`."
+
+- record_id: BRD-033
+  kind: BOARD
+  topic_id: BRD
+  title: "The Verilator reproduction is not the board's failure: the model runs 18M cartridge fetches where the board runs 84"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "BRD-028's figure of 18,375,892 cartridge fetch cycles from `build/sim_v` under `-DTINYGBA_SDRAM_RTL` is a simulation result and has no board counterpart. The board record is BRD-029, which measures 84 cartridge instruction fetches from Super Mario Advance on `build/iw_s5` and additionally 513,204 IWRAM data writes and 669,827 IWRAM data reads with zero IWRAM instruction fetches. Core-log entries 31 and 32, and records BRD-030 and BRD-032, asserted that the controller build's fetch count matched the deployed board image; that assertion is wrong and is withdrawn here. The model, taken to 3000 million steps, executes some eighteen million cartridge fetches and reaches the cartridge's literal pool and its first self-check read at `0x08000400`; the board executes eighty-four fetches and never executes an instruction from IWRAM."
+  consequence: "The Verilator build with the real controller is an instrument for the controller's logic and sequencing, and it is not a reproduction of the board's failure. Any conclusion that leaned on the two being the same fault must be re-read: the model demonstrably gets much further than the board, so a fault the model shows and a fault the board shows may be different faults, and a fix validated only in the model is not thereby validated for the board. The useful asymmetry is the other way round from how it was being used: the model can be single-stepped and is worth using for questions about the controller's logic, while the board is the only instrument for the questions the model cannot reach, which are signal integrity, clock phase and anything depending on the physical part. Wording rule: do not describe the model as reproducing the board's blank display; describe it as reproducing a blank display under the real controller."
+  sources:
+    - "This repository, `.ai/core-reference.md` BRD-028 (simulation, 18,375,892 fetch cycles) and BRD-029 (board, 84 fetches on Super Mario Advance)"
+    - "This repository, `build/run_cal_c/cc.log`: 18,375,892 cartridge fetch cycles at 3000 million steps, 889 frames"
+    - "This repository, `build/run_cal_a/ca.log` and frame dumps, the array control at the same budget"
+  verification: "Read 2026-11-08 by comparing the two records directly rather than by recollection: BRD-028's title states the run is `build/sim_v` built with `-DTINYGBA_SDRAM_RTL`, and BRD-029 states the 84-fetch figure was observed on the board across 32 captured frames over 16 seconds. The model's 18,375,892 was independently re-confirmed this cycle in `build/run_cal_c/cc.log`."
+
+- record_id: TCL-025
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "Upstream never compiles the real SDRAM controller under Verilator, so this port crossed that boundary alone"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "Upstream GBATang at `77fd0714a426ada76aee612f1192c704e89762e4` instantiates the memory system behind a preprocessor gate in `src/gbatang_top.sv`: `ifndef VERILATOR` selects `sdram_gba`, the 534-line controller that runs on hardware, and the `else` branch selects `sdram_sim`, the behavioural array. nand2mario's simulation has therefore never executed the controller, and the controller has only ever run on vendor-built Gowin hardware. This port removed that gate so `-DTINYGBA_SDRAM_RTL` can compile the controller against a pin-level part model, which is the reason core-log entry 14 had to change `gba_memory.sv` at all: the loader's and the second request's acknowledgement losses are only reachable when a real acknowledgement timing is present, and upstream's own simulation cannot see them." 
+  consequence: "A divergence between this port and upstream in the memory path is expected rather than suspicious, because this port asks the controller questions upstream never asks. Conversely, upstream's hardware behaviour is not evidence that this port's simulation is right, and this port's simulation result is not evidence about upstream's hardware: the two projects are measuring different things with different instruments. When a memory-path difference appears against upstream, classify it first as 'this port's simulation-only concern' or 'a change to hardware behaviour', because entry 14's changes are the former and were shown this cycle to be load-bearing in simulation and not the cause of the present fault."
+  sources:
+    - "`/run/media/vash/GIT/tangcore/gbatang/src/gbatang_top.sv` at `77fd0714`: the `ifndef VERILATOR` gate around the `sdram_gba` instance and its `else` array branch"
+    - "`/run/media/vash/GIT/tangcore/gbatang/src/memory/sdram_gba.v`, diffed against this repository's copy: cosmetic slang changes plus the documented `[31:15]` to `[31:16]` repair, with the acknowledgement timing unchanged"
+    - "This repository, core-log entry 14, which records why the `gba_memory.sv` changes were needed once the controller was compiled"
+  verification: "Read from the upstream checkout 2026-11-08 after confirming its HEAD is the pinned `77fd0714a426ada76aee612f1192c704e89762e4`, and the `gba_memory.sv` divergence was confirmed by diffing against the same checkout."
