@@ -1137,3 +1137,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 35 COMMIT Unreleased 2026-11-08T14:43:20-07:00
+
+#### Coming From:
+
+Unreleased 64d5d1c
+
+#### Purpose:
+
+Find why a byte read of the BIOS logo word returned a value that was on neither the bus nor in the ROM, after the part, the bus and the word paths were excluded by measurement.
+
+#### Outcome:
+
+The phase-four fault was a defect in this port's own pin-level SDRAM model, and correcting it removes the logo retry loop and makes 753 of 764 cartridge reads correct where 112 of 4,000 were before. The trace in `build/run_bt6` printed both dies unconditionally and showed the cause directly: at the cycle the selected die was driving `d421` for `0x0800009c`, the deselected die was simultaneously driving `f374` on the same `SDRAM_DQ` wire, and the bus settled on `f775`, whose low byte `0x75` is the value the BIOS logo check rejects. The wrapper wires die 0 to `nCS` and die 1 to `~nCS` onto one shared bus, and the model withdrew its drive only on `cs && command == CMD_RD`, so a deselected die that still had read data in its pipeline kept driving indefinitely and overrode the selected one. The defect can only exist in a model, because a real part tri-states whenever `nCS` is high regardless of pipeline state. The repair is one functional line, `if (command == CMD_RD)` in place of `if (cs && command == CMD_RD)`: `command` is decoded from RAS, CAS and WE, which every die sees, so gating the withdrawal on the command lets a deselected die release the bus. Gating on `cs` alone was tried first and is wrong for the opposite reason: the controller raises `nCS` immediately after the command while the data appears two clocks later, so a plain `cs` gate suppressed the word it was meant to drive and made the picture worse; that attempt was reverted before commit. Verified on a clean rebuild from the committed tree at 3000 million steps: `tools/check_cartread.py` reports 753 of 764 reads matching the ROM with `data_now`, against 112 of 4,000 before the change, and the 3,881-fold retry at `0x0800009c` is gone. The 11 remaining failures are all 32-bit word reads of the literal pool at `0x080002b0` through `0x080002e4`, which is the separate one-word lag BRD-032 records and is now the only read defect left. The picture is still white, so the machine still does not boot: the pool literals feed the entry code's own checks, and a stale literal there is enough to stop it. Nothing was deployed and the Tang was not connected to. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 34 and the existing reference records were not rewritten, confirmed the one new record carries a unique id and the canonical field order, and validated this entry as entry 35 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-five against the 100-entry limit.
+
+#### Next Steps:
+
+Attack the eleven remaining word-read failures, because they are now the only read defect and the machine's boot depends on them: the pool literals at `0x080002b0` to `0x080002e4` return the previous word, and the entry code loads `0x08000400`, `0x08000800` and `0x08000c00` from that pool before its self-checks. Instrument the same single-domain bus counter already proven in this cycle, but arm it on a 32-bit fetch rather than a byte read, and compare the two clocks by which the part presents data with the cycle the controller accepts a 32-bit request, since a 32-bit access is serviced as two halfwords and the acknowledgement for the first is issued before the second has been collected. Do not re-test the byte path, the two-die bus contention, the part, the DQM handling or the word-validity of individual halfwords; all are measured and recorded in BRD-034 and BRD-035. Do not gate a model's bus withdrawal on `cs` alone, which is measured wrong in this configuration and made the picture worse. Keep every cartridge-read claim going through `tools/check_cartread.py`, keep weight-bearing runs at 3000 million steps, and note that the board remains in two-wire mode. BRD-033 still governs what may be claimed: this is a model result, and the model does not reproduce the board's failure.
+
+#### Files Modified:
+
+- fpga/gba/diag/sdram_model.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

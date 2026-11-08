@@ -190,7 +190,23 @@ module snes_sdram_model #(
         // the bus at the moment of the sample and produced ZZZZ rather than a
         // wrong value.  Holding to the next READ models the part and leaves the
         // controller's choice of sample point to the controller.
-        if (cs && command == CMD_RD) begin
+        // TinyGBA: any READ command on the bus withdraws every die's drive.
+        //
+        // Upstream withdrew only on `cs && command == CMD_RD`, so a die that still
+        // had read data in its pipeline kept driving SDRAM_DQ while the OTHER die
+        // was selected.  The wrapper wires die0 to nCS and die1 to ~nCS on one
+        // shared bus, so a cartridge read had the selected die driving the correct
+        // word and the deselected die overriding it with a stale value.  Measured
+        // 2026-11-08 in `build/run_bt6`: at the cycle die0 was driving `d421` for
+        // `0x0800009c`, die1 was simultaneously driving `f374`, and the bus settled
+        // on `f775` -- the constant `0x75` the BIOS logo check rejects.
+        //
+        // `command` is decoded from RAS/CAS/WE, which every die sees, so gating the
+        // withdrawal on the command rather than on `cs` lets a deselected die
+        // release the bus.  It must not be gated on `cs` alone: the controller
+        // raises nCS immediately after the command and the data appears two clocks
+        // later, so a plain `cs` gate suppresses the word it is meant to drive.
+        if (command == CMD_RD) begin
             dq_oen <= 1'b1;             // a new READ replaces the previous data
         end else if (rd_valid_pipe[0]) begin
             if (dqm_pipe[0] == 2'b11) begin
