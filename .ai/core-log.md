@@ -1107,3 +1107,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 34 COMMIT Unreleased 2026-11-08T13:37:54-07:00
+
+#### Coming From:
+
+Unreleased b984fd8
+
+#### Purpose:
+
+Narrow the cartridge read fault to a single stage by measuring the SDRAM bus itself, after the failure was localised to byte reads of one address.
+
+#### Outcome:
+
+The part, the bus and the model are exonerated, and the corruption is confined to a byte read's collection inside `sdram_gba`. Analysis of the existing 3000-million-step captures by access width showed the defect is narrow: on the array build every width is correct, and on the controller build word, low-halfword and high-halfword reads are all correct while byte reads fail, with 3,881 of 3,888 wrong reads landing on the single address `0x0800009c`. That address is the last word of the Nintendo logo, which the BIOS validates, so the machine is failing its logo check and retrying in a loop rather than executing the cartridge. The first divergence in the read stream is a dropped access rather than a wrong one: the array services `0x0800009d` once and the controller never services it at all. A bus-level trace was then built in `fpga/gba/diag/gba_sdram_rtl.v` with one counter in one clock domain, because two independently started counters in the controller and the model reported a spurious 16-cycle offset. It arms on a READ command to the word holding `0x0800009c` and prints every cycle afterwards. The result is textbook: the READ command appears with `dq=0000`, and exactly two clocks later `dq=d421`, which is the correct halfword for bytes `21 d4`, and it is then held stable for as long as the trace runs. So the part returns the right word at the cycle a CL=2 part should, the controller's collect point falls inside that window, the DQM handling is correct because the controller issues `dqm=00` on reads as the model's own comment claims, and the bus is clean. The corruption therefore happens between the bus and `cpu_rdata`, inside the collection stage, and only for the byte arms: `casez (ds_latch[0])` maps `4'b0001` to `{4{dq_in[7:0]}}`, and the trace earlier this cycle showed the collected byte as `0x75` where the bus was carrying `0x21`, a value that appears nowhere in the cartridge image. Three instrument traps were hit and cost time: a comment beginning with the word the simulator treats as a directive fails elaboration, which entry 10 already records; a tristate operand may not be compared outside the propagation graph, so DQ is now read through a wire and printed rather than compared; and a counter placed in a block that does not tick on every clock produces an offset that looks like a real timing defect. Nothing was deployed and the Tang was not connected to. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 33 and the existing reference records were not rewritten, confirmed the one new record carries a unique id and the canonical field order, and validated this entry as entry 34 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-four against the 100-entry limit.
+
+#### Next Steps:
+
+Instrument the byte arm's input rather than the bus, because every other candidate is now excluded by measurement and the remaining question is exactly what `dq_in` holds on the cycle the `4'b0001` arm samples it during a byte read at `0x0800009c`: print `dq_in`, `ds_latch[0]`, `addr_latch[0]` and `cpu_rdata[port[0]]` on the collect edge for that access, on the same bus-level counter, and do it for a byte read in the retry loop rather than the first logo read, since the failure count of 3,881 implies the loop is where the corruption is reproducible. If `dq_in` is correct at the collect edge the fault is in the arm or in what happens to `cpu_rdata` afterwards, and if it is wrong the fault is that the collect edge falls outside the part's driven window for back-to-back reads, which the model withdraws the bus for one cycle when a new READ arrives. Do not re-test the bus, the part, the DQM handling or the word and halfword paths; all are measured and recorded. Do not place counters in blocks that may not tick every clock, and do not compare tristate signals. Keep every cartridge-read claim going through `tools/check_cartread.py`, keep weight-bearing runs at 3000 million steps, and note the board remains in two-wire mode.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
