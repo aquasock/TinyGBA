@@ -79,6 +79,9 @@ bool cart_fetch_seen = false;
 struct ScriptedPress { int bit, frame, duration; };
 ScriptedPress presses[64];
 int n_presses = 0;
+// Diagnostic counters for the cartridge and display traces below.
+int n_cartread = 0, n_dispcnt_wr = 0;
+unsigned long n_cart_fetch_cycles = 0;
 const char *dump_prefix = NULL;   // -p PREFIX: write PREFIX_frameNNNN.ppm
 int dump_every = 0;               // -pe N: dump every Nth frame (0 = off)
 int dump_first = 0;               // -pf N: start dumping at frame N
@@ -602,6 +605,28 @@ int main(int argc, char **argv, char **env)
 					if (gba->halt)    cpu_halt_cycles++;
 					if (gba->rom_en)  rom_req_cycles++;
 				}
+				// Cartridge traffic and the display register, sampled on the same
+				// edge as the flash logs above.  `cpu_en_r` is the cycle the CPU
+				// actually receives data, so a read logged here is the value the
+				// CPU saw; a trace sampled anywhere else reports whatever was on
+				// the bus at that instant and produces believable nonsense.
+				if (cpu_en_r && ram_cen_r && !ram_wen_r &&
+				    ((ram_addr_r >> 24) == 8) && n_cartread < 200) {
+					n_cartread++;
+					printf("CARTREAD: addr=%08x be=%x data=%08x\n",
+					       ram_addr_r, ram_be_r, gba->ram_rdata);
+				}
+				// Every write to DISPCNT.  The board lingers on forced blank, so
+				// whether the cartridge's final 0x0403 store is ever issued is
+				// exactly the question this answers.
+				if (ram_cen_r && ram_wen_r && ram_addr_r == 0x04000000 &&
+				    n_dispcnt_wr < 60) {
+					n_dispcnt_wr++;
+					printf("DISPCNTWRITE: data=%08x be=%x\n",
+					       gba->ram_wdata, ram_be_r);
+				}
+				if (gba->rom_en && ((gba->rom_addr >> 24) != 0))
+					n_cart_fetch_cycles++;
 				cpu_en_r = gba->cpu_en;
 				ram_addr_r = gba->ram_addr;
 				ram_be_r = gba->ram_be;
@@ -813,6 +838,7 @@ int main(int argc, char **argv, char **env)
 	}
 
 	// The same question the hardware probe answers, in the same units.
+	printf("cartridge fetch cycles: %lu\n", n_cart_fetch_cycles);
 	printf("fetch regions ever seen (rom_addr[27:21], OR): 0x%08X\n", region_seen);
 	for (int r = 0; r < 32; r++)
 		if (region_seen & (1u << r))

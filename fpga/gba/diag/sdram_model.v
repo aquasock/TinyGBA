@@ -192,9 +192,8 @@ module snes_sdram_model #(
         // controller's choice of sample point to the controller.
         if (cs && command == CMD_RD) begin
             dq_oen <= 1'b1;             // a new READ replaces the previous data
-        end else if (cas_latency >= 3'd1 && cas_latency <= 3'd4 &&
-                     rd_valid_pipe[cas_latency-1]) begin
-            if (dqm_pipe[cas_latency-1] == 2'b11) begin
+        end else if (rd_valid_pipe[0]) begin
+            if (dqm_pipe[0] == 2'b11) begin
                 dq_oen <= 1'b1;
             end else begin
                 dq_oen <= 1'b0;
@@ -216,8 +215,13 @@ module snes_sdram_model #(
         // DQM still gates writes exactly as before.  A partial-DQM read -- which
         // nothing in this design performs -- would now return both bytes instead
         // of one byte and one high-impedance lane.
-        if (cas_latency >= 3'd1 && cas_latency <= 3'd4 && rd_valid_pipe[cas_latency-1]) begin
-            dq_out <= rd_pipe[cas_latency-1];
+        // The enable above and the data here MUST use the same pipeline stage.
+        // Driving the bus from one stage while loading its value from another
+        // presents a stale word for one clock, which is what made the first
+        // attempt at this return mostly-correct data with a corrupt entry at
+        // 0x08000004 -- close enough to look like a working read.
+        if (rd_valid_pipe[0]) begin
+            dq_out <= rd_pipe[0];
         end
     end
 

@@ -956,3 +956,33 @@ Build the instrument that can see past the ring, because the ring has now been c
 - User Test: FAIL
 
 ---
+## 29 COMMIT Unreleased 2026-11-07T21:16:05-07:00
+
+#### Coming From:
+
+Unreleased fffc072
+
+#### Purpose:
+
+Make the real SDRAM controller usable in the simulation, so the memory path that runs on the board can be debugged in a model that can be single-stepped instead of only through a bitstream and a capture card.
+
+#### Outcome:
+
+The real-controller model now boots the cartridge, and reaching that required finding a defect in the model itself rather than in the design. The starting point was the previous cycle's conclusion that the real controller reproduced the board's failure; that conclusion was wrong and is withdrawn. What the model was actually doing was returning zero for every cartridge read. The cause is in `fpga/gba/diag/sdram_model.v`: the read path has a shift register `rd_pipe` with a companion `rd_valid_pipe`, and the tri-state enable was computed from `rd_valid_pipe[cas_latency-1]` while the data register `dq_out` was loaded from `rd_pipe[cas_latency-1]` in a later `if` that tested the same index. The two are written a clock apart relative to the shift, so the bus was enabled one cycle before its data arrived and presented the previous word. The controller samples DQ in its own DAT slot, so it captured a stale or high-impedance bus and `cpu_rdata` came out as a clean zero rather than as an error. The write path was never in doubt: the die dump showed `cart[0..3] = 002e ea00 ff24 51ae`, exactly the image's first eight bytes, so the loader, the part and the controller's write sequencing were all correct and only the read capture was wrong. Both the enable and the data now use stage 0, and the result is categorical: all 112 cartridge data reads in a run match the ROM file under byte, halfword and word interpretation, and the model boots the cartridge with 18,375,892 cartridge fetch cycles and `fetch regions` `0x00000040`. The investigation also cost two of my own errors worth recording. I first claimed the real-controller build reproduced the board's stall, which it did not -- the frames I read were a machine holding an unreadable cartridge; and before that I read a run of 900 million steps as evidence of a stall when the same ROM under this controller needs about 3000 million to reach the cartridge, which is the third time this project has drawn a conclusion from a simulation that had not run long enough and the reason BRD-028 records the budget with the result. On the board the fault is unchanged and now reproduced in the model: the BIOS intro plays, the screen goes black, `DISPCNT` receives the cartridge's first `0x0000` store and then only the BIOS's own `0x1002`, and no cartridge read ever reaches the self-checks at `0x08000400`, `0x08000800` or `0x08000C00`, while the same ROM under `sdram_sim` boots to green. Nothing was deployed and the board was not touched: every change in this cycle is simulation-only, and a bitstream built from this tree would be identical to `build/gx_s4` from entry 27, because `sdram_model.v` is never compiled by `tools/build_tinygba.sh` and the harness is not part of the design. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 28 and the existing reference records were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 29 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of twenty-nine against the 100-entry limit.
+
+#### Next Steps:
+
+Single-step the model from the cartridge's literal load to its first self-check read, because that is now the whole remaining distance and it is the only place the two models differ. The specific comparison is the array build, which boots green, against the real-controller build, which stalls: the cartridge loads `0x08000C00` from the pool at `0x080002C4`, and the next thing it should do is read `0x08000400`, and that read never appears in the trace. Run both under the same step budget with a breakpoint on `ram_addr == 0x08000400` and record what the CPU is fetching and what `cpu_en` and `ram_cen` do in the cycles around it, since the difference between the two builds is the controller's acknowledgement timing and not the data. Do not re-test the write path, the die contents or the literal pool: all three are measured correct and recorded in TCL-022 and BRD-028. Do not conclude anything from a run shorter than 3000 million steps with this ROM under the real controller; that limit has now cost three separate wrong readings in this project and is the reason the budget is recorded beside every result. One limit of the model must travel with anything found in it: `sdram_model.v` is a model of a part and not the part, so a fault found here is evidence about the controller's logic and sequencing and not about this board's signal integrity or clock skew, and the board remains the only instrument for those. The board itself is in two-wire mode with `build/gx_s4` and `build/test/addrprobe.gba` loaded from entry 27, and no change in this cycle warrants flashing it.
+
+#### Files Modified:
+
+- fpga/gba/diag/sdram_model.v
+- tools/sim/sim_main.cpp
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

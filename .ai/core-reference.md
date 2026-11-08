@@ -693,3 +693,31 @@ Field meanings:
     - "`tools/cap_tang.sh`, which flashes and captures together for exactly this reason"
     - "This repository, `fpga/gba/src/gbatang_top.sv`: the ring's clear while `~gbaon`, which is why an unconfigured or unreleased board reads all-zero rather than stale"
   verification: "Measured 2026-11-07 by the same cartridge producing an empty ring before the reflash and correct values after it, with the page distribution changing from sixteen page-0 frames to a four-page cycle."
+
+- record_id: TCL-022
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "The pin-level SDRAM model drove DQ from one pipeline stage and its data from another, so every cartridge read returned zero"
+  status: VERIFIED
+  verified_date: 2026-11-07
+  statement: "In `fpga/gba/diag/sdram_model.v` the read path has a shift register `rd_pipe` and a companion `rd_valid_pipe`, and the tri-state enable was computed from `rd_valid_pipe[cas_latency-1]` while the data register `dq_out` was loaded from `rd_pipe[cas_latency-1]` in a separate later `if` that tested the same index. The two are written on different cycles relative to the shift, so the bus was enabled one clock before its data arrived and presented the previous word. The controller samples DQ in its own DAT slot rather than at the standard CAS point, so what it captured was a stale or high-impedance bus, and `cpu_rdata` came out as a clean `0x00000000` rather than as an error. Measured on the model built with `TINYGBA_SDRAM_RTL`: every cartridge data read returned zero while the loader wrote the die byte-perfectly, `cart[0..3] = 002e ea00 ff24 51ae` matching the image's first eight bytes -- so the write path and the part were both correct and only the read capture was wrong."
+  consequence: "A model that returns zero looks exactly like a dead bus or a controller that never captures, and this project spent several cycles reading it as evidence about the controller: the earlier conclusion that the real-controller build reproduced the board's failure was drawn from it and is wrong. The repair is to use one pipeline stage for both the enable and the data, which is now the case. After it, all 112 cartridge data reads match the ROM file under byte, halfword and word interpretation, and the model boots the cartridge: 18,375,892 cartridge fetch cycles and `fetch regions` `0x00000040`. Anyone debugging a read path against this model should check that enable and data agree on a stage before believing a zero, because a zero here is the failure's shape rather than its cause."
+  sources:
+    - "This repository, `fpga/gba/diag/sdram_model.v`: the read enable and the `dq_out` load, before and after"
+    - "This repository, `fpga/gba/src/memory/sdram_gba.v`: the DAT-slot capture at `cycle[3]`, `port[0]` and `oe_latch[0]`"
+    - "This repository, `tools/sim/sim_main.cpp`: the `CARTREAD` trace, sampled on the cycle `cpu_en_r` is asserted"
+  verification: "Measured 2026-11-07. Before the fix, twelve cartridge reads logged `data=00000000` including reads of addresses whose contents the die dump showed to be correct. After it, 112 of 112 matched, and a 3000M-step run reported 18,375,892 cartridge fetch cycles where the same run before reported none. The result was reproduced on a clean rebuild from the committed tree."
+
+- record_id: BRD-028
+  kind: BOARD
+  topic_id: BRD
+  title: "With the real SDRAM controller the model boots the cartridge, executes 18M cartridge fetches, and still never enables the display"
+  status: VERIFIED
+  verified_date: 2026-11-07
+  statement: "`build/sim_v`, built with `-DTINYGBA_SDRAM_RTL` and the official BIOS, runs `test_logo.gba` to 3000M steps: 889 frames, `cartridge fetch cycles: 18375892`, `fetch regions 0x00000040`, so the CPU executes from the cartridge through the real controller. The cartridge's literal pool loads correctly -- `0x080002B0` returns `0x08000400`, `0x080002B4` returns `0xA5A50001`, and the same for the other two check constants -- and its first store lands, `DISPCNT <= 0x0000`, which is why the screen goes black after the BIOS intro fades. What never happens is the final `0x0403` store: the only `DISPCNT` writes after the cartridge's are `0x1002`, alternating, which is the BIOS's own value. Cartridge data reads stop at `0x080002CC` and never reach the self-check reads at `0x08000400`, `0x08000800` or `0x08000C00`. The same ROM under `sdram_sim` instead boots to green, completing every check. This is the board's symptom reproduced in a simulation: BIOS intro plays, screen goes black, display never re-enabled, cartridge code running but never reaching its own checks."
+  consequence: "The fault is now reproducible on demand in a simulation that can be single-stepped, which is the instrument this project has needed since BRD-011. It is not the SDRAM part or the write path -- both are proved correct -- and it is not the literal load, the IO decode or the fetch path, all measured working. It lies between the cartridge loading its literal at `0x080002C4` and the read of `0x08000400`, and the difference between the two models is the memory controller's timing. The next step is model work, not hardware: single-step the transition from the entry code to the first self-check read and compare against the array model doing the same. Run lengths matter and have misled this project twice: at 2000M steps the same build reports zero cartridge fetches, so 3000M is the budget for this ROM under the real controller."
+  sources:
+    - "This repository, `build/sim_v/obj_dir/Vgbatang_top` built from the committed tree with `-DTINYGBA_SDRAM_RTL` and `-DTINYGBA_BIOS_HEX` pointing at `build/test/official_bios.hex`"
+    - "This repository, `tools/sim/sim_main.cpp`: the `CARTREAD`, `DISPCNTWRITE` and `cartridge fetch cycles` traces"
+    - "`build/test/test_logo.gba` and `build/test/test.s`: the entry code, the literal pool at `0x2B0` to `0x2E8`, and the three self-checks"
+  verification: "Measured 2026-11-07 and reproduced on a clean rebuild: 18,375,892 cartridge fetch cycles at 3000M steps, the `DISPCNT <= 0` store observed, `0x1002` thereafter, and no cartridge read reaching `0x08000400`. Frames dumped at 200-frame intervals from 200 to 800 were uniformly black from 300 onwards."
