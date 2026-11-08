@@ -81,6 +81,9 @@ ScriptedPress presses[64];
 int n_presses = 0;
 // Diagnostic counters for the cartridge and display traces below.
 int n_cartread = 0, n_dispcnt_wr = 0;
+// `ram_rdata` from the previous clk16 edge, so a capture carries both candidate
+// words and the correct pairing can be established against a known-good build.
+uint32_t prev_ram_rdata = 0;
 unsigned long n_cart_fetch_cycles = 0;
 const char *dump_prefix = NULL;   // -p PREFIX: write PREFIX_frameNNNN.ppm
 int dump_every = 0;               // -pe N: dump every Nth frame (0 = off)
@@ -605,16 +608,22 @@ int main(int argc, char **argv, char **env)
 					if (gba->halt)    cpu_halt_cycles++;
 					if (gba->rom_en)  rom_req_cycles++;
 				}
-				// Cartridge traffic and the display register, sampled on the same
-				// edge as the flash logs above.  `cpu_en_r` is the cycle the CPU
-				// actually receives data, so a read logged here is the value the
-				// CPU saw; a trace sampled anywhere else reports whatever was on
-				// the bus at that instant and produces believable nonsense.
+				// Cartridge traffic and the display register.  TinyGBA: this used to
+				// print `ram_rdata` on the `cpu_en` edge and assert that was the value
+				// the CPU received.  That claim was never calibrated, and it is the
+				// reason a "stale cartridge read" lead survived three cycles before an
+				// RTL trace contradicted it.  The harness therefore no longer decides:
+				// it logs the address together with BOTH candidate data words, the one
+				// visible on the `cpu_en` edge and the one visible on the next edge,
+				// and tools/compare_cputrace.py picks the pairing by requiring it to
+				// reproduce the ROM contents in the build known to work.  An
+				// instrument that cannot be checked against a known-good result is
+				// what produced the bad conclusions, not the data.
 				if (cpu_en_r && ram_cen_r && !ram_wen_r &&
 				    ((ram_addr_r >> 24) == 8) && n_cartread < 4000) {
 					n_cartread++;
-					printf("CARTREAD: addr=%08x be=%x data=%08x\n",
-					       ram_addr_r, ram_be_r, gba->ram_rdata);
+					printf("CARTREAD: addr=%08x be=%x data_now=%08x data_prev=%08x\n",
+					       ram_addr_r, ram_be_r, gba->ram_rdata, prev_ram_rdata);
 				}
 				// Every write to DISPCNT.  The board lingers on forced blank, so
 				// whether the cartridge's final 0x0403 store is ever issued is
@@ -627,6 +636,7 @@ int main(int argc, char **argv, char **env)
 				}
 				if (gba->rom_en && ((gba->rom_addr >> 24) != 0))
 					n_cart_fetch_cycles++;
+				prev_ram_rdata = gba->ram_rdata;
 				cpu_en_r = gba->cpu_en;
 				ram_addr_r = gba->ram_addr;
 				ram_be_r = gba->ram_be;

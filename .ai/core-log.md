@@ -1046,3 +1046,34 @@ Trace the assembly path rather than the controller handoff, because the contract
 - User Test: NOT RUN
 
 ---
+
+## 32 COMMIT Unreleased 2026-11-08T11:59:55-07:00
+
+#### Coming From:
+
+Unreleased 654017e
+
+#### Purpose:
+
+Replace the cartridge-read instrument that produced three contradictory conclusions with one calibrated against the ROM, and settle whether the controller really returns the wrong word.
+
+#### Outcome:
+
+The controller really does return the wrong word, and the instrument that now says so is validated against the ROM rather than against an assumption about where the CPU samples. The previous harness printed `ram_rdata` on the `cpu_en` edge and asserted in a comment that this was the value the CPU received, which was never checked; that single unexamined assumption is what let a stale-read lead be stated, withdrawn and reinstated across three cycles. `tools/sim/sim_main.cpp` now logs the address with both candidate words, the one visible on the `cpu_en` edge and the one visible on the previous edge, and `tools/check_cartread.py` reads the ROM image, translates the GBA address to an image offset by subtracting `0x08000000`, masks each word by the byte enables and scores both columns. On the array build, which produces a working machine, `data_now` reproduces 184 of 184 captured reads exactly and `data_prev` reproduces 11, so the pairing is established by evidence and the same column can be applied to the controller with confidence. On the controller build, 112 of 4,000 captured reads match the ROM and 3,888 do not, and the mismatches are a consistent one-word lag: `0x080002B0` returns `e154e154` where the image holds `08000400`, `0x080002B4` returns `08000400`, `0x080002B8` returns `a5a50001` and so on through the literal pool. The runs were 3000 million steps each and the frames say the same thing: the array draws two colours at a mean of 83 to 85, which is its pass screen, and the controller draws one colour at a mean of 0 for all 889 frames, with 18,375,892 cartridge fetch cycles against the board's identical figure. The root cause is not established and no fix ships. Two attempts were made and both were reverted unshipped: delaying the controller's 32-bit read acknowledgement until the high halfword is collected made `sdram_rdata` correct at the acknowledgement while `ram_rdata` stayed stale because the output mux only sources the bus in `MAIN`, and adding that mux change as well still left the frames black and the reads one word stale, so neither moved the symptom and neither is retained. An assembly-path trace of `double_req`, `rom_rdata_new`, both raw SDRAM ports and both output ports showed the two builds delivering the identical correct word for the self-check read of `0x08000400` within their own windows, which is why the remaining divergence is now recorded as being in the latch or ordering of the double-request path rather than in the controller's data, and why no third patch was attempted on inference. One further instrument defect was fixed: `tools/check_cartread.py` recognises that a capture read while a run is still writing can end mid-line and skips the incomplete tail rather than aborting, which is the hazard TCL-023 records. Nothing was deployed and the Tang was not connected to; it remains in two-wire mode. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 31 and the existing reference records were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 32 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-two against the 100-entry limit.
+
+#### Next Steps:
+
+Find where the cartridge word is latched rather than whether it is wrong, because that question is now answered and quantified: instrument the double-request path's latch and ordering in both builds on the same address, tracing when `rom_rdata_new` is written relative to the acknowledgement and which cycle the output mux is sampled by the consumer, since the assembly trace showed both builds holding the right word at the self-check read and yet only one of them executes correctly. Do not re-derive the staleness itself and do not re-run the array-versus-controller A/B; both are measured, calibrated and recorded. Do not patch `sdram_gba` or `gba_memory` again until a trace explains why the two reverted attempts left the symptom unchanged, because both were motivated by a correct observation of the lag and both failed to move it, which means the lag is being absorbed somewhere not yet instrumented. Keep using `tools/check_cartread.py` for every cartridge-read claim from now on: it calibrates the sampling column against a build whose machine works and then judges the failing build with the same column, and a claim that has not been through it is the class of claim that cost this project three cycles. Every simulation that carries weight must run to 3000 million steps, since shorter runs do not reach the cartridge handover for this ROM under this controller. When the latch is settled, require the array-equivalent result before anything else: two colours at a mean of 85 for `test_logo` and the RetroRegen menu, and only then build a bitstream. The board is in two-wire mode and must be returned to one-wire before it can be flashed, the DMA `REQ1_START` defect remains open as its own change and is not on this path, and every hardware result remains attributable to the design only under BRD-019's unmeasured-`clk16`-pip caveat.
+
+#### Files Modified:
+
+- tools/sim/sim_main.cpp
+- tools/check_cartread.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
