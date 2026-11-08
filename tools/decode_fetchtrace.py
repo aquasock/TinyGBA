@@ -334,6 +334,21 @@ def decode_fetch_and_phases(w0, w1, w2, w3):
     ]
 
 
+def decode_iwram(w0, w1, w2, w3):
+    """IWRAM execution.  A retail cartridge copies itself to 0x03000000 and runs
+    from there, so these fields answer 'is the game actually executing' where the
+    cartridge-fetch counter cannot."""
+    seen = (w0 >> 28) & 1
+    addr = w0 & 0x0FFFFFFF
+    return [
+        f"IWRAM execution seen: {seen}"
+        + (f", last fetch 0x{addr:08X}" if seen else ""),
+        f"IWRAM instruction fetches: {w1}",
+        f"IWRAM data writes: {w2}",
+        f"IWRAM data reads:  {w3}",
+    ]
+
+
 def decode_last_vram(w0, w1, w2, w3):
     return [
         f"last VRAM store address : 0x{w0 & 0x0FFFFFFF:08X}",
@@ -405,6 +420,7 @@ def report(name, capture):
             idx = ent["index"]
             print(f"  [{flag}] " + ("status" if idx == 0 else "counters" if idx == 1
                                      else "last cart fetch / VRAM phases" if idx == 2
+                                     else "IWRAM execution" if idx == 4
                                      else "last VRAM store"))
             if idx == 0:
                 for line in decode_status(*words):
@@ -414,6 +430,9 @@ def report(name, capture):
                     print(f"        {line}")
             elif idx == 2:
                 for line in decode_fetch_and_phases(*words):
+                    print(f"        {line}")
+            elif idx == 4:
+                for line in decode_iwram(*words):
                     print(f"        {line}")
             else:
                 for line in decode_last_vram(*words):

@@ -986,3 +986,33 @@ Single-step the model from the cartridge's literal load to its first self-check 
 - User Test: NOT RUN
 
 ---
+## 30 COMMIT Unreleased 2026-11-08T00:02:15-07:00
+
+#### Coming From:
+
+Unreleased f6574f3
+
+#### Purpose:
+
+Build the readout that can see a cartridge executing from IWRAM, because every instrument this project has used so far goes blind at the point a retail game leaves the cartridge, and find out whether Super Mario Advance reaches its own code at all.
+
+#### Outcome:
+
+The board answers that a retail cartridge writes and reads IWRAM in volume and never executes a single instruction there, which is a narrower and more useful result than anything the display-side instruments had produced. The readout is `build/iw_s5` (`.fs` SHA-256 `b4f5a0800dd1520ae2576e5a1b9edfd2c8c5a7543c67201832a0f6c9096da695`), built at seed 5 with the real controller taps and the official BIOS, passing both gates at `clk16` 18.980, `clk50` 85.727, `clk67` 32.864 under the documented GBATang four-cycle allowance with a 30.43 ns worst path against a 59.70 ns budget, and `hclk` 79.327 MHz, zero hold violations, `clk67` on both measured-good spines. Page 1 gained entry 4: a sticky IWRAM-execution bit with the last IWRAM fetch address, plus full-width counters of IWRAM instruction fetches, IWRAM data writes and IWRAM data reads, all gated on `rom_addr[27:24] == 4'h3` and `ram_addr[27:24] == 4'h3` respectively. The page-1 validity mask moved from `0x0F00` to `0x1F00` because it had been setting bits 8 to 11 only, which would have left entry 4's validity strip dark and made a live entry look absent -- caught before the build by reading the mask arithmetic rather than the picture. All five new registers were confirmed live in the synthesised netlist before flashing: `iw_fetch` 32 bits, `iw_wr` and `iw_rd` 24 each, `s_iw` 1, and `last_iw_addr` 27 with bit 0 folded, which is correct because ARM instruction addresses are word-aligned. On the board, with Super Mario Advance loaded, every page-1 frame over a 16-second capture agrees: IWRAM execution seen 0, IWRAM instruction fetches 0, IWRAM data writes 513204, IWRAM data reads 669827, cartridge fetches 84, halt 1. So the DMA transfers land, IWRAM is written and read heavily, and the CPU never fetches from `0x03000000` even once. This supersedes entry 27's statement that Super Mario Advance copies itself into IWRAM and executes from there: that was inferred from a frozen cartridge-fetch counter and was wrong, though the count of 84 it reported is reproduced exactly. The earlier reading treated the frozen counter as consistent with a game running elsewhere; the direct measurement shows the game never gets anywhere. Of four seeds staged for place and route, seed 5 finished first and cleanly, and seeds 2, 3 and 4 were still routing when this cycle closed at the operator's request for a handoff. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 29 and the existing reference records were not rewritten, confirmed the new record carries a unique id and the canonical field order, and validated this entry as entry 30 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty against the 100-entry limit.
+
+#### Next Steps:
+
+Find why control never transfers into IWRAM, because that is now the single question and it is upstream of everything the display-side instruments were chasing. The data path is proved: 513,204 writes and 669,827 reads mean the DMA lands and the region works, so the fault is in the handover -- the DMA's completion signalling, the branch, or an exception taken at the transfer. Take it to the model, which is the right instrument now: `build/sim_v` or `build/sim_fix2` with `-DTINYGBA_SDRAM_RTL` boots the cartridge and can be single-stepped, and the comparison that matters is Super Mario Advance under the array build, which is the known-good reference, against the same ROM under the real controller. Watch `ram_addr`, `rom_addr`, `cpu_en` and `halt` across the DMA3 completion and record the first instruction the CPU fetches after `cart_fetch` stops rising. The `DISPCNTWRITE` trace already in `tools/sim/sim_main.cpp` is the wrong instrument for this and should be replaced rather than extended. Two measurement traps cost this project real time and must not be repeated: a run shorter than 3000 million steps with this ROM under the real controller reports no cartridge fetches and means nothing, and a frozen counter of cartridge fetches says nothing about IWRAM execution, which is the whole reason this entry exists. Do not re-test the memory path, the fetch path, the literal path, the IO decode, the DMA transfer itself, the clock plan or the SDRAM; all are measured. Do not attempt a fix on the board before the model explains the handover; the board is the only instrument for signal integrity and clock skew, and neither is implicated yet. One standing caveat is unaffected: `clk16` still reaches its sinks on pips this board has never measured (BRD-019), so hardware results remain attributable to the design only with that stated.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- tools/decode_fetchtrace.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---

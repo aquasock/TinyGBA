@@ -721,3 +721,18 @@ Field meanings:
     - "This repository, `tools/sim/sim_main.cpp`: the `CARTREAD`, `DISPCNTWRITE` and `cartridge fetch cycles` traces"
     - "`build/test/test_logo.gba` and `build/test/test.s`: the entry code, the literal pool at `0x2B0` to `0x2E8`, and the three self-checks"
   verification: "Measured 2026-11-07 and reproduced on a clean rebuild: 18,375,892 cartridge fetch cycles at 3000M steps, the `DISPCNT <= 0` store observed, `0x1002` thereafter, and no cartridge read reaching `0x08000400`. Frames dumped at 200-frame intervals from 200 to 800 were uniformly black from 300 onwards."
+
+- record_id: BRD-029
+  kind: BOARD
+  topic_id: BRD
+  title: "A retail cartridge writes and reads IWRAM but never executes a single instruction from it"
+  status: VERIFIED
+  verified_date: 2026-11-07
+  statement: "`build/iw_s5` (`.fs` SHA-256 `b4f5a0800dd1520ae2576e5a1b9edfd2c8c5a7543c67201832a0f6c9096da695`) carries an IWRAM-execution readout on page 1 entry 4: a sticky 'IWRAM execution ever seen' bit with the last IWRAM fetch address, and separate full-width counters for IWRAM instruction fetches, IWRAM data writes and IWRAM data reads. `tr_iwfetch` is `rom_en & cpu_en & ~halt & rom_addr[27:24] == 4'h3`; the write and read counters use the same region test on `ram_addr`. With Super Mario Advance loaded, all four fields are frozen across 16 seconds: **IWRAM execution seen 0, IWRAM instruction fetches 0, IWRAM data writes 513204, IWRAM data reads 669827**, alongside `cart_fetch` 84 and `halt` 1. So the cartridge's DMA transfers land and IWRAM is being written and read in volume, but the CPU never fetches a single instruction from `0x03000000`. This supersedes core-log entry 27's reading that Super Mario Advance copies itself into IWRAM and executes from there; that was an inference from a frozen cartridge-fetch counter, and it was wrong. The cart-fetch count of 84 reproduces exactly, so the number was right and the interpretation was not."
+  consequence: "The failure is no longer 'the display never turns on' but something much narrower and upstream of it: control never transfers into IWRAM. The data path there works -- 513,204 writes and 669,827 reads prove it -- so the fault is in the handover, meaning the DMA completion signalling, the branch, or an exception taken at the moment of transfer. Everything the project has measured as working remains working: BIOS handover, cartridge fetches, data reads, literal loads, IO decode, DMA transfers, clock plan, SDRAM. What has never been observed on this board is a CPU executing outside the BIOS or the cartridge's first 84 fetches. Do not cite entry 27's IWRAM claim; do not treat a frozen cartridge-fetch counter as evidence of a hang or of progress."
+  sources:
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: the `tr_iwfetch`/`tr_iwwr`/`tr_iwrd` taps, the counters, and page 1 entry 4 in the readout mux"
+    - "This repository, `tools/decode_fetchtrace.py`: `decode_iwram`, and the page-1 valid mask raised from `0x0F00` to `0x1F00` so entry 4's validity strip is not dark"
+    - "This repository, `build/iw_s5/timing-gate.log` and `clock-plane.log`: `clk67` on measured-good spines, zero hold violations"
+    - "`build/test/roms/sma.gba`, SHA-256 `d29dec02caacbf449e2a93c6042258b0669542e102eb0e6fd0eb92a5411e0244`"
+  verification: "Observed on the board 2026-11-07 across 32 captured frames over 16 seconds, decoded with `tools/decode_fetchtrace.py`; every page-1 frame agreed on all four IWRAM fields, the cartridge-fetch count and the halt bit."

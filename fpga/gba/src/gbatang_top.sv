@@ -852,6 +852,14 @@ wire tr_iowr   = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h4);
 wire tr_vramwr = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h6);
 wire tr_cart   = rom_en & cpu_en & ~halt & rom_addr[27];
 wire tr_mmio   = gb_bus_ena & ~gb_bus_rnw;
+// IWRAM execution.  A retail cartridge copies itself to 0x03000000 and runs from
+// there, at which point a counter of CARTRIDGE fetches stops moving although the
+// CPU is working, so that counter cannot tell a running game from a wedged one.
+// Entry 27 made exactly that mistake.  These watch the region the cartridge
+// actually moves to.
+wire tr_iwfetch = rom_en & cpu_en & ~halt & (rom_addr[27:24] == 4'h3);
+wire tr_iwwr    = ram_cen & ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h3);
+wire tr_iwrd    = ram_cen & ~ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h3);
 
 reg  [27:0] ram_addr_d1;
 always @(posedge clk16) ram_addr_d1 <= ram_addr[27:0];
@@ -872,6 +880,11 @@ reg  [15:0] mmio_wr;                      // writes the register file received
 reg  [23:0] vram_wr;
 reg  [15:0] dc_wr;
 reg  [31:0] cart_fetch;
+(* keep *) reg [27:0] last_iw_addr;        // last IWRAM instruction fetch
+reg  [31:0] iw_fetch;                     // IWRAM instruction fetches
+reg  [23:0] iw_wr;                        // IWRAM data writes
+reg  [23:0] iw_rd;                        // IWRAM data reads
+(* keep *) reg s_iw;                      // IWRAM execution ever seen
 always @(posedge clk16) begin
     if (~gbaon) begin
         mm_n            <= 3'd0;
@@ -882,6 +895,11 @@ always @(posedge clk16) begin
         vram_wr         <= 24'd0;
         dc_wr           <= 16'd0;
         cart_fetch      <= 32'd0;
+        last_iw_addr    <= 28'd0;
+        iw_fetch        <= 32'd0;
+        iw_wr           <= 24'd0;
+        iw_rd           <= 24'd0;
+        s_iw            <= 1'b0;
         s_vram          <= 5'd0;
         s_dc            <= 3'd0;
         last_cart_addr  <= 28'd0;
@@ -889,6 +907,13 @@ always @(posedge clk16) begin
         last_vram_addr  <= 28'd0;
         last_vram_data  <= 32'd0;
     end else begin
+        if (tr_iwfetch) begin
+            iw_fetch     <= iw_fetch + 32'd1;
+            last_iw_addr <= rom_addr[27:0];
+            s_iw         <= 1'b1;
+        end
+        if (tr_iwwr) iw_wr <= iw_wr + 24'd1;
+        if (tr_iwrd) iw_rd <= iw_rd + 24'd1;
         if (tr_cart) begin
             cart_fetch      <= cart_fetch + 32'd1;
             last_cart_addr  <= rom_addr[27:0];
@@ -984,18 +1009,29 @@ always @(*) begin
                             2'd0: tr_word_mux = {3'h0, last_cart_thumb, last_cart_addr};
                             default: tr_word_mux = {27'h0, s_vram};
                         endcase
-                  default: case (tr_wd)
+                  // Entry 3 keeps the last VRAM store.
+                  3'd3: case (tr_wd)
                             2'd0: tr_word_mux = {4'h0, last_vram_addr};
-                            2'd1: tr_word_mux = last_vram_data;
-                            default: tr_word_mux = 32'd0;
+                            default: tr_word_mux = last_vram_data;
                         endcase
+                  // Entry 4 carries IWRAM execution.  A retail cartridge copies
+                  // itself to 0x03000000 and runs from there, so these are the
+                  // only fields that can tell a working game from a wedged one;
+                  // the cartridge-fetch counter goes blind at that point.
+                  3'd4: case (tr_wd)
+                            2'd0: tr_word_mux = {3'h0, s_iw, last_iw_addr};
+                            2'd1: tr_word_mux = iw_fetch;
+                            2'd2: tr_word_mux = {8'h0, iw_wr};
+                            default: tr_word_mux = {8'h0, iw_rd};
+                        endcase
+                  default: tr_word_mux = 32'd0;
                  endcase
     endcase
 end
 
 assign tr_word  = tr_word_mux;
 assign tr_valid = (tr_page == 2'd0) ? {8'h00, mm_vld}
-                : (tr_page == 2'd1) ? 16'h0F00
+                : (tr_page == 2'd1) ? 16'h1F00
                 :                     16'h0000;
 `endif
 
