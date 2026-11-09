@@ -964,3 +964,17 @@ Field meanings:
     - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the concurrent rom-and-ram branch of `cpu_en` and the output mux's `state == MAIN` guard"
     - "This repository, `fpga/gba/src/memory/sdram_gba.v`: the low-halfword continuation that acks a 32-bit read, and the `{cpu_rdata[31:16], dq_in}` composition it produces"
   verification: "Not verified. The trace is from one completed 3000-million-step run whose summary was confirmed before reading it, and the cycle numbers are reproducible, but no change has been built against it and the proposed repair is untested."
+
+- record_id: TCL-029
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A trace that arms on an address must also check that the address is inside the image"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "A consumer-side trace was armed on a 16-bit cartridge data read with the condition `ram_be == 4'b0011` and `ram_addr[15:0] >= 16'h02b0`, and it fired on `0x08008c20`, which is offset 35,872 into a 4,096-byte cartridge. The window it captured is therefore an out-of-range access whose returned value is meaningless either way, so it could not distinguish a working 16-bit path from a broken one, and the comparison it was built for was not obtained. The run itself was valid -- 3000 million steps, `Total frames` summary confirmed before reading anything -- so the fault is entirely in the arming condition, which tested the low 16 bits of an address without testing the high bits that identify the region or the image bound."
+  consequence: "An address-selective trace must bound the address on both ends and check the region nibble, because the CPU does make out-of-range accesses and one of them will be the first match. On this design the region is `ram_addr[27:24]` and the image bound for the test cartridge is offset 0x1000; a condition that omits either will eventually fire on a garbage access and produce a window that looks like data. The concrete lesson from this cycle is that the comparison did not need a new trace at all: `tools/check_cartread.py` already scores 55 low and 55 high halfword reads as correct against the 32-bit path's 11 failures, so the width asymmetry was measured before the trace was written. Check whether an existing capture already answers the question before building an instrument to answer it."
+  sources:
+    - "This repository, `build/run_hw/hw.log`: the 24-cycle window armed at `0x08008c20`, with its `Total frames` summary present"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the arming condition, since reverted"
+    - "This repository, `tools/check_cartread.py` output on `build/run_base/bs.log`: 55 low and 55 high halfwords correct, 11 of 532 word reads failing"
+  verification: "Measured 2026-11-08: the image is 4,096 bytes (`ls -l` on `build/test/test_logo.gba`), the armed address is offset 35,872, and the captured window shows an acknowledgement of an out-of-range access. The existing scored capture independently shows the halfword path correct in bulk."

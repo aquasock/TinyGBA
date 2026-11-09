@@ -1289,3 +1289,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 40 COMMIT Unreleased 2026-11-08T21:08:59-07:00
+
+#### Coming From:
+
+Unreleased e1c555f
+
+#### Purpose:
+
+Compare a 16-bit cartridge data read against the failing 32-bit case before attempting the repair that entry 39 proposed, so the width that already works could be shown to be undisturbed.
+
+#### Outcome:
+
+The comparison was not obtained, and the reason is worth recording because it is an instrument-selection fault rather than a machine result. A consumer-side trace armed on a 16-bit cartridge data read and ran the full 3000 million steps, confirmed by its `Total frames` summary before any line was read, and it captured a single window of 24 cycles. The window is at `0x08008c20`, which is offset 35,872 into a 4,096-byte cartridge, so it is an out-of-range access rather than a real cartridge read: the trace's arming condition tested `ram_be == 4'b0011` and an address at or above `0x02b0` but never checked that the address was inside the image, and the first 16-bit data access the CPU made happened to be beyond it. What the window does show is consistent with the 32-bit case and not informative about it: at the acknowledgement cycle the state is `REQ2_START`, `cpu_en` is high, `ram_rdata` presents the buffered value and `sdram_rdata` already holds fresh data, which is the same shape as the failing 32-bit read. Because the access is out of range its returned value is meaningless either way, so it cannot distinguish a correct 16-bit path from an incorrect one, and the lead recorded in BRD-039 remains untested for the 16-bit half. No source change is made this cycle, the instrumentation was reverted, and the tree is clean at `e1c555f`. Two things are worth carrying: the `check_cartread.py` scoring already shows 16-bit halves as correct in bulk, with 55 low halfwords and 55 high halfwords matching and no failures at either, so the comparison that the repair depends on is available from the existing capture and does not need a new trace at all; and the trace as built would arm on any 16-bit data access above `0x02b0` regardless of whether it lies inside the cartridge, which is the specific mistake to correct if it is ever rebuilt. Nothing was deployed and the Tang was not connected to. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 39 were not rewritten, and validated this entry as entry 40 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of forty against the 100-entry limit.
+
+#### Next Steps:
+
+Do not rebuild this trace: the comparison it was meant to supply already exists in the scored captures, where 16-bit low and high halves match the ROM 55 times each with zero failures against the 32-bit path's 11 failures out of 532, so the width asymmetry is already measured and the repair's safety requirement is satisfied without another run. Proceed instead to the repair proposed in entry 39, which is to register `sdram_ready` and add a `MAIN`-state term to the concurrent rom-and-ram branch of `cpu_en` that fires on the cycle after a 32-bit RAM read completes, applying only when the access is 32-bit so the 16-bit path is untouched, and then require both properties together: reach at least `0x080002e4` and the eleven failures gone. If a trace is rebuilt for any reason, arm it on an address inside the cartridge, since the condition used here accepted `0x08008c20` in a 4 KiB image and produced a window that could not be interpreted. Keep every read claim going through `tools/check_cartread.py`, report reach and accuracy together per TCL-027, confirm a run printed its summary before reading a number from it, and launch long runs with `setsid` per TCL-028. The board remains in two-wire mode, BRD-033 still governs what may be claimed about it, and the DMA `REQ1_START` defect remains open and untouched.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
