@@ -978,3 +978,43 @@ Field meanings:
     - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the arming condition, since reverted"
     - "This repository, `tools/check_cartread.py` output on `build/run_base/bs.log`: 55 low and 55 high halfwords correct, 11 of 532 word reads failing"
   verification: "Measured 2026-11-08: the image is 4,096 bytes (`ls -l` on `build/test/test_logo.gba`), the armed address is offset 35,872, and the captured window shows an acknowledgement of an out-of-range access. The existing scored capture independently shows the halfword path correct in bulk."
+
+- record_id: BRD-040
+  kind: BOARD
+  topic_id: BRD
+  title: "test_logo does not stop: eight seconds after release the CPU is in the blink delay loop, past the DISPCNT<=0x0403 store"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "`build/stl_s5` (`TINYGBA_FETCHTRACE` plus `TINYGBA_STALLTRACE`, layout `v5`, `.fs` SHA-256 `04dc4311896e5aab122f22b39d38c00f027fa6ae60948eb80301d2abef861aa8`) keeps the last sixteen completed CPU memory cycles and freezes them after 2^22 clk16 with no completed cycle or 2^27 clk16 after release. With `test_logo.gba`, three freshly flashed loads decoded identically: the stall trigger never fired, the time trigger froze the ring after exactly 26,863,572 completed cycles, the longest gap ended by a completed cycle was 276,009 clk16, and tens of millions of further cycles completed after the freeze. The sixteen-cycle tail is the cartridge's `delay` loop, `0x080002A4` `E2544001` `subs r4, r4, #1`, `0x080002A8` `1AFFFFFD` `bne delay` and the prefetched `0x080002AC` `EAFFFFED` `b blink`, each fetch equal to the ROM word. At the freeze the memory FSM is moving between `MAIN` and `REQ1_WAIT` on cartridge fetches, `dma_on` is low, all DMA channels are idle and the BIOS intro's FIFO-B sound DMA has stopped at 29,352 beats."
+  consequence: "The `delay` loop is reached only through the straight-line code after the ROM, IWRAM, EWRAM and VRAM checks, the background fill, the column loop and the `strh` of `0x0403` to `DISPCNT`, so on this image the CPU executes past the point BRD-023 and BRD-025 inferred it never reached. Those records inferred it from a sticky `DISPCNT<=0x0403` bit and the drawer's register copy on older images; this instrument does not show whether the store lands in `DISPCNT`, so the display fault, if it persists, is after the CPU and not a CPU wedge. Do not build another tail instrument for `test_logo.gba`; an overlay-off image of the current tree is the direct test of whether the blink square is drawn."
+  sources:
+    - "This repository, `build/stl_cap/logo1/decode.txt`, `logo2/decode.txt` and `logo3/decode.txt`, decoded by `tools/decode_fetchtrace.py --layout v5 --expect build/test/test_logo.gba`"
+    - "This repository, `build/test/test.s`: the `blink` and `delay` loops after the `ldr r0, =0x0403; strh r0, [r11]` store"
+    - "This repository, the STALLTRACE recorder in `fpga/gba/src/gbatang_top.sv`"
+  verification: "Measured 2026-11-08 on the board, three loads each preceded by a fresh flash, every page assembled from at least nine frames with the first frame after each page change dropped; the marker `0x57A1` was present and the three decodes agree word for word."
+
+- record_id: BRD-041
+  kind: BOARD
+  topic_id: BRD
+  title: "Super Mario Advance does not stall and the DMA REQ1_START deadlock is not observed: at eight seconds the CPU is in the BIOS sound mixer with the memory FSM in MAIN and DMA idle"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "On `build/stl_s5` with Super Mario Advance, three freshly flashed loads decoded identically. The stall trigger (2^22 clk16 with no completed CPU memory cycle) never fired; the time trigger froze the ring after exactly 17,459,560 completed cycles, the longest gap ended by a completed cycle was 327,688 clk16, which is a halted frame, and cycles kept completing after the freeze. At the freeze the `gba_memory` FSM is in `MAIN` with `dma_on_r`, `double_req` and `dma_sdram` low, `dma_on` and `dma_ena` low, `cpu_en` high, `halt` low, no `sdram_ready` pulse since the last completed cycle, the DMA arbiter idle with every channel's module idle, and 126,524 DMA read and write beats completed. The sixteen-cycle tail is BIOS code: the resampling mix loop at `0x000020A0` to `0x000020CC` (`strb r0, [r5, #0x630]`, `ldrb r0, [r5]`, `strb r0, [r5], #1`, `subs r8, r8, #1`), which stores bytes to IWRAM `0x03004532` and reads and writes `0x03003F02`, then `b 0x2004` into the pitch-step compare at `0x00002004` to `0x0000200C`. After the freeze the live DMA beat counters keep rising, with the last DMA read from IWRAM `0x030049D8` and the last write to `0x040000A4`, FIFO B, and live samples show `halt` high between bursts."
+  consequence: "The lead that a DMA SDRAM access completes in `REQ1_START` and leaves the FSM waiting in `REQ1_WAIT` with `cpu_en` held low does not describe this board run: no stall of even a quarter second occurs within about twenty seconds of release, and at the sampled moment the FSM and DMA are idle. Super Mario Advance's machine is alive and running the BIOS sound driver, not frozen; BRD-029's `halt=1` and frozen cartridge-fetch count are consistent with a CPU that has left the cartridge for BIOS code and halts between interrupts. The `REQ1_START` hop remains a code-reading observation with no board symptom, and the `cpu_en` repair of entries 39 and 40 has no board fault to address."
+  sources:
+    - "This repository, `build/stl_cap/sma1/decode.txt`, `sma2/decode.txt` and `sma3/decode.txt`, decoded by `tools/decode_fetchtrace.py --layout v5 --expect build/test/roms/sma.gba`"
+    - "This repository, `build/test/official_bios.hex` disassembled with capstone at `0x1F80` to `0x20E0`"
+  verification: "Measured 2026-11-08 on the board, three loads each preceded by a fresh flash; the three decodes agree to the cycle, the marker `0x57A1` was present, and every snapshot and counter flop was confirmed as a `DFFRE` with logic-driven D or CE in `build/stl_s1/tinygba.json`."
+
+- record_id: BRD-042
+  kind: BOARD
+  topic_id: BRD
+  title: "LEAD: Super Mario Advance leaves the cartridge for the BIOS and its own IRQ handler is never entered"
+  status: LEAD
+  verified_date: 2026-11-08
+  statement: "A static reading of Super Mario Advance's `crt0`, not a measurement, shows `0x080000D8` to `0x080000EC` loading `0x03007FFC`, storing `0x080000FC` (an ARM IRQ handler in cartridge ROM) to it, then `bx` to Thumb `AgbMain` at `0x08000281`. On the board the CPU makes exactly 84 cartridge instruction fetches (BRD-029) and is then measured alive in BIOS code with the BIOS sound mixer running and FIFO-B sound DMA active (BRD-041). If an interrupt were dispatched through the game's handler pointer, each would fetch from `0x080000FC` and raise the cartridge-fetch count, so either no interrupt is dispatched to it or the pointer the BIOS reads is not the one the game stored. Separately, `0x080000FC` is exactly the DMA3 source recorded in BRD-025 for `DMA3CNT <= 0x85001F00`, and sound DMA keeps running under the game but stops under `test_logo.gba`."
+  consequence: "This is a lead because no control-flow transition has been captured: the instrument froze at a fixed time and saw only the mixer. The next measurement is the cartridge-to-BIOS transition itself and every exception-vector fetch with the handler pointer the BIOS IRQ stub reads from `0x03FFFFFC`, which would also show whether the BRD-025 DMA3 entry is really the `crt0` store of `0x080000FC` seen through the MMIO ring."
+  sources:
+    - "This repository, `build/test/roms/sma.gba` disassembled with capstone at `0x080000C0` to `0x08000340` and its literals at `0x08000270` and `0x08000274`"
+    - "This repository, records BRD-025, BRD-029 and BRD-041"
+  verification: "Not verified. The crt0 reading is static, and the coincidence of addresses and the sound-DMA difference are observations that no captured transition yet explains."

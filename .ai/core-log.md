@@ -1319,3 +1319,36 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 41 COMMIT Unreleased 2026-11-08T22:35:00-07:00
+
+#### Coming From:
+
+Unreleased cb04146
+
+#### Purpose:
+
+Measure on the board, with one stall-tail instrument, where `test_logo.gba` stops and what state the memory controller and DMA are in when Super Mario Advance stops, instead of continuing to chase model-only literal-pool failures.
+
+#### Outcome:
+
+A new define, `TINYGBA_STALLTRACE`, layered on `TINYGBA_FETCHTRACE` (decoder layout `v5`), records the last sixteen completed CPU memory cycles (`(rom_en | ram_cen) & cpu_en & ~halt`) in a ring and freezes it, together with a snapshot of the `gba_memory` FSM state, `dma_on`, `dma_ena`, `dma_addr`, `rom_en`, `ram_cen`, `cpu_en`, `halt`, `sdram_ready` pulses since the last completed cycle and since the last state change, clk16 spent in the current state, DMA beat counts and the DMA arbiter's `debug_dma`, either when no cycle completes for 2^22 clk16 (0.25 s, nearly thirteen times the longest gap then measured) or 2^27 clk16 (8 s) after release, whichever comes first; the longest pre-freeze gap is kept so the margin is measured, and page 3 shows live counters that keep running after the freeze. The MMIO write ring is compiled out under the new define, and `gba_memory.sv` gains only a STALLTRACE-guarded `stl_mem_state` output port. `tools/decode_fetchtrace.py` decodes `v5`, drops the first frame after each page change (TCL-019), takes a per-word majority over the remaining frames, checks the `0x57A1` marker and compares every cartridge fetch against the ROM; it was validated on synthetic frames before any capture was read. `check_ring_width.py` passed, all 2,048 ring bits and every counter and snapshot flop were confirmed in `build/stl_s1/tinygba.json` as `DFFRE` with logic-driven D or CE (the only GND bits are design constants: address bit 0, `f_mem[4:3]` and the unused `debug_dma[7]`), and the default and FETCHTRACE-only configurations still elaborate. Seeds 2 to 5 were placed from the seed-1 netlist of the same tree and defines; seeds 1 to 4 failed the clock-plane gate with `clk67` on general routing, and seed 5 (`build/stl_s5`, `.fs` SHA-256 `04dc4311896e5aab122f22b39d38c00f027fa6ae60948eb80301d2abef861aa8`) passed the clock-plane gate non-strictly, met timing with zero hold violations under the documented clk67 multicycle allowance, and was deployed over JTAG. Three loads of each cartridge, each freshly flashed, decoded identically to the cycle (`build/stl_cap/logo1..3/decode.txt`, `build/stl_cap/sma1..3/decode.txt`). Neither machine stops: in every load the stall trigger never fired, the 8-second time trigger did, and the live counters showed tens of millions of further completed cycles. `test_logo.gba` completes 26,863,572 cycles before the freeze, its longest gap is 276,009 clk16, the BIOS sound DMA finished at 29,352 beats and is idle, and the tail is the cartridge's `delay` loop at `0x080002A4` `subs r4, r4, #1`, `0x080002A8` `bne delay` and the prefetched `0x080002AC` `b blink`, every fetch matching the ROM; that loop lies after the `DISPCNT <= 0x0403` store, so on this image the CPU executes past the point BRD-023 and BRD-025 inferred it never reached, though whether the store lands in `DISPCNT` is not measured here (BRD-040). Super Mario Advance completes 17,459,560 cycles before the freeze, its longest gap is 327,688 clk16, and at the freeze the FSM is in `MAIN` with `dma_on` low, every DMA channel idle and no `sdram_ready` pending, while the tail is the BIOS sound mixer loop at `0x0000207C` to `0x000020CC` and `0x00002004` to `0x0000200C`, mixing bytes into IWRAM `0x03004532` and `0x03003F02`, and FIFO-B sound DMA from IWRAM keeps running after the freeze (BRD-041). The `REQ1_START` DMA lead is therefore not observed on the board: no DMA deadlock and no CPU stall occurs in either cartridge within about twenty seconds of release. A static reading of Super Mario Advance's `crt0`, not a measurement, shows it installing an ARM IRQ handler at `0x080000FC` in cartridge ROM through `0x03007FFC` and then calling Thumb `AgbMain` at `0x08000280`, so the board's frozen count of 84 cartridge fetches with the CPU alive in BIOS code means the game's own handler is never entered; that, the coincidence of `0x080000FC` with the DMA3 source recorded in BRD-025, and sound DMA running under the game but not under `test_logo.gba` are recorded as a lead in BRD-042. No fix was attempted, the entries 39 and 40 `cpu_en` repair was not applied, and nothing about the Verilator model is claimed (BRD-033). The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 40 were not rewritten, and validated this entry as entry 41 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of forty-one against the 100-entry limit.
+
+#### Next Steps:
+
+The plan's premise that both cartridges stop is falsified on this image, so the next instrument should capture transitions rather than a stall tail, and it needs approval before it is built: keep the `v5` ring but freeze it on control-flow events instead of time, either sixteen cycles after the last cartridge fetch, recognised as the first BIOS-region fetch that follows a cartridge fetch with no cartridge fetch for 2^22 clk16 afterwards, or by recording only fetches whose region differs from the previous fetch together with every fetch of the `0x08` and `0x18` exception vectors and the word the BIOS IRQ stub reads from `0x03FFFFFC`. That would show how Super Mario Advance leaves the cartridge for the BIOS, whether an IRQ is ever dispatched through its handler pointer, and whether the BRD-025 DMA3 entry is really the `crt0` store of `0x080000FC`. For `test_logo.gba`, an overlay-off image of the current tree would show directly whether the blink square is drawn now that the CPU is measured inside the blink loop. Keep the `cpu_en` repair parked, since the board shows no read fault and no stall for it to address, keep the `REQ1_START` DMA defect recorded as unobserved rather than fixed, and use `build/stl_s5` as the deployed reference for this instrument.
+
+#### Files Modified:
+
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/gba_memory.sv
+- tools/decode_fetchtrace.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

@@ -139,6 +139,12 @@ module gba_memory (
     output      [7:0]   dbg_loader_writes,
     output              dbg_loader_writing,
 `endif
+`ifdef TINYGBA_STALLTRACE
+    // TinyGBA: observation-only output for the board stall-trace instrument
+    // (gbatang_top.sv, TINYGBA_STALLTRACE).  {dma_on_r, double_req, dma_sdram,
+    // 2'b00, state}.  Read by nothing but the readout; compiled out otherwise.
+    output      [7:0]   stl_mem_state,
+`endif
 
     // SDRAM interface
 	output reg [1:0]    sdram_port,           
@@ -405,6 +411,10 @@ end
 assign dbg_state          = state;
 assign dbg_loader_writes  = dbg_loader_writes_r;
 assign dbg_loader_writing = loader_writing;
+`endif
+
+`ifdef TINYGBA_STALLTRACE
+assign stl_mem_state = {dma_on_r, double_req, dma_sdram, 2'b00, state};
 `endif
 
 // the state machine

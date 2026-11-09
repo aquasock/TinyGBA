@@ -222,10 +222,12 @@ end
 //
 // The pair of strips at the right is a two-bit page number, read before any row:
 // a decoder that assumed a page would mislabel every field.  The layout in force
-// is the one `gbatang_top.sv` implements -- currently page 0 the MMIO write ring
+// is the one `gbatang_top.sv` implements -- by default page 0 the MMIO write ring
 // and page 1 the status pages, with pages 2 and 3 unused because the boot trace
-// moved behind its own define.  Older captures used pages 2 and 3 for those and
-// carry a different numbering; `tools/decode_fetchtrace.py --layout` names which.
+// moved behind its own define.  With TINYGBA_STALLTRACE also defined (layout v5)
+// pages 0 and 2 are the 16-slot stall ring, page 1 entries 5..7 the freeze
+// snapshot and page 3 the live counters.  Older captures used other numberings;
+// `tools/decode_fetchtrace.py --layout` names which.
 //
 // The page advances every 2^25 clk cycles, 0.67 s at clk50, and the whole cycle
 // takes 2.7 s.  The GPU's pixel stream is folded into the blue LSB for the

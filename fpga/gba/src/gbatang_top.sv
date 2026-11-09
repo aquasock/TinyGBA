@@ -720,6 +720,13 @@ assign dbg_done      = 1'b0;
 wire [6:0]  tr_sel;
 wire [31:0] tr_word;
 wire [15:0] tr_valid;
+`ifdef TINYGBA_STALLTRACE
+// Stall-trace readout (layout v5), generated after the DMA block further down.
+wire [31:0] stl_word;
+wire [15:0] stl_valid;
+wire [7:0]  stl_mem_state;                // gba_memory {dma_on_r, double_req, dma_sdram, 2'b00, state}
+wire [31:0] stl_debug_dma;                // gba_dma debug_dma
+`endif
 `ifdef TINYGBA_FETCHTRACE
 // TinyGBA: the first sixteen CPU memory cycles from the cartridge, drawn as
 // words by gba2hdmi (BRD-022).  The official BIOS completes its intro and
@@ -864,8 +871,13 @@ wire tr_iwrd    = ram_cen & ~ram_wen & cpu_en & ~halt & (ram_addr[27:24] == 4'h3
 reg  [27:0] ram_addr_d1;
 always @(posedge clk16) ram_addr_d1 <= ram_addr[27:0];
 
+`ifndef TINYGBA_STALLTRACE
+// The MMIO ring is compiled out under TINYGBA_STALLTRACE: the stall tail ring
+// takes its pages and its 1,024 registers, and both together would bring back
+// the routing fragility the boot trace caused (BRD-024).
 (* keep *) reg [1023:0] mm_flat;          // entry e word w at bits (4e+w)*32
 (* keep *) reg [7:0]    mm_vld;
+`endif
 (* keep *) reg [4:0]    s_vram;           // VRAM store ever carried
                                           // {7FFF, 0000, FFE0, 001F, 03E0}
 (* keep *) reg [2:0]    s_dc;             // DISPCNT written with {FFE0, 0403, 0000}
@@ -889,7 +901,9 @@ always @(posedge clk16) begin
     if (~gbaon) begin
         mm_n            <= 3'd0;
         mm_wrapped      <= 1'b0;
+`ifndef TINYGBA_STALLTRACE
         mm_vld          <= 8'd0;
+`endif
         io_total        <= 16'd0;
         mmio_wr         <= 16'd0;
         vram_wr         <= 24'd0;
@@ -967,11 +981,13 @@ always @(posedge clk16) begin
             // the rest did not, which is only possible if the layout is wrong.
             // The read side always used `{tr_ent, 7'd0}`, so only this line was
             // wrong -- the symptom looked like a decoder fault and was not.
+`ifndef TINYGBA_STALLTRACE
             mm_flat[{mm_n, 7'd0} +: 128] <= {4'h0,  16'hA5C3, gb_bus_adr[11:0],
                                              gb_bus_din,
                                              4'h0,  ram_addr[27:0],
                                              4'h0,  ram_addr_d1[27:0]};
             mm_vld[mm_n] <= 1'b1;
+`endif
             mm_n         <= mm_n + 3'd1;
             if (mm_n == 3'd7) mm_wrapped <= 1'b1;
             mmio_wr <= mmio_wr + 16'd1;
@@ -982,15 +998,23 @@ end
 wire [2:0]   tr_page = tr_sel[6:5];
 wire [2:0]   tr_ent  = tr_sel[4:2];
 wire [1:0]   tr_wd   = tr_sel[1:0];
+`ifndef TINYGBA_STALLTRACE
 wire [6:0]   mm_off  = {tr_wd, 5'd0};     // 0, 32, 64, 96
 wire [127:0] mm_pick = mm_flat[{tr_ent, 7'd0} +: 128];
+`endif
 
 reg [31:0] tr_word_mux;
 always @(*) begin
     tr_word_mux = 32'd0;
     case (tr_page)
+`ifdef TINYGBA_STALLTRACE
+        // Layout v5: pages 0 and 2 are the stall tail ring, page 3 the live
+        // stall counters; all generated in the stall-trace block below.
+        2'd0, 2'd2, 2'd3: tr_word_mux = stl_word;
+`else
         // Page 0: the MMIO write ring, eight entries of four words.
         2'd0: tr_word_mux = mm_pick[mm_off +: 32];
+`endif
         // Page 1: the status pages, four entries.
         2'd1: case (tr_ent)
                   3'd0: case (tr_wd)
@@ -1024,15 +1048,24 @@ always @(*) begin
                             2'd2: tr_word_mux = {8'h0, iw_wr};
                             default: tr_word_mux = {8'h0, iw_rd};
                         endcase
+`ifdef TINYGBA_STALLTRACE
+                  // Entries 5..7: the freeze snapshot of the stall trace.
+                  default: tr_word_mux = stl_word;
+`else
                   default: tr_word_mux = 32'd0;
+`endif
                  endcase
     endcase
 end
 
 assign tr_word  = tr_word_mux;
+`ifdef TINYGBA_STALLTRACE
+assign tr_valid = (tr_page == 2'd1) ? {stl_valid[15:13], 5'h1F, 8'h00} : stl_valid;
+`else
 assign tr_valid = (tr_page == 2'd0) ? {8'h00, mm_vld}
                 : (tr_page == 2'd1) ? 16'h1F00
                 :                     16'h0000;
+`endif
 `endif
 
 wire [13:0] vram_lo_addr;
@@ -1222,6 +1255,9 @@ gba_memory mem (
 `ifdef TINYGBA_SDRAM_DEBUG
 	.dbg_state(mem_dbg_state), .dbg_loader_writes(mem_dbg_lw), .dbg_loader_writing(mem_dbg_lwr),
 `endif
+`ifdef TINYGBA_STALLTRACE
+    .stl_mem_state(stl_mem_state),
+`endif
     .gb_bus_din(gb_bus_din), .gb_bus_dout(gb_bus_dout), .gb_bus_adr(gb_bus_adr),
     .gb_bus_rnw(gb_bus_rnw), .gb_bus_ena(gb_bus_ena), .gb_bus_done(gb_bus_done),
     .gb_bus_acc(gb_bus_acc), .gb_bus_be(gb_bus_be), .gb_bus_rst(gb_bus_rst), 
@@ -1317,8 +1353,270 @@ gba_dma dma (
     .dma_init_cycles(), .dma_cycles_adrup(), .dma_eepromcount(dma_eepromcount), 
     .dma_bus_Adr(dma_addr), .dma_bus_rnw(dma_rnw), .dma_bus_ena(dma_bus_ena), 
     .dma_bus_acc(dma_bus_acc), .dma_bus_dout(dma_wdata), .dma_bus_din(dma_rdata), 
-    .dma_bus_done(dma_bus_done), .dma_bus_unread(), .debug_dma()
+    .dma_bus_done(dma_bus_done), .dma_bus_unread(),
+`ifdef TINYGBA_STALLTRACE
+    .debug_dma(stl_debug_dma)
+`else
+    .debug_dma()
+`endif
 );
+
+`ifdef TINYGBA_STALLTRACE
+// ---------------------------------------------------------------- stall tail
+// TinyGBA: the board stall-trace instrument, layout v5 (core-log entry 41).
+// Compiled under TINYGBA_STALLTRACE, which needs TINYGBA_FETCHTRACE for the
+// readout path; give both on TINYGBA_DEFINES.
+//
+// Two board facts were never measured: where test_logo stops between
+// `DISPCNT<=0` and `DISPCNT<=0x0403` with halt=0 (BRD-023/025), and what the
+// memory controller and DMA are doing when Super Mario Advance freezes after
+// its DMA3 copy with halt=1 (BRD-025/029).  The boot trace answered only "what
+// were the first sixteen cycles"; this answers "what were the LAST sixteen".
+//
+// Ring.  Every completed CPU memory cycle -- the clk16 edge where the CPU has a
+// request out (`rom_en` or `ram_cen`) and `cpu_en & ~halt`, the CPU's own
+// enable -- is written into a sixteen-slot circular ring, with the read data
+// sampled on the following clk16 edge as the CPU receives it.  The words are
+// the boot trace's:
+//   word 0  {rom_en, thumb, 2'b00, rom_addr[27:0]}
+//   word 1  rom_data as the CPU receives it
+//   word 2  {ram_cen, ram_wen, ram_be[3:0], ram_addr[27:24], ram_addr[21:0]}
+//   word 3  ram_wen ? ram_wdata : ram_rdata
+//
+// Freeze.  The ring stops taking entries, and a snapshot of the memory
+// controller is latched, on whichever comes first:
+//   stall  no completed CPU cycle for 2^22 clk16 cycles (4,194,304, ~0.25 s
+//          at 16.78 MHz, ~15 frames).  The longest legitimate waits in this
+//          machine are a HALT until the next V-Blank (one frame, 280,896
+//          clk16) and an immediate DMA holding the CPU (a full 0x1F00-word
+//          copy at a few clk16 per beat is well under 10^5), so this is
+//          an order of magnitude clear of both.  The longest gap that DID end
+//          in a completed cycle before the freeze is kept as `stl_maxgap`, so
+//          the margin is measured rather than assumed.
+//   time   2^27 clk16 (~8.0 s) after gbaon, so a CPU that is looping rather
+//          than stalled still yields a coherent sixteen-cycle window of the loop.
+// The cause is recorded.  Everything clears while `~gbaon`, so each load
+// records afresh.  Counters that keep running after the freeze are on page 3
+// and are read combinationally in clk50: discard the first frame after a page
+// change and read pages by the page strip (TCL-019).
+//
+// Readout (gba2hdmi FETCHTRACE geometry, unchanged):
+//   page 0  ring slots 0..7          page 2  ring slots 8..15
+//   page 1  status entries 0..4 as in v4, freeze snapshot in entries 5..7
+//   page 3  live counters, entries 0..2
+// Oldest ring slot is `stl_wp` once `stl_full`, else slot 0; the decoder orders
+// them.  Page 1 entry 5 word 0 carries the marker 0x57A1 in bits 31:16 so a
+// packing or decoder error shows as a wrong marker, not as plausible data.
+wire        stl_cyc = (rom_en | ram_cen) & cpu_en & ~halt;
+wire [15:0] stl_flags = {dma_on, dma_bus_ena, rom_en, ram_cen, cpu_en, halt,
+                         mem_rd, mem_wr, mem_port[1:0], cpu_mem_ready, thumb,
+                         ram_wen, dma_rnw, dma_bus_done, gbaon};
+
+(* keep *) reg [2047:0] stl_flat;         // slot s word w at bits (4s+w)*32
+(* keep *) reg [15:0]   stl_vld;
+(* keep *) reg [3:0]    stl_wp;           // next slot to write
+(* keep *) reg          stl_full;         // the ring has wrapped
+reg         stl_pend;                     // a slot's read data arrives this cycle
+reg  [3:0]  stl_pidx;
+reg         stl_pwen;
+reg  [31:0] stl_pwdata;
+(* keep *) reg          stl_frz;
+(* keep *) reg [1:0]    stl_cause;        // bit 0 stall, bit 1 time
+(* keep *) reg [31:0]   stl_gap;          // clk16 since the last completed cycle, live
+(* keep *) reg [23:0]   stl_maxgap;       // longest gap ended by a completed cycle, pre-freeze
+reg  [27:0] stl_age;                      // clk16 since gbaon, stops at bit 27
+(* keep *) reg [31:0]   stl_ncyc;         // completed cycles before the freeze
+(* keep *) reg [31:0]   stl_post;         // completed cycles after the freeze
+(* keep *) reg [15:0]   stl_rdy_cyc;      // sdram_ready pulses since the last completed cycle
+(* keep *) reg [15:0]   stl_rdy_st;       // sdram_ready pulses since the FSM changed state
+(* keep *) reg [15:0]   stl_st_age;       // clk16 in the current FSM state
+(* keep *) reg [15:0]   stl_st_chg;       // FSM state changes since the last completed cycle
+reg  [2:0]  stl_st_prev;
+(* keep *) reg [31:0]   stl_dma_rd;       // DMA read beats completed (dma_bus_done)
+(* keep *) reg [31:0]   stl_dma_wr;       // DMA write beats completed
+(* keep *) reg [27:0]   stl_dma_rd_addr;  // address of the last completed DMA read
+(* keep *) reg [27:0]   stl_dma_wr_addr;  // address of the last completed DMA write
+// Freeze snapshot.
+(* keep *) reg [7:0]    f_mem;
+(* keep *) reg [15:0]   f_flags;
+(* keep *) reg [27:0]   f_dma_addr;
+(* keep *) reg [27:0]   f_rom_addr;
+(* keep *) reg [31:0]   f_ram;            // {ram_be, ram_addr[27:0]}
+(* keep *) reg [23:0]   f_sdaddr;         // mem_addr[25:2]
+(* keep *) reg [15:0]   f_rdy_cyc, f_rdy_st, f_st_age, f_st_chg;
+(* keep *) reg [15:0]   f_dbgdma;
+(* keep *) reg [31:0]   f_dma_rd, f_dma_wr;
+
+wire stl_go   = stl_cyc & ~stl_frz;
+wire stl_trig = ~stl_frz & (stl_gap[22] | stl_age[27]);
+wire stl_stch = stl_mem_state[2:0] != stl_st_prev;
+
+always @(posedge clk16) begin
+    if (~gbaon) begin
+        stl_vld     <= 16'd0;
+        stl_wp      <= 4'd0;
+        stl_full    <= 1'b0;
+        stl_pend    <= 1'b0;
+        stl_frz     <= 1'b0;
+        stl_cause   <= 2'd0;
+        stl_gap     <= 32'd0;
+        stl_maxgap  <= 24'd0;
+        stl_age     <= 28'd0;
+        stl_ncyc    <= 32'd0;
+        stl_post    <= 32'd0;
+        stl_rdy_cyc <= 16'd0;
+        stl_rdy_st  <= 16'd0;
+        stl_st_age  <= 16'd0;
+        stl_st_chg  <= 16'd0;
+        stl_st_prev <= 3'd0;
+        stl_dma_rd  <= 32'd0;
+        stl_dma_wr  <= 32'd0;
+        stl_dma_rd_addr <= 28'd0;
+        stl_dma_wr_addr <= 28'd0;
+        f_mem       <= 8'd0;
+        f_flags     <= 16'd0;
+        f_dma_addr  <= 28'd0;
+        f_rom_addr  <= 28'd0;
+        f_ram       <= 32'd0;
+        f_sdaddr    <= 24'd0;
+        f_rdy_cyc   <= 16'd0;
+        f_rdy_st    <= 16'd0;
+        f_st_age    <= 16'd0;
+        f_st_chg    <= 16'd0;
+        f_dbgdma    <= 16'd0;
+        f_dma_rd    <= 32'd0;
+        f_dma_wr    <= 32'd0;
+    end else begin
+        // Ring.
+        stl_pend <= stl_go;
+        if (stl_go) begin
+            stl_wp    <= stl_wp + 4'd1;
+            if (stl_wp == 4'd15) stl_full <= 1'b1;
+            stl_pidx  <= stl_wp;
+            stl_pwen  <= ram_wen;
+            stl_pwdata <= ram_wdata;
+            stl_flat[{stl_wp, 2'd0}*32 +: 32] <= {rom_en, thumb, 2'b00, rom_addr[27:0]};
+            stl_flat[{stl_wp, 2'd2}*32 +: 32] <= {ram_cen, ram_wen, ram_be,
+                                                  ram_addr[27:24], ram_addr[21:0]};
+        end
+        if (stl_pend) begin
+            stl_flat[{stl_pidx, 2'd1}*32 +: 32] <= rom_data;
+            stl_flat[{stl_pidx, 2'd3}*32 +: 32] <= stl_pwen ? stl_pwdata : ram_rdata;
+            stl_vld[stl_pidx] <= 1'b1;
+        end
+
+        // Gap, age and cycle counts.
+        if (~stl_age[27]) stl_age <= stl_age + 28'd1;
+        if (stl_cyc) begin
+            stl_gap <= 32'd0;
+            if (~stl_frz & (stl_gap[23:0] > stl_maxgap)) stl_maxgap <= stl_gap[23:0];
+            if (stl_frz) stl_post <= stl_post + 32'd1;
+            else         stl_ncyc <= stl_ncyc + 32'd1;
+        end else if (~&stl_gap)
+            stl_gap <= stl_gap + 32'd1;
+
+        // Memory-controller wait counters.
+        stl_st_prev <= stl_mem_state[2:0];
+        if (stl_cyc) begin
+            stl_rdy_cyc <= 16'd0;
+            stl_st_chg  <= 16'd0;
+        end else begin
+            if (cpu_mem_ready & ~&stl_rdy_cyc) stl_rdy_cyc <= stl_rdy_cyc + 16'd1;
+            if (stl_stch & ~&stl_st_chg)      stl_st_chg  <= stl_st_chg + 16'd1;
+        end
+        if (stl_stch) begin
+            stl_st_age <= 16'd0;
+            stl_rdy_st <= 16'd0;
+        end else begin
+            if (~&stl_st_age)                  stl_st_age <= stl_st_age + 16'd1;
+            if (cpu_mem_ready & ~&stl_rdy_st)  stl_rdy_st <= stl_rdy_st + 16'd1;
+        end
+
+        // DMA beats.
+        if (dma_bus_done & dma_rnw) begin
+            stl_dma_rd      <= stl_dma_rd + 32'd1;
+            stl_dma_rd_addr <= dma_addr;
+        end
+        if (dma_bus_done & ~dma_rnw) begin
+            stl_dma_wr      <= stl_dma_wr + 32'd1;
+            stl_dma_wr_addr <= dma_addr;
+        end
+
+        // Freeze.
+        if (stl_trig) begin
+            stl_frz    <= 1'b1;
+            stl_cause  <= {stl_age[27], stl_gap[22]};
+            f_mem      <= stl_mem_state;
+            f_flags    <= stl_flags;
+            f_dma_addr <= dma_addr;
+            f_rom_addr <= rom_addr[27:0];
+            f_ram      <= {ram_be, ram_addr[27:0]};
+            f_sdaddr   <= mem_addr;
+            f_rdy_cyc  <= stl_rdy_cyc;
+            f_rdy_st   <= stl_rdy_st;
+            f_st_age   <= stl_st_age;
+            f_st_chg   <= stl_st_chg;
+            f_dbgdma   <= stl_debug_dma[15:0];
+            f_dma_rd   <= stl_dma_rd;
+            f_dma_wr   <= stl_dma_wr;
+        end
+    end
+end
+
+// Readout.  `tr_sel` is {page[1:0], entry[2:0], word[1:0]}; page bit 1 picks
+// ring slots 8..15.  Combinational from `tr_sel`, as gba2hdmi requires.
+wire [3:0]  stl_rslot = {tr_sel[6], tr_sel[4:2]};
+wire [31:0] stl_ring_word = stl_flat[{stl_rslot, tr_sel[1:0]}*32 +: 32];
+reg  [31:0] stl_word_mux;
+always @(*) begin
+    stl_word_mux = 32'd0;
+    case (tr_sel[6:5])
+        2'd0, 2'd2: stl_word_mux = stl_ring_word;
+        // Page 1 entries 5..7: the freeze snapshot.  Fixed once frozen.
+        2'd1: case (tr_sel[4:0])
+                  5'd20: stl_word_mux = {16'h57A1, 3'b000, stl_frz, 2'b00, stl_cause,
+                                         3'b000, stl_full, stl_wp};
+                  5'd21: stl_word_mux = {f_mem, 8'h00, f_flags};
+                  5'd22: stl_word_mux = {4'h0, f_dma_addr};
+                  5'd23: stl_word_mux = {4'h0, f_rom_addr};
+                  5'd24: stl_word_mux = f_ram;
+                  5'd25: stl_word_mux = {6'h00, f_sdaddr, 2'b00};
+                  5'd26: stl_word_mux = {f_rdy_cyc, f_rdy_st};
+                  5'd27: stl_word_mux = {f_st_age, f_st_chg};
+                  5'd28: stl_word_mux = {16'h0000, f_dbgdma};
+                  5'd29: stl_word_mux = f_dma_rd;
+                  5'd30: stl_word_mux = f_dma_wr;
+                  5'd31: stl_word_mux = {8'h00, stl_maxgap};
+                  default: stl_word_mux = 32'd0;
+              endcase
+        // Page 3: live counters.  These move after the freeze; read the second
+        // frame after the page changes (TCL-019).
+        default: case (tr_sel[4:0])
+                  5'd0:  stl_word_mux = stl_ncyc;
+                  5'd1:  stl_word_mux = stl_gap;
+                  5'd2:  stl_word_mux = stl_post;
+                  5'd3:  stl_word_mux = {stl_mem_state, 8'h00, stl_flags};
+                  5'd4:  stl_word_mux = {4'h0, stl_dma_rd_addr};
+                  5'd5:  stl_word_mux = {4'h0, stl_dma_wr_addr};
+                  5'd6:  stl_word_mux = stl_dma_rd;
+                  5'd7:  stl_word_mux = stl_dma_wr;
+                  5'd8:  stl_word_mux = {stl_rdy_cyc, stl_rdy_st};
+                  5'd9:  stl_word_mux = {stl_st_age, stl_st_chg};
+                  5'd10: stl_word_mux = {16'h0000, stl_debug_dma[15:0]};
+                  5'd11: stl_word_mux = {15'h0000, dma_eepromcount};
+                  default: stl_word_mux = 32'd0;
+              endcase
+    endcase
+end
+assign stl_word  = stl_word_mux;
+// Valid strip: x 224..231 shows tr_valid[{page[0], entry}].  Pages 0 and 2 show
+// which ring slots hold a complete entry; page 1's entries 5..7 show the freeze
+// (white once frozen); page 3 marks its three entries.
+assign stl_valid = (tr_sel[6:5] == 2'd0) ? {8'h00, stl_vld[7:0]}
+                 : (tr_sel[6:5] == 2'd2) ? {8'h00, stl_vld[15:8]}
+                 : (tr_sel[6:5] == 2'd1) ? {{3{stl_frz}}, 13'h0000}
+                 :                         16'h0700;
+`endif
 
 ////////////////////////////
 // Timer

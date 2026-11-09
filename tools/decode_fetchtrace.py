@@ -41,8 +41,19 @@ A set bit is white.  A clear bit is black or dark grey in an address word
 so a row reads as hex.  Every pixel carries a one-LSB tint from the GPU's pixel
 stream, which is why nothing here compares colours for equality.
 
+Layout v5 (TINYGBA_STALLTRACE, core-log entry 41) adds a stall "tail": pages
+0 and 2 are a sixteen-slot ring of the LAST completed CPU memory cycles before
+the machine stopped, page 1 keeps the status entries and carries a freeze
+snapshot of the memory controller in entries 5..7, and page 3 holds live
+counters.  A ring needs pages 0, 1 and 2 together, so with v5 the captures are
+also ASSEMBLED: give the frames of one load in time order and the decoder
+drops each frame that is the first after a page change (TCL-019), takes a
+per-word majority over the rest, reports any disagreement, and prints the ring
+oldest-first.
+
 Usage:
     tools/decode_fetchtrace.py CAPTURE.png [CAPTURE.png ...]
+    tools/decode_fetchtrace.py --layout v5 --expect ROM.gba FRAME*.png
     tools/decode_fetchtrace.py --layout v3 CAPTURE.png    # pre-trim builds
     tools/decode_fetchtrace.py --window 420,180 CAPTURE.png
     tools/decode_fetchtrace.py --expect tools/../build/test/test_logo.gba CAPTURE.png
@@ -224,13 +235,106 @@ LAYOUTS = {
         2: "unused in this layout",
         3: "unused in this layout",
     },
+    #   v5  pages 0,2 = stall tail ring slots 0..7 / 8..15; 1 = status +
+    #       freeze snapshot (entries 5..7); 3 = live stall counters
+    #       build/stl_s* -- TINYGBA_FETCHTRACE + TINYGBA_STALLTRACE
+    "v5": {
+        0: "stall tail ring, slots 0..7",
+        1: "status pages + freeze snapshot",
+        2: "stall tail ring, slots 8..15",
+        3: "live stall counters",
+    },
 }
 LAYOUT = "v4"
 PAGE_NAMES = LAYOUTS[LAYOUT]
 
 # Which page carries the MMIO ring and which carries the status entries, per layout.
-MMIO_PAGE = {"v3": 2, "v4": 0}
-STATUS_PAGE = {"v3": 3, "v4": 1}
+MMIO_PAGE = {"v3": 2, "v4": 0, "v5": None}
+STATUS_PAGE = {"v3": 3, "v4": 1, "v5": 1}
+# Status entries per layout: v3 had four; entry 4 (IWRAM) arrived with v4.
+STATUS_ENTRIES = {"v3": 4, "v4": 5, "v5": 5}
+RING_BASE = {0: 0, 2: 8}            # v5 ring page -> first slot
+STALL_MARKER = 0x57A1
+
+MEM_STATES = {0: "MAIN", 1: "REQ1_START", 2: "REQ1_WAIT", 3: "REQ2_BRAM",
+              4: "REQ2_START", 5: "REQ2_WAIT", 6: "?6", 7: "?7"}
+PORTS = {0: "NONE", 1: "ROM", 2: "RAM", 3: "DMA"}
+FLAG_NAMES = ["gbaon", "dma_done", "dma_rnw", "ram_wen", "thumb", "sdram_ready",
+              None, None, "mem_wr", "mem_rd", "halt", "cpu_en", "ram_cen",
+              "rom_en", "dma_ena", "dma_on"]     # bit 0 first; 7:6 is mem_port
+
+
+def decode_mem_state(m):
+    """gba_memory {dma_on_r, double_req, dma_sdram, 2'b00, state}."""
+    return (f"FSM state={m & 7} ({MEM_STATES[m & 7]}) dma_on_r={(m >> 7) & 1} "
+            f"double_req={(m >> 6) & 1} dma_sdram={(m >> 5) & 1}")
+
+
+def decode_flags(f):
+    on = [n for i, n in enumerate(FLAG_NAMES) if n and (f >> i) & 1]
+    off = [n for i, n in enumerate(FLAG_NAMES) if n and not (f >> i) & 1]
+    port = (f >> 6) & 3
+    return f"high: {' '.join(on) or '-'} | low: {' '.join(off)} | sdram_port={PORTS[port]}"
+
+
+def decode_debug_dma(d):
+    """gba_dma debug_dma[15:0]."""
+    on = [i for i in range(4) if (d >> (3 + i)) & 1]
+    allow = [i for i in range(4) if (d >> (8 + i)) & 1]
+    idle = [i for i in range(4) if (d >> (12 + i)) & 1]
+    return (f"arbiter idle={d & 1} switch=ch{(d >> 1) & 3} channels on={on} "
+            f"allow_on={allow} module idle={idle}")
+
+
+def decode_snapshot(e5, e6, e7):
+    """Page 1 entries 5..7 of layout v5: the freeze snapshot."""
+    w = e5[0]
+    marker = w >> 16
+    if marker != STALL_MARKER:
+        raise AssertionError(f"stall marker reads 0x{marker:04X}, expected "
+                             f"0x{STALL_MARKER:04X}; packing or word order is wrong")
+    frz = (w >> 12) & 1
+    cause = (w >> 8) & 3
+    full = (w >> 4) & 1
+    wp = w & 0xF
+    causes = {0: "none", 1: "stall (no completed CPU cycle for 2^22 clk16)",
+              2: "time (2^27 clk16 after gbaon)", 3: "stall and time together"}
+    m = e5[1] >> 24
+    flags = e5[1] & 0xFFFF
+    lines = [
+        f"frozen={frz} cause={causes[cause]} ring full={full} write pointer={wp}",
+        f"at freeze: {decode_mem_state(m)}",
+        f"at freeze: {decode_flags(flags)}",
+        f"at freeze: dma_addr=0x{e5[2] & 0x0FFFFFFF:08X} rom_addr=0x{e5[3] & 0x0FFFFFFF:08X}",
+        f"at freeze: ram_be={e6[0] >> 28:04b} ram_addr=0x{e6[0] & 0x0FFFFFFF:08X} "
+        f"sdram byte addr=0x{e6[1] & 0x03FFFFFC:07X}",
+        f"at freeze: sdram_ready pulses since last completed cycle={e6[2] >> 16} "
+        f"(65535 = saturated), since FSM state change={e6[2] & 0xFFFF}",
+        f"at freeze: clk16 in current FSM state={e6[3] >> 16} (65535 = saturated), "
+        f"FSM state changes since last completed cycle={e6[3] & 0xFFFF}",
+        f"at freeze: {decode_debug_dma(e7[0] & 0xFFFF)}",
+        f"DMA beats before freeze: reads={e7[1]} writes={e7[2]}",
+        f"longest gap ended by a completed cycle before freeze: {e7[3] & 0xFFFFFF} clk16",
+    ]
+    return lines, {"frozen": frz, "cause": cause, "full": full, "wp": wp}
+
+
+def decode_live(entries):
+    """Page 3 of layout v5: counters that keep running after the freeze."""
+    e0, e1, e2 = (entries[i]["words"] for i in range(3))
+    return [
+        f"completed CPU cycles before freeze: {e0[0]}",
+        f"clk16 since last completed cycle (live): {e0[1]}",
+        f"completed CPU cycles after freeze (live): {e0[2]}",
+        f"live: {decode_mem_state(e0[3] >> 24)}",
+        f"live: {decode_flags(e0[3] & 0xFFFF)}",
+        f"last DMA read addr=0x{e1[0] & 0x0FFFFFFF:08X} last DMA write addr=0x{e1[1] & 0x0FFFFFFF:08X}",
+        f"DMA beats (live): reads={e1[2]} writes={e1[3]}",
+        f"live: sdram_ready since last cycle={e2[0] >> 16} since state change={e2[0] & 0xFFFF}; "
+        f"clk16 in state={e2[1] >> 16} state changes={e2[1] & 0xFFFF}",
+        f"live: {decode_debug_dma(e2[2] & 0xFFFF)}",
+        f"DMA3 transfer count (dma_eepromcount)={e2[3] & 0x1FFFF}",
+    ]
 
 
 def decode_mmio(words):
@@ -401,6 +505,7 @@ def report(name, capture):
 
     pg = page_index(size, px, win)
     print(f"page {pg}: {PAGE_NAMES[pg]}")
+    entries = None
 
     if pg == MMIO_PAGE[LAYOUT]:
         # Ring entries carry no order of their own; each is self-describing.
@@ -414,7 +519,7 @@ def report(name, capture):
             print(f"  [{flag}] slot {ent['index']}  {decode_mmio(words)}")
     elif pg == STATUS_PAGE[LAYOUT]:
         entries = decode_page(size, px, win, pg, base=0)
-        for ent in entries[:4]:
+        for ent in entries[:STATUS_ENTRIES[LAYOUT]]:
             words = ent["words"]
             flag = "V" if ent["valid"] else "-"
             idx = ent["index"]
@@ -439,6 +544,30 @@ def report(name, capture):
                     print(f"        {line}")
             if not ent["valid"]:
                 problems.append(f"status page entry {idx} is not marked valid")
+        if LAYOUT == "v5":
+            print("  freeze snapshot (entries 5..7)" +
+                  ("" if entries[5]["valid"] else "  [strip dark: not frozen]"))
+            try:
+                lines, _ = decode_snapshot(entries[5]["words"], entries[6]["words"],
+                                           entries[7]["words"])
+                for line in lines:
+                    print(f"        {line}")
+            except AssertionError as exc:
+                problems.append(str(exc))
+    elif LAYOUT == "v5" and pg in RING_BASE:
+        entries = decode_page(size, px, win, pg, base=RING_BASE[pg])
+        for ent in entries:
+            flag = "V" if ent["valid"] else "-"
+            w = ent["words"]
+            print(f"  [{flag}] slot {ent['index']:2d}  {field_of(w[0], 'addr')}  "
+                  f"rom_data=0x{w[1]:08X}  {field_of(w[2], 'ramctl')}  data=0x{w[3]:08X}")
+    elif LAYOUT == "v5" and pg == 3:
+        entries = decode_page(size, px, win, pg, base=0)
+        for line in decode_live(entries):
+            print(f"        {line}")
+        for i in range(3):
+            if not entries[i]["valid"]:
+                problems.append(f"live page entry {i} is not marked valid")
     elif LAYOUT == "v3" and pg <= 1:
         problems.append(f"page {pg} is the boot trace, which this decoder does "
                         f"not render; the boot trace answered its question in BRD-023")
@@ -450,6 +579,127 @@ def report(name, capture):
             print(f"  ! {p}")
     else:
         print("internal consistency: OK")
+    FRAMES.append({"name": name, "page": pg, "entries": entries,
+                   "problems": list(problems)})
+    return problems
+
+
+FRAMES = []
+
+
+def majority(values):
+    best = max(set(values), key=values.count)
+    return best, values.count(best), len(values)
+
+
+def assemble(rom):
+    """Layout v5: combine the frames of one load into the ordered tail.
+
+    Frames are taken in the order given.  A frame whose page differs from the
+    previous frame's is the first after a page change and may tear (TCL-019),
+    so it is dropped.  Each remaining word is a majority over its page's frames
+    and every disagreement is reported, because the ring and the snapshot are
+    frozen and must read identically in every frame."""
+    problems = []
+    use = {}
+    prev = None
+    for fr in FRAMES:
+        if fr["page"] != prev:
+            prev = fr["page"]
+            continue
+        if not fr["problems"]:
+            use.setdefault(fr["page"], []).append(fr)
+    print("=== assembled (layout v5)")
+    print("frames used per page: " + ", ".join(
+        f"page {p}: {len(use.get(p, []))}" for p in range(4)))
+
+    def words_of(page):
+        frs = use.get(page, [])
+        if not frs:
+            return None
+        out = []
+        for e in range(ENTRIES_PER_PAGE):
+            row = []
+            for wd in range(4):
+                vals = [f["entries"][e]["words"][wd] for f in frs]
+                v, n, tot = majority(vals)
+                if n != tot and not (page == 3 or (page == 1 and e < 5)):
+                    problems.append(f"page {page} entry {e} word {wd}: {n}/{tot} frames agree "
+                                    f"on 0x{v:08X}")
+                row.append(v)
+            valid = majority([f["entries"][e]["valid"] for f in frs])[0]
+            out.append({"words": row, "valid": valid})
+        return out
+
+    p1 = words_of(1)
+    if p1 is None:
+        problems.append("no settled page-1 frame: cannot order the ring")
+        return problems
+    try:
+        lines, snap = decode_snapshot(p1[5]["words"], p1[6]["words"], p1[7]["words"])
+    except AssertionError as exc:
+        problems.append(str(exc))
+        return problems
+    print("freeze snapshot:")
+    for line in lines:
+        print(f"  {line}")
+    p3 = words_of(3)
+    if p3 is not None:
+        print("live counters (page 3):")
+        for line in decode_live([{"words": e["words"]} for e in p3]):
+            print(f"  {line}")
+    slots = {}
+    for page in (0, 2):
+        pw = words_of(page)
+        if pw is None:
+            problems.append(f"no settled frame of ring page {page}")
+            continue
+        for e in range(ENTRIES_PER_PAGE):
+            slots[RING_BASE[page] + e] = pw[e]
+    if len(slots) != 16:
+        return problems
+    order = list(range(snap["wp"], 16)) + list(range(snap["wp"])) if snap["full"] \
+        else list(range(snap["wp"]))
+    print(f"tail, oldest first ({len(order)} cycles; the last line is the last "
+          f"completed CPU memory cycle before the freeze):")
+    for k, s_ in enumerate(order):
+        ent = slots[s_]
+        w = ent["words"]
+        if not ent["valid"]:
+            problems.append(f"ring slot {s_} is in the ordered range but not valid")
+        rom_en = (w[0] >> 31) & 1
+        thumb = (w[0] >> 30) & 1
+        addr = w[0] & 0x0FFFFFFF
+        insn = ""
+        if rom_en:
+            if thumb:
+                hw = (w[1] >> 16) if addr & 2 else (w[1] & 0xFFFF)
+                insn = f" thumb insn=0x{hw:04X}"
+            else:
+                insn = f" arm insn=0x{w[1]:08X}"
+            if rom is not None and addr >> 24 in (8, 9):
+                off = addr & 0x01FFFFFF
+                if thumb:
+                    ref = int.from_bytes(rom[off & ~1:(off & ~1) + 2], "little") \
+                        if off + 2 <= len(rom) else None
+                    got = (w[1] >> 16) if addr & 2 else (w[1] & 0xFFFF)
+                else:
+                    ref = int.from_bytes(rom[off & ~3:(off & ~3) + 4], "little") \
+                        if off + 4 <= len(rom) else None
+                    got = w[1]
+                if ref is None:
+                    insn += " (beyond ROM)"
+                elif ref == got:
+                    insn += " = ROM"
+                else:
+                    insn += f" != ROM 0x{ref:0{4 if thumb else 8}X}"
+                    problems.append(f"slot {s_}: fetch 0x{addr:08X} returned 0x{got:X}, "
+                                    f"ROM has 0x{ref:X}")
+        ram_cen = (w[2] >> 31) & 1
+        ram = ""
+        if ram_cen:
+            ram = f" | {field_of(w[2], 'ramctl')} data=0x{w[3]:08X}"
+        print(f"  {k - len(order) + 1:3d} slot {s_:2d}: rom_en={rom_en} addr=0x{addr:08X}{insn}{ram}")
     return problems
 
 
@@ -493,9 +743,20 @@ def main(argv):
         if problems:
             bad = 3
 
+    rom = None
     if expect:
         with open(expect, "rb") as f:
             rom = f.read()
+    if LAYOUT == "v5":
+        aproblems = assemble(rom)
+        if aproblems:
+            print("--- assembly problems")
+            for p in aproblems:
+                print(f"  ! {p}")
+            bad = 3
+        else:
+            print("assembly: OK")
+    if expect:
         print(f"--- cartridge reference {expect} ({len(rom)} bytes)")
         for off in (0x00, 0xC0, 0xC4, 0xC8):
             if off + 4 <= len(rom):
