@@ -922,3 +922,31 @@ Field meanings:
     - "This repository, core-log entry 37, which records the isolation by four builds"
     - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the wide mux that drove `rom_data` as well as `ram_rdata` on the acknowledgement cycle"
   verification: "Measured 2026-11-08: the same ROM at the same 3000-million-step budget reported 448 of 448 correct with reach `0x080000de` in one configuration and 451 of 462 with reach `0x080002e4` in another, and the higher-accuracy result was the broken one."
+
+- record_id: BRD-038
+  kind: BOARD
+  topic_id: BRD
+  title: "The remaining word-read defect is independent of the clk16/clk67 phase across all twelve offsets"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "The eleven remaining cartridge read failures under `-DTINYGBA_SDRAM_RTL` are not an artefact of the simulator's clock phase. `TINYGBA_CLK16_SHIFT` was swept across all twelve offsets the harness supports -- a twelve-step counter where `clk16` spans six steps and `clk67` spans three, so each offset moves the `clk16` edge relative to `clk67` by one step -- with `test_logo` at 3000 million steps per run. Every one of the twelve produced 864 reads matching the ROM, 11 failing, a highest cartridge address of `0x080002e4`, and a cartridge fetch cycle count of 149,742,181. All twelve runs printed their `Total frames` summary, and phase 0, which is the default, reproduces the baseline exactly. The eleven failures are exclusively 32-bit word reads, 11 of 532, with every narrower width clean; each returns the word belonging to the previous transaction, and repeated reads of the same address converge on the correct value."
+  consequence: "The clk16-to-clk67 relationship is excluded as a cause for this defect, so it is deterministic logic in `sdram_gba`'s collection or `gba_memory`'s assembly rather than a timing coincidence the simulator imposes. This closes, for the memory path, a question entry 10 opened and entry 19's twelve-offset sweep answered only for a standalone raster model. The consequence for method is that further timing changes are not indicated: the signature is the first 32-bit word read of each distinct address returning its predecessor while narrower reads of the same device succeed, which points at how `cpu_rdata` is assembled across the two halfword collects rather than at when the acknowledgement arrives relative to either clock. Wording rule: this is a model result and says nothing about the physical board, which BRD-033 still governs."
+  sources:
+    - "This repository, `build/phase/p1` through `build/phase/p11/r.log`, each a full 3000-million-step run at one `TINYGBA_CLK16_SHIFT` value, plus `build/phase/p0/r.log` for the default"
+    - "This repository, `tools/score_phases.py`, which reports per-phase accuracy and reach"
+    - "This repository, `tools/sim/sim_main.cpp`: `clk16_shift_get()` and the twelve-step `clk16_level()` counter"
+  verification: "Measured 2026-11-08 across twelve completed runs, each confirmed to have printed its `Total frames` summary before any number was read. Every phase reported 864/11 at reach `0x080002e4`; phase 0 matched the independently produced baseline in `build/run_base/bs.log`."
+
+- record_id: TCL-028
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "Background jobs launched with `&` die with the launching shell; detach them with `setsid`"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "A simulation launched as `( cd dir && CMD ... ) &` from a shell that then exits does not survive: the child is killed when its parent shell session ends, and its redirected log stops mid-line with no summary. Measured 2026-11-08 on a twelve-run phase sweep: the first attempt launched eleven runs this way and all eleven were dead within sixty seconds, leaving logs of 70 and 136 lines that contained no `Total frames` line. Relaunching the identical commands as `setsid nohup env ... &` kept all eleven alive for the full eighteen minutes each needed and all twelve runs (including the single sequential one) completed and printed their summaries."
+  consequence: "Launch long runs with `setsid` and verify completion by counting summary lines before reading any number out of them, because a truncated log is indistinguishable from a short result at a glance and produced a wrong reading of a whole sweep in this project. This pairs with the existing rules about run length and about reading only completed runs: those govern how long to run, this governs whether the run survived. A sweep in particular must be checked run by run, since a phase that stops early looks exactly like a phase that reached a different conclusion."
+  sources:
+    - "This repository, `build/phase/p*/r.log` from the first attempt: 70 and 136 lines, zero summary lines, all processes gone within a minute"
+    - "This repository, `build/phase/p*/r.log` from the `setsid` attempt: all twelve with `Total frames` and identical fetch counts"
+    - "This repository, `tools/score_phases.py`, which was extended to report reach so a truncated run is visible as a low reach rather than read as a result"
+  verification: "Measured 2026-11-08: eleven processes alive at fifteen and at seventy-five seconds after a `setsid` launch, versus zero within sixty seconds of the plain `&` launch, with the logs differing only in completeness."

@@ -1229,3 +1229,33 @@ Establish what the eleven pool word reads actually do before changing any timing
 - User Test: NOT RUN
 
 ---
+
+## 38 COMMIT Unreleased 2026-11-08T19:53:51-07:00
+
+#### Coming From:
+
+Unreleased 048e441
+
+#### Purpose:
+
+Test whether the eleven remaining literal-pool word reads are an artefact of the simulator's clk16/clk67 phase relationship rather than a property of the logic, by sweeping all twelve phase offsets the harness supports.
+
+#### Outcome:
+
+The phase hypothesis is dead: all twelve offsets produce identical results, so the defect is a property of the logic and not of the clock relationship the simulator happens to impose. `TINYGBA_CLK16_SHIFT` was swept across all twelve values with `test_logo` under `-DTINYGBA_SDRAM_RTL` at 3000 million steps, and `tools/score_phases.py` reports 864 reads correct, 11 failed and a highest cartridge address of `0x080002e4` for every one of the twelve, with the cartridge fetch cycle counter reading 149,742,181 in all of them. The baseline reproduces exactly at phase 0, which is the default, and each run printed its own `Total frames` summary, so the result rests on twelve completed runs rather than on partially written logs. That last point cost a cycle: an earlier attempt launched the sweep in the background inside a shell that then exited, the children died with it, and their truncated logs were read as data before anyone noticed that none of them contained a summary line, which is the same failure mode entry 37 records in a different form and the reason `tools/score_phases.py` prints reach beside accuracy. The sweep was rerun with `setsid` so the processes detach from the launching shell, and completion was confirmed by counting summary lines before a single number was read. This closes the phase question that entry 10 opened and entry 19's twelve-offset sweep of a standalone raster model did not answer for the memory path: the clk16-to-clk67 relationship has no effect on this defect, so it is deterministic logic in `sdram_gba`'s collection or in `gba_memory`'s assembly, both of which are simulated with exact integer ratios in every phase. What the eleven failures are, precisely, is unchanged from the previous cycle: they are exclusively 32-bit word reads, 11 of 532, every narrower width being clean, and each returns the word belonging to the previous transaction, with repeated reads of the same address converging on the correct value. Nothing was deployed and the Tang was not connected to; no bitstream is affected because these files are simulation-only per TCL-026. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 37 were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 38 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-eight against the 100-entry limit.
+
+#### Next Steps:
+
+Stop looking at clocks and read the collection path as arithmetic, because phase is now excluded across all twelve offsets and the defect is therefore deterministic: the eleven failures are the first 32-bit word read of each distinct pool address, each returning its predecessor, and repeated reads of the same address converge, which is the exact signature of `cpu_rdata` being consumed while it still holds `{old_high_halfword, new_low_halfword}` from the low-halfword collect. The missing measurement is not another timing change but a trace of when `cpu_rdata` is written relative to when the consumer latches it, for one failing pool read and one succeeding header read in the same run, since those two differ in outcome and the earlier assumption that they take the same path has now been wrong three times. Do not re-run a phase sweep, do not widen an output mux without checking instruction fetches still work, and do not attempt another acknowledgement change until that trace exists. Note that `test_logo`'s entry code loads its pool through `ldr Rd,[pc,#imm]`, which is a 32-bit data read on the same port as every other data access, so if the header reads succeed at 16 bits while the pool reads fail at 32, the distinguishing variable is width and not address. Keep every read claim going through `tools/check_cartread.py`, report reach and accuracy together per TCL-027, and confirm a run printed its summary before reading any number out of it. The board remains in two-wire mode, BRD-033 still governs what may be claimed about it, and the DMA `REQ1_START` defect remains open and untouched.
+
+#### Files Modified:
+
+- tools/score_phases.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
