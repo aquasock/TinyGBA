@@ -326,22 +326,7 @@ always @(posedge clk) begin
                     a <= addr_latch[0][22:10];
                     SDRAM_BA <= addr_latch[0][24:23];
 
-                    // TinyGBA: a 32-bit READ is not acknowledged here.  This branch
-                    // is the low-halfword slot, and on this cycle `cpu_rdata` only
-                    // receives `{old_high_halfword, new_low_halfword}` -- a word whose
-                    // upper half still belongs to the previous transaction.  The
-                    // acknowledgement therefore lands one `clk16` slot before the word
-                    // exists, and the consumer latches the splice.  Measured 2026-11-08
-                    // on a single clock domain in `build/run_wt`: at the continuation
-                    // (`cont=1`) for `0x080002b0` the register held `e1540400`, and the
-                    // correct `08000400` appeared only at the high-halfword collect four
-                    // clocks later.  The array model acks and delivers the whole word
-                    // together, which is why it boots.  Writes keep the ack here; the
-                    // read ack is issued below once the high halfword has been
-                    // collected.  Earlier attempts to make this change were measured
-                    // through a corrupt bus, because `sdram_model.v` let a deselected
-                    // die drive DQ (BRD-035), so they could not show the effect.
-                    if (~oe_latch[0]) cpu_ready <= 1;            // write: ready on next cycle
+                    cpu_ready <= 1;                             // ready signal on next cycle
                 end else if (new_cpu) begin                     // new CPU request 
                     reg [25:2] cpu_addr_with_bank;              // patch flash bank
                     cpu_addr_with_bank = cpu_addr;
@@ -400,14 +385,6 @@ always @(posedge clk) begin
 
                 if (~need_refresh) refresh_chip1 <= 0;
             end
-
-            // TinyGBA: acknowledge a 32-bit READ on the cycle its high halfword is
-            // collected, so the acknowledgement and the complete word become visible
-            // to the consumer in the same cycle.  Placed after the RAS block because
-            // that block assigns `cpu_ready <= 0` unconditionally on a `cycle[3]`
-            // slot, and the last non-blocking assignment in a time step wins.
-            if (cycle[3] & ~flash_cmd_en & port[0] != 0 & addr_latch[0][1] & oe_latch[0])
-                cpu_ready <= 1;
 
             ////////////////////////////////////////
             // RAS for flash backup controller

@@ -632,16 +632,7 @@ always @* begin
     // CPU output
     rom_data = rom_rdata_buf;       // default values
     ram_rdata = ram_rdata_buf;
-    // TinyGBA: also drive the ports on the cycle a 32-bit read is acknowledged.
-    // This mux only sourced `sdram_rdata` while the FSM was in `MAIN`, but the
-    // acknowledgement arrives in a wait state, so the acked cycle still showed
-    // `ram_rdata_buf`/`rom_rdata_buf` -- the previous transaction's word.  With the
-    // controller's acknowledgement moved to the high-halfword collect this makes the
-    // acknowledgement and the complete word coincide, which is what the array model
-    // already does.  Without the controller change the acknowledgement lands before
-    // the word exists; without this change the acked cycle presents a stale buffer.
-    if (state == MAIN & ~dma_on_r |
-        sdram_ready & ~dma_on_r & (state == REQ1_WAIT | state == REQ2_WAIT)) begin
+    if (state == MAIN & ~dma_on_r) begin    // do not output on first cycle after DMA
         if (rom_en_r) begin         // rom access, update value
             if (double_req)
                 rom_data = rom_rdata_new;

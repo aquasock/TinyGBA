@@ -893,3 +893,32 @@ Field meanings:
     - "This repository, `tools/sim/build_gba_sim.sh`: `sdram_gba.v`, `gba_sdram_rtl.v` and `sdram_model.v` in the Verilator list"
     - "This repository, `fpga/gba/src/gbatang_top.sv`: the `TINYGBA_SDRAM_RTL` gate around the `gba_sdram_rtl` instance"
   verification: "Confirmed 2026-11-08 by listing the `diag/` files each script references and by grepping the synthesis script for the model's filename, which appears only inside a comment in `sdram_gba.v`. No build was run to establish this."
+
+- record_id: BRD-037
+  kind: BOARD
+  topic_id: BRD
+  title: "The acknowledgement change was a reach regression measured as a fix, and entry 36 is withdrawn"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "The commit that moved the 32-bit read acknowledgement to the high-halfword collect reduced how far the machine gets and was reported as a repair because the reads it did perform were correct. Four configurations were built from the same tree and measured at 3000 million steps on `test_logo` under `-DTINYGBA_SDRAM_RTL`, scored with `tools/check_cartread.py`. The die-selection fix alone (`cf240f8`) reaches `0x080002e4`, issues the literal-pool load at `0x080002b0`, and reports 451 of 462 reads matching with 11 failures. Adding the controller acknowledgement change with the output mux untouched leaves that identical at 451 of 462, so it moves nothing measurable alone. Adding also the wide output mux that drove both `rom_data` and `ram_rdata` on the acknowledgement cycle cuts reach to `0x080000de`, removes the pool load entirely, and reports 448 of 448 reads correct -- which is the figure entry 36 called a fix. Narrowing that mux to `ram_rdata` alone restores reach to `0x080002e4` and the 11 failures return. Tying the mux to `cpu_en` instead cuts reach to `0x080000de` again. The restored tree is byte-identical to `cf240f8` by `git diff`, and reproduces the baseline exactly."
+  consequence: "Entry 36 and BRD-036 overstate the result and must not be cited as a read-timing fix: the wide mux clobbered the instruction-fetch path, so the machine stopped earlier and its surviving reads were clean by construction. The BIOS logo that rendered in that run rendered because the fetch path still worked up to that point. What stands from the cycle is the pin-level model's deselected-die defect, which took reads from 112 of 4,000 to 753 of 764 and removed a 3,881-fold retry loop at `0x0800009c`, and which was verified before the acknowledgement change existed. The eleven literal-pool word reads still return the previous word and their cause is not established; three timing attempts have now failed against three different confounds. Wording rule for any future fix: report reach and read accuracy together, and treat a run that is correct because it stopped earlier as a regression, not a repair."
+  sources:
+    - "This repository, `build/run_base/bs.log`: the restored baseline, 462 reads, 451 matching, reach `0x080002e4`"
+    - "This repository, `build/run_va/va.log` and `build/run_n2/n2.log`: the controller-ack-only and data-port-narrowed configurations, both 451 of 462"
+    - "This repository, `build/run_ack/ak.log`: the configuration entry 36 described, 448 of 448, reach `0x080000de`, no pool load"
+    - "This repository, `build/run_cen/cn.log` and `build/run_ex/ex.log`: the `cpu_en`-tied variants, both stopping at `0x080000de`"
+  verification: "Measured 2026-11-08 by four builds and four 3000-million-step runs, all scored with the same calibrated column. `git diff cf240f8 -- fpga/gba/src/memory/` on the restored tree returns nothing, and the restored baseline's read counts and reach reproduce the controller-only run exactly."
+
+- record_id: TCL-027
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A fix must be checked for reach as well as correctness, because stopping earlier makes the survivors look right"
+  status: VERIFIED
+  verified_date: 2026-11-08
+  statement: "A change that reduces how far a program gets will appear to improve any metric computed over the instructions it does execute. Here, driving both output ports on the SDRAM acknowledgement cycle corrupted instruction fetches, so `test_logo` stopped 28 bytes earlier and never issued its literal-pool load; every one of the 448 reads it still performed was correct, giving a 448-of-448 result that read as a complete fix while the machine had actually regressed from reaching `0x080002e4` to `0x080000de`. The same tree without that mux, or with the mux narrowed to the data port, reported 451 of 462 with 11 failures and greater reach. The two metrics disagree in opposite directions, and only the pair distinguishes a repair from a truncation."
+  consequence: "Report reach and accuracy together for any change to a boot path, and treat a reduction in reach as disqualifying regardless of how clean the surviving measurements are. On this project the concrete form is the highest cartridge address reached plus the read accuracy from `tools/check_cartread.py`, both quoted in every result: `0x080002e4` with 451 of 462 is strictly better than `0x080000de` with 448 of 448, because the first is still executing the entry code and the second has stopped in the middle of it. This is the same class as the earlier rule about runs that end before their budget, applied to a different axis."
+  sources:
+    - "This repository, `build/run_ack/ak.log` against `build/run_va/va.log` and `build/run_base/bs.log`"
+    - "This repository, core-log entry 37, which records the isolation by four builds"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the wide mux that drove `rom_data` as well as `ram_rdata` on the acknowledgement cycle"
+  verification: "Measured 2026-11-08: the same ROM at the same 3000-million-step budget reported 448 of 448 correct with reach `0x080000de` in one configuration and 451 of 462 with reach `0x080002e4` in another, and the higher-accuracy result was the broken one."

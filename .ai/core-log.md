@@ -1198,3 +1198,34 @@ Establish whether the model now reproduces the board, because the fetch count dr
 - User Test: NOT RUN
 
 ---
+
+## 37 COMMIT Unreleased 2026-11-08T17:50:27-07:00
+
+#### Coming From:
+
+Unreleased 26069d6
+
+#### Purpose:
+
+Withdraw entry 36's claim that the acknowledgement change fixed the cartridge reads, after isolating that the same change cost the machine its reach, and restore the last known-honest source state.
+
+#### Outcome:
+
+Entry 36's result was produced by a change that broke something else, and it is withdrawn. Reverting the source half of that commit while keeping its log history in place restores a tree whose RTL is byte-identical to `cf240f8`, confirmed with `git diff cf240f8 -- fpga/gba/src/memory/` returning nothing, and the restored baseline reproduces exactly: `test_logo` under `-DTINYGBA_SDRAM_RTL` at 3000 million steps reaches `0x080002e4`, issues the literal-pool load at `0x080002b0`, and `tools/check_cartread.py` reports 451 of 462 reads matching the ROM with 11 failures, all 32-bit word reads of the pool from `0x080002b0` to `0x080002e4`. The isolation was measured rather than argued, by building four configurations from the same tree. The model die-selection fix alone, which is `cf240f8`, reaches `0x080002e4` with the pool load issued and 11 bad reads. Adding the controller acknowledgement change with the output mux untouched leaves those numbers unchanged at 451 of 462, so that change moves nothing measurable on its own. Adding the wide mux that drove both output ports on the acknowledgement cycle cut reach to `0x080000de` and removed the pool load entirely, while every read it did perform was correct, which is the 448-of-448 figure entry 36 reported as a fix. Narrowing that mux to the data port restored reach but returned the 11 failures, and tying it to `cpu_en` instead cut reach again. The conclusion is that entry 36 measured a machine that had stopped earlier over a set of reads that happened to be clean, and described the truncation as a repair; the BIOS logo that rendered in that run rendered because the fetch path was still working at that point, not because the read timing had been corrected. What stands from the cycle is `cf240f8`, the pin-level model's deselected-die bus defect, which took reads from 112 of 4,000 correct to 753 of 764 and removed a 3,881-fold retry loop at `0x0800009c`, and which was verified before the acknowledgement change existed. The eleven literal-pool word reads still return the previous word and their cause is not established. Nothing was deployed and the Tang was not connected to; no bitstream was affected either way, because the files in question are simulation-only per TCL-026. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 36 were not rewritten, confirmed the two new records carry unique ids and the canonical field order, and validated this entry as entry 37 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-seven against the 100-entry limit.
+
+#### Next Steps:
+
+Establish what the eleven pool word reads actually do before changing any timing again, because three attempts at a timing change have now been made and each was measured against a different confound: the first two ran through the corrupt bus of BRD-035, and the third was reported as a fix while the output mux was silently truncating the fetch path. The specific measurement that is missing is whether the pool word reads are a timing defect at all, given that the same code path returns correct words for the header and logo reads in the same run: compare the state machine trace for a pool access against a header access that succeeds, on the same single bus-level counter, and look for a difference in which port, which state, or which acknowledgement the two take rather than assuming they take the same one. Do not re-test the byte path, the two-die contention or the DQM handling; all are measured and recorded. Do not widen an output mux to cover an acknowledgement cycle without first checking that instruction fetches still work, which is the specific mistake that produced this entry. Treat every read claim through `tools/check_cartread.py` and every weight-bearing run at 3000 million steps, and require both properties together before reporting a fix: reach equal to the previous baseline and reads correct, since a run that is correct only because it stopped earlier is not progress. BRD-033 still governs what may be claimed about the board, the board remains in two-wire mode, and the DMA `REQ1_START` defect remains open and untouched.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/memory/sdram_gba.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
