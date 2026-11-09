@@ -1259,3 +1259,33 @@ Stop looking at clocks and read the collection path as arithmetic, because phase
 - User Test: NOT RUN
 
 ---
+
+## 39 COMMIT Unreleased 2026-11-08T20:34:30-07:00
+
+#### Coming From:
+
+Unreleased c10b594
+
+#### Purpose:
+
+Trace the consumer side of a failing literal-pool word read against a succeeding one in a single run, to find why three acknowledgement changes moved nothing.
+
+#### Outcome:
+
+The trace explains all three failed attempts at once, and the reason is a misidentification of the signal that matters. Recording the memory FSM's consumer side across the whole literal-pool block shows the acknowledgement and the complete word landing on different cycles, and shows that moving the acknowledgement cannot fix it because the acknowledgement is not the signal the CPU acts on. The window starts at the first 32-bit read of `0x080002b0` and covers 140 consecutive cycles including four pool reads and the first cartridge text read. Each 32-bit read takes four cycles through `MAIN`, `REQ1_WAIT`, `REQ2_START` and `REQ2_WAIT`, and at the `REQ2_WAIT` cycle where `cpu_en` is high the mux is presenting the buffered word from the previous transaction while the controller is presenting the low halfword splice: for `0x080002b0` at cycle 76106114 the state is `REQ2_WAIT`, `cpu_en` is 1, `sdram_rdata` holds `e1540400` and `ram_rdata` holds `e154e154`, and the correct `08000400` appears only at the next cycle, 76106115, when the FSM has returned to `MAIN`, the mux sources `sdram_rdata` correctly, and `cpu_en` is 0. The same shape repeats on every pool read in the window. The decisive detail is in the enable decode: `cpu_en` for a concurrent rom-and-ram access is `state == REQ2_BRAM | (state == REQ2_START | state == REQ2_WAIT) & sdram_ready`, which references the state machine and the controller's ready pulse and does not reference `cpu_ready` at all. Every attempt in this session moved `cpu_ready` in `sdram_gba`, which is an input to that expression only through `sdram_ready` in two states, so moving it cannot move the cycle on which `cpu_en` asserts while the state machine is already returning to `MAIN`. That is why the acknowledgement change left the eleven failures untouched, why widening the output mux fixed the reads by breaking fetches, and why the `cpu_en`-tied mux truncated the machine: each was aimed at the wrong signal. No source change is made this cycle; the instrumentation was reverted and the tree is clean at `c10b594`. The phase sweep from the previous cycle stands and is what makes this diagnosis usable, since the defect is deterministic and therefore has a single cause rather than a phase-dependent one. Nothing was deployed and the Tang was not connected to. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, checked that entries 1 to 38 were not rewritten, confirmed the one new record carries a unique id and the canonical field order, and validated this entry as entry 39 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of thirty-nine against the 100-entry limit.
+
+#### Next Steps:
+
+Fix the enable rather than the acknowledgement, because the trace shows the data is complete and the mux is correct on the cycle after the controller's ready pulse, and the only thing missing there is `cpu_en`. The candidate is to register `sdram_ready` and add a term to the concurrent rom-and-ram branch of `cpu_en` that fires in `MAIN` on the cycle after a 32-bit RAM read completed, so the CPU consumes when `ram_rdata` is sourced from `sdram_rdata` instead of from the buffer; this must be written to apply only to 32-bit accesses, since the trace shows 16-bit reads are collected in one pass and already correct. Before building it, trace the same window for a 16-bit data read to confirm it completes in one collect and would be broken by an unconditional delay, because the eleven failures are exclusively 32-bit and the fix must not move the width that works. Then require both properties together: reach `0x080002e4` or better and the eleven failures gone, measured with `tools/check_cartread.py` and reported with reach per TCL-027. Do not move `cpu_ready` again to try to achieve this, which is measured three times now to have no effect on this path. Do not widen an output mux without checking instruction fetches still work, and confirm every run printed its summary before reading a number from it. Keep weight-bearing runs at 3000 million steps and launch long runs with `setsid` per TCL-028. The board remains in two-wire mode, BRD-033 still governs what may be claimed about it, and the DMA `REQ1_START` defect remains open and untouched.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

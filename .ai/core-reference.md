@@ -950,3 +950,17 @@ Field meanings:
     - "This repository, `build/phase/p*/r.log` from the `setsid` attempt: all twelve with `Total frames` and identical fetch counts"
     - "This repository, `tools/score_phases.py`, which was extended to report reach so a truncated run is visible as a low reach rather than read as a result"
   verification: "Measured 2026-11-08: eleven processes alive at fifteen and at seventy-five seconds after a `setsid` launch, versus zero within sixty seconds of the plain `&` launch, with the logs differing only in completeness."
+
+- record_id: BRD-039
+  kind: BOARD
+  topic_id: BRD
+  title: "LEAD: the CPU consumes a 32-bit cartridge read one cycle before the controller's word is complete, and cpu_en is not cpu_ready"
+  status: LEAD
+  verified_date: 2026-11-08
+  statement: "A consumer-side trace across the literal-pool block shows why every acknowledgement change in this session had no effect. Each 32-bit cartridge data read takes four cycles through `MAIN`, `REQ1_WAIT`, `REQ2_START` and `REQ2_WAIT`. At the `REQ2_WAIT` cycle where `cpu_en` is high, the mux presents the buffered word from the previous transaction while the controller is presenting the low-halfword splice: for `0x080002b0` at cycle 76106114 the state is `REQ2_WAIT`, `cpu_en` is 1, `sdram_rdata` holds `e1540400`, `ram_rdata` holds `e154e154`, and the correct `08000400` appears only on the next cycle at 76106115, in `MAIN`, with `cpu_en` 0. The shape repeats on every pool read in the 140-cycle window. The controlling detail is the enable decode: `cpu_en` for a concurrent rom-and-ram access is `state == REQ2_BRAM | (state == REQ2_START | state == REQ2_WAIT) & sdram_ready`, which does not reference `cpu_ready`. Moving `cpu_ready` in `sdram_gba` therefore cannot move the cycle on which `cpu_en` asserts once the FSM is returning to `MAIN`."
+  consequence: "This is recorded as a lead rather than a finding because the mechanism is established but no fix has been applied or measured. It does account for all three failed attempts in this session with one cause: the acknowledgement change left the eleven failures untouched, widening the output mux fixed reads by breaking fetches, and tying the mux to `cpu_en` truncated the machine, because each was aimed at `cpu_ready` rather than at the enable. The candidate repair is to register `sdram_ready` and add a `MAIN`-state term to the concurrent rom-and-ram branch of `cpu_en`, applying only to 32-bit accesses so the 16-bit path that already works is not delayed. Before that is attempted, trace a 16-bit data read in the same window to confirm it completes in one collect."
+  sources:
+    - "This repository, `build/run_pool/pt.log`: 140 consecutive cycles from the first 32-bit read of `0x080002b0`, printing state, enables, `sdram_rdata`, `ram_rdata_buf` and `ram_rdata`"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the concurrent rom-and-ram branch of `cpu_en` and the output mux's `state == MAIN` guard"
+    - "This repository, `fpga/gba/src/memory/sdram_gba.v`: the low-halfword continuation that acks a 32-bit read, and the `{cpu_rdata[31:16], dq_in}` composition it produces"
+  verification: "Not verified. The trace is from one completed 3000-million-step run whose summary was confirmed before reading it, and the cycle numbers are reproducible, but no change has been built against it and the proposed repair is untested."
