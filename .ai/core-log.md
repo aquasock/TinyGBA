@@ -1567,3 +1567,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 49 COMMIT Unreleased 2026-11-13T16:22:37-07:00
+
+#### Coming From:
+
+Unreleased 15204e4
+
+#### Purpose:
+
+Run entry 33's open experiment, giving `clk16` and `clk67` upstream's clock-lane assignment on the shared PLL, to test whether BRD-044's one-word read lag is a clock-plan effect rather than a logic one.
+
+#### Outcome:
+
+The experiment is settled as a negative on both halves, and it needed no board time. The device database was read first rather than the record consulted: across the whole GW5AST-138C only three pips drive a clock-plane wire from a PLL output, `TLPLL0CLK0` and `TLPLL0CLK2` from `MPLLCLKOUT0` and `MPLLCLKOUT2` on the left-edge site and `TRPLL0CLK0` from `MPLLCLKOUT0` on the right-edge sites, so `CLKOUT1` reaches nothing beyond the tile-local `F1` lane. Upstream's assignment therefore puts `clk16` on a lane with no plane pip, which is the same position `clk67` was in before this port gave it a BUFG. The swap was implemented faithfully anyway, with `ODIV1_SEL` and `ODIV2_SEL` exchanged and the port connections renamed so `clk16` takes `CLKOUT1` and `clk67` takes `CLKOUT2`, and with `CLOCK_LOC "clk16" BUFG` applied as the same remedy the port already used for `clk67`. Synthesis confirmed nothing but routing had changed, at 14,921 flip-flops and 148 block RAM against `build/v7_s9`'s identical counts. Eight seeds were launched; seed 9 reached a routed netlist and the clock-plane gate refused it with `NO PLANE PIP: 'clk16' crosses no bridge pip, so it is on general routing`, while `clk67` on `CLKOUT2` did reach the plane on `SPINE19/TOP2` and `SPINE27/TOP2`. The remaining seven were stopped rather than awaited, because the refusal is structural: the BUFG route carries `clk67`'s 255 sinks and cannot carry `clk16`'s 2381, so no seed would have differed. The second half of the answer matters more than the first and was available from arithmetic: both arrangements use the same VCO and the same dividers, `FVCO` 1809 MHz from `Fpfd` 27 and `MDIV` 67 with `ODIV0` 36, one lane at 27 and one at 108, giving 50.25, 67.00 and 16.75 MHz in both cases. Upstream puts 16.75 MHz on the /108 divider and 67 MHz on the /27 divider and so does this port; the swap only changes which output pin carries which, so it changes insertion delay and plane routing and does not change the divider relationship that sets when the two clocks' edges fall relative to each other. The phase hypothesis entry 33 was built on is therefore weakened rather than confirmed, and the port's clock swap is shown to be forced rather than gratuitous: `clk16` must be on `CLKOUT0` or `CLKOUT2` to reach the plane on this device, `clk50` holds `CLKOUT0`, so `clk67` is the only clock that can be moved off and the arrangement in the tree is the one the device admits. Recorded as TCL-032. Nothing was deployed and the Tang was powered down throughout, so no board reading was taken and none was possible from a build the clock-plane gate refuses. The tree is restored to `15204e4`; `pll_16.v`, `gbatang_top.sv` and `tinygba.cst` are byte-identical to the image the board has run, and the attempt is preserved outside the repository. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 48 were not rewritten, confirmed TCL-032 carries a unique id and the canonical field order, and validated this entry as entry 49 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set, `None.` for Files Modified because no engineering file changed, and a count of forty-nine against the 100-entry limit.
+
+#### Next Steps:
+
+Close BRD-049's hazard next, which is now the highest-value change on this boundary: `cpu_ready` leaves `sdram_gba` as a bare net, one `clk67` cycle wide and a quarter of the `clk16` period, and is consumed as a level by `gba_memory`, `gba_dma` and a third block with no synchroniser, so a two-flop synchroniser in `clk16` with an edge detect, or a four-phase handshake, removes a hazard that is unsafe by construction regardless of whether it turns out to be the current fault. That work needs no board and can be judged in the model for reach and read accuracy together per TCL-027, with the caveat that the harness cannot confirm a timing fix (TCL-031) so a clean model result is necessary and not sufficient. Do not re-run entry 33's experiment, which this cycle closes as unbuildable and phase-neutral. If the synchroniser is done and the lag survives it, the next discriminating instrument is a board measurement of the arrival relationship rather than any further logic change, and the honest statement at that point is that the fault is placement-dependent timing on an unmeasured clock plan, which BRD-019 has held open since 2026-11-04. Keep the objective in view rather than the proxy: reach at `0x080002AC` is measured on `test_logo`'s blink loop, a retail title needs BRD-045's DMA `REQ1_START` deadlock solved as well, and that record has been verified and untouched since entry 43.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
