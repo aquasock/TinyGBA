@@ -1434,7 +1434,7 @@ reg  [3:0]  stl_pidx;
 reg         stl_pwen;
 reg  [31:0] stl_pwdata;
 (* keep *) reg          stl_frz;
-(* keep *) reg [2:0]    stl_cause;        // bit 0 stall, bit 1 time, bit 2 cart->BIOS
+(* keep *) reg [3:0]    stl_cause;        // bit 0 stall, bit 1 time, bit 2 cart->BIOS, bit 3 pool read
 (* keep *) reg [31:0]   stl_gap;          // clk16 since the last completed cycle, live
 (* keep *) reg [23:0]   stl_maxgap;       // longest gap ended by a completed cycle, pre-freeze
 reg  [27:0] stl_age;                      // clk16 since gbaon, stops at bit 27
@@ -1536,12 +1536,49 @@ wire stl_fcfc   = stl_fetch & (rom_addr[27:0] == 28'h0800_00FC);
 wire stl_hndrd  = ram_cen & ~ram_wen & cpu_en & ~halt &
                   (ram_addr[27:0] == 28'h03FF_FFFC);
 
+// ---------------------------------------------------------------- layout v7
+// The literal-pool read (core-log entry 43's Next Steps, BRD-044).  v6 measured
+// that the cartridge's second store to DISPCNT carries 0xFFE0 where its source
+// says 0x0403, and that the word immediately before 0x0403 in this cartridge's
+// literal pool is 0x0000FFE0.  The instruction is `ldr r0, =0x0403` followed by
+// `strh r0, [r11]`, so the stored value is whatever that load returned.  One
+// measurement decides it, and this block takes it.
+//
+// The ring also freezes on the read itself, so the capture holds the cycles
+// leading into the pool load as well as the value it produced.  The address arm
+// checks the region nibble AND an offset inside the 4 KiB image, which is the
+// bound TCL-029 requires: the CPU does make out-of-range accesses, and a
+// condition testing only the low bits will eventually fire on one.
+//
+// Three adjacent pool words are recorded rather than one, because the lag this
+// tests for is a one-transaction offset: if 0x2E0 returns the word that belongs
+// to 0x2DC and 0x2E4 returns the word that belongs to 0x2E0, that is a lag and
+// its direction is known.  All three are recorded raw and compared against the
+// cartridge image by the host decoder rather than against a constant compiled
+// here, because a comparison inside the instrument would have to be trusted to
+// be right about the very value it is checking (TCL-024).
+wire stl_frd32   = ram_cen & ~ram_wen & cpu_en & ~halt & (ram_be == 4'b1111);
+wire stl_fcart32 = stl_frd32 & (ram_addr[27:24] == 4'h8) & ~ram_addr[12];
+wire stl_f2dc    = stl_fcart32 & (ram_addr[11:0] == 12'h2DC);
+wire stl_f2e0    = stl_fcart32 & (ram_addr[11:0] == 12'h2E0);
+wire stl_f2e4    = stl_fcart32 & (ram_addr[11:0] == 12'h2E4);
+
+(* keep *) reg        s_f2dc, s_f2e0, s_f2e4;   // each pool word was read
+(* keep *) reg [31:0] v_f2dc, v_f2e0, v_f2e4;   // the word each read returned
+(* keep *) reg [7:0]  f2e0_n;                   // reads of 0x080002E0, saturating
+(* keep *) reg [3:0]  f2e0_be;                  // byte enables seen on that access
+(* keep *) reg [27:0] last_rd32_addr;           // last 32-bit cartridge data read
+(* keep *) reg [31:0] last_rd32_data;           // and the word it returned
+(* keep *) reg [31:0] prev_rd32_data;           // the word the one before that returned
+reg         rd_p_dc, rd_p_e0, rd_p_e4;          // that read's data arrives this cycle
+reg         rd_p_c32;                           // a 32-bit cartridge read's data arrives now
+
 wire stl_go   = stl_cyc & ~stl_frz;
 // v6 adds the handover to the two time-based triggers rather than replacing them.
 // The stall trigger is cheap and entry 41 measured it never fire, and the 8-second
 // trigger is what still yields a coherent window for a cartridge that never returns
 // to the BIOS at all -- which is exactly what test_logo.gba does.
-wire stl_trig = ~stl_frz & (stl_gap[22] | stl_age[27] | stl_fxfer);
+wire stl_trig = ~stl_frz & (stl_gap[22] | stl_age[27] | stl_fxfer | stl_f2e0);
 wire stl_stch = stl_mem_state[2:0] != stl_st_prev;
 
 always @(posedge clk16) begin
@@ -1551,7 +1588,7 @@ always @(posedge clk16) begin
         stl_full    <= 1'b0;
         stl_pend    <= 1'b0;
         stl_frz     <= 1'b0;
-        stl_cause   <= 2'd0;
+        stl_cause   <= 4'd0;
         stl_gap     <= 32'd0;
         stl_maxgap  <= 24'd0;
         stl_age     <= 28'd0;
@@ -1591,6 +1628,21 @@ always @(posedge clk16) begin
         s_cfc       <= 1'b0;
         bios_fetch  <= 32'd0;
         stl_hnd_pend <= 1'b0;
+        s_f2dc      <= 1'b0;
+        s_f2e0      <= 1'b0;
+        s_f2e4      <= 1'b0;
+        v_f2dc      <= 32'd0;
+        v_f2e0      <= 32'd0;
+        v_f2e4      <= 32'd0;
+        f2e0_n      <= 8'd0;
+        f2e0_be     <= 4'd0;
+        last_rd32_addr <= 28'd0;
+        last_rd32_data <= 32'd0;
+        prev_rd32_data <= 32'd0;
+        rd_p_dc     <= 1'b0;
+        rd_p_e0     <= 1'b0;
+        rd_p_e4     <= 1'b0;
+        rd_p_c32    <= 1'b0;
     end else begin
         // Ring.
         stl_pend <= stl_go;
@@ -1672,10 +1724,41 @@ always @(posedge clk16) begin
         end
         if (stl_hnd_pend) hnd_val <= ram_rdata;
 
+        // Layout v7: the literal-pool read.  Every value is recorded raw and
+        // scored against the cartridge image by the host decoder, never compared
+        // against a constant compiled here: a comparison inside the instrument
+        // would have to be trusted to be right about the very value it checks,
+        // which is TCL-024's lesson.  The three adjacent words plus the two-deep
+        // read history give the decoder enough to name a lag and its direction.
+        rd_p_dc <= stl_f2dc;
+        rd_p_e0 <= stl_f2e0;
+        rd_p_e4 <= stl_f2e4;
+        if (stl_f2dc) begin s_f2dc <= 1'b1; end
+        if (stl_f2e4) begin s_f2e4 <= 1'b1; end
+        if (stl_f2e0) begin
+            s_f2e0  <= 1'b1;
+            f2e0_be <= ram_be;
+            if (~&f2e0_n) f2e0_n <= f2e0_n + 8'd1;
+        end
+        if (rd_p_dc) v_f2dc <= ram_rdata;
+        if (rd_p_e4) v_f2e4 <= ram_rdata;
+        if (rd_p_e0) v_f2e0 <= ram_rdata;
+        // Two-deep history of completed 32-bit cartridge data reads, so the host
+        // decoder can see whether the pool read's value came from the transaction
+        // before it.  The data is sampled on the cycle after the access, like every
+        // other data capture here, so the shift happens on arrival and not on the
+        // access cycle.
+        rd_p_c32 <= stl_fcart32;
+        if (stl_fcart32) last_rd32_addr <= ram_addr[27:0];
+        if (rd_p_c32) begin
+            prev_rd32_data <= last_rd32_data;
+            last_rd32_data <= ram_rdata;
+        end
+
         // Freeze.
         if (stl_trig) begin
             stl_frz    <= 1'b1;
-            stl_cause  <= {stl_fxfer, stl_age[27], stl_gap[22]};
+            stl_cause  <= {stl_f2e0, stl_fxfer, stl_age[27], stl_gap[22]};
             f_mem      <= stl_mem_state;
             f_flags    <= stl_flags;
             f_dma_addr <= dma_addr;
@@ -1704,7 +1787,7 @@ always @(*) begin
         2'd0, 2'd2: stl_word_mux = stl_ring_word;
         // Page 1 entries 5..7: the freeze snapshot.  Fixed once frozen.
         2'd1: case (tr_sel[4:0])
-                  5'd20: stl_word_mux = {16'h57A2, 2'b00, stl_frz, 2'b00, stl_cause,
+                  5'd20: stl_word_mux = {16'h57A3, 2'b00, stl_frz, 1'b0, stl_cause,
                                          3'b000, stl_full, stl_wp};
                   5'd21: stl_word_mux = {f_mem, 8'h00, f_flags};
                   5'd22: stl_word_mux = {4'h0, f_dma_addr};
@@ -1747,6 +1830,20 @@ always @(*) begin
                   5'd17: stl_word_mux = {24'h0, gpu_dc, 1'b0};
                   5'd18: stl_word_mux = {16'h0000, last_dc_data};
                   5'd19: stl_word_mux = {16'h0000, dc_wr};
+                  // Layout v7: the literal-pool read.  Entry 5 is the three words
+                  // themselves; entry 6 is the two-deep read history that says
+                  // whether the value came from the transaction before it.
+                  // Entry 5: the three pool words as the CPU received them.
+                  5'd20: stl_word_mux = v_f2e0;
+                  5'd21: stl_word_mux = v_f2dc;
+                  5'd22: stl_word_mux = v_f2e4;
+                  5'd23: stl_word_mux = {4'h0, last_rd32_addr};
+                  // Entry 6: the two-deep read history and the flags.
+                  5'd24: stl_word_mux = last_rd32_data;
+                  5'd25: stl_word_mux = prev_rd32_data;
+                  5'd26: stl_word_mux = {17'h0, s_f2dc, s_f2e0, s_f2e4, f2e0_be,
+                                         f2e0_n};
+                  5'd27: stl_word_mux = {24'h0, v_f2e0[15:8]};
                   default: stl_word_mux = 32'd0;
               endcase
     endcase

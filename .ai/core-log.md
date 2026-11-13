@@ -1414,3 +1414,34 @@ Capture the literal read itself, because BRD-044 is the whole remaining distance
 - User Test: NOT RUN
 
 ---
+
+## 44 COMMIT Unreleased 2026-11-13T00:52:00-07:00
+
+#### Coming From:
+
+Unreleased 413a0ba
+
+#### Purpose:
+
+Build layout `v7` to capture the literal-pool read at `0x080002E0` and settle whether the one-word lag of BRD-044 is what put `0xFFE0` in DISPCNT, then stop at the operator's request for a handoff with the build and the measurement state recorded rather than interpreted.
+
+#### Outcome:
+
+The instrument is built and deployed and its result is deliberately unread, because the placement that carried it behaved unlike every prior image and no clean alternative placement was available before the session ended. Layout `v7` adds a fourth freeze cause, the first completed 32-bit cartridge data read of `0x080002E0` with the region nibble and an in-image offset both checked per TCL-029, plus raw records of the words returned for `0x080002DC`, `0x080002E0` and `0x080002E4` and a two-deep history of 32-bit cartridge data reads, all scored against the cartridge image by the host decoder rather than against constants compiled into the instrument, following TCL-024. `tools/check_ring_width.py` refused two of my own packing mistakes on the way, a 33-bit cause field and a 45-bit flag word, and the decoder's field order for the new words was corrected after a round-trip test showed flags and byte enables in the wrong positions; both verdicts it can reach, confirmed and refuted, were exercised against synthetic words before any capture was read. Synthesis needed three attempts: the first two ran from source that was then edited, and re-synthesising into an existing directory would have reused the cached netlist, so each was discarded and the build that shipped was made from the committed source at 23:22 with its netlist written at 23:36. Of eight seeds, seed 9 was again the only one to converge, at 589,915 iterations against 583,265 for the previous netlist, and it passed every gate with zero hold violations, `clk16` 19.529, `clk50` 80.880, `clk67` 31.398 under the documented GBATang allowance, `hclk` 91.819 MHz and cross-domain paths at 44.39 and 40.29 ns against 59.70; seeds 10 to 16 were relaunched after seed 9 was first read and were still routing when the build was killed at the operator's request. `build/v7_s9` (`.fs` SHA-256 `0d3d58da1d022a1cdf1e5f918c5ec83065aac6d3cace16a5362a00374a1aad86`) then behaved unlike any prior image: three fresh loads all read 32,192,194 completed cycles before the freeze, 211 writes to `0x04000000` with the last carrying `0x0080` and none carrying `0xFFE0` or `0x0403`, and a tail ring showing the CPU looping at `0x0800020C` to `0x0800025C` instead of the blink loop that `stl_s5` and `v6_s9` both measured, with the pool-read arms never firing. Five page-0 frames agreed field for field, so the capture was stable rather than torn, and scoring those fetches against the cartridge image showed five of nine differing, every one of them by byte 2 being incremented by one, which is not a corruption pattern any previously recorded fault produces. Re-flashing `build/deploy_v6/tinygba.fs` on the same board with the same cartridge restored the correct blink loop and byte-exact words, so the difference is the bitstream and not the board, the loader or the capture path. The one build-visible difference found is that `clk67` on `v7_s9` is carried by `SPINE0/TOP0`, which this board has never measured, while the working control's `clk67` sits only on `SPINE16/TOP0` and `SPINE25/TOP1`, both measured good, so the result is recorded as BRD-047 in lead status and the v7 reading is withdrawn rather than interpreted: it can neither confirm nor refute BRD-044, and its absent pool reads describe a run that was not executing the cartridge correctly. The board was left running `build/deploy_v6` with `test_logo.gba` loaded, since that image is measured working. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 43 were not rewritten, confirmed the new record carries a unique id and the canonical field order, and validated this entry as entry 44 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of forty-four against the 100-entry limit.
+
+#### Next Steps:
+
+Resume by settling BRD-047 before spending another build on BRD-044, because the two are now coupled: build layout `v7` again and inspect each candidate seed's `build/*/clock-plane.log` before deploying, keeping only a placement whose `clk67` is confined to `SPINE16/TOP0` and `SPINE25/TOP1`, and if such a seed reads the pool correctly then the spine is the cause and the project has its first placement-level A/B that separates two near-identical netlists; if it repeats the byte-2 increment and the `0x0800020C` loop then the cause is in the v7 logic and the added comparators are the place to look. Seeds 10 to 16 are already netlisted from the committed source and only need their gates inspected, so this costs placement time and no synthesis. Do not reuse seed 9 for v7 and do not read anything further from `build/v7_s9`; also note that `stl_s5`, `v6_s9` and now `v7_s9` all converge at seed 9, which suggests seed sensitivity rather than anything about the seed's quality, so a wider seed range is worth the wall clock. Once the pool read is in hand, require both properties together per TCL-027, the white field gone and reach undiminished, before reporting a fix, and keep the parked `cpu_en` repair of entries 39 and 40 parked until then. The DMA `REQ1_START` deadlock of BRD-045 remains a separate fault on a separate cartridge and is not on this path. BRD-019 still governs wording and has now earned it twice.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- tools/decode_fetchtrace.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

@@ -254,17 +254,27 @@ LAYOUTS = {
         2: "stall tail ring, slots 8..15",
         3: "live counters + handover records",
     },
+    #   v7  as v6, plus a fourth freeze cause (the literal-pool read of
+    #       0x080002E0) and page 3 entries 5..6 carrying the words the pool
+    #       reads returned.  Marker 0x57A3; the cause field widens to 4 bits,
+    #       which keeps `frozen` at bit 13 as in v6.
+    "v7": {
+        0: "stall tail ring, slots 0..7",
+        1: "status pages + freeze snapshot",
+        2: "stall tail ring, slots 8..15",
+        3: "live counters, handover + pool-read records",
+    },
 }
 LAYOUT = "v4"
 PAGE_NAMES = LAYOUTS[LAYOUT]
 
 # Which page carries the MMIO ring and which carries the status entries, per layout.
-MMIO_PAGE = {"v3": 2, "v4": 0, "v5": None, "v6": None}
-STATUS_PAGE = {"v3": 3, "v4": 1, "v5": 1, "v6": 1}
+MMIO_PAGE = {"v3": 2, "v4": 0, "v5": None, "v6": None, "v7": None}
+STATUS_PAGE = {"v3": 3, "v4": 1, "v5": 1, "v6": 1, "v7": 1}
 # Status entries per layout: v3 had four; entry 4 (IWRAM) arrived with v4.
-STATUS_ENTRIES = {"v3": 4, "v4": 5, "v5": 5, "v6": 5}
+STATUS_ENTRIES = {"v3": 4, "v4": 5, "v5": 5, "v6": 5, "v7": 5}
 RING_BASE = {0: 0, 2: 8}            # v5 ring page -> first slot
-STALL_MARKER = {"v5": 0x57A1, "v6": 0x57A2}
+STALL_MARKER = {"v5": 0x57A1, "v6": 0x57A2, "v7": 0x57A3}
 
 MEM_STATES = {0: "MAIN", 1: "REQ1_START", 2: "REQ1_WAIT", 3: "REQ2_BRAM",
               4: "REQ2_START", 5: "REQ2_WAIT", 6: "?6", 7: "?7"}
@@ -311,9 +321,9 @@ def decode_snapshot(e5, e6, e7):
         raise AssertionError(f"stall marker reads 0x{marker:04X}, expected "
                              f"0x{want:04X} for layout {LAYOUT}; packing, word "
                              f"order or layout is wrong")
-    if LAYOUT == "v6":
+    if LAYOUT in ("v6", "v7"):
         frz = (w >> 13) & 1
-        cause = (w >> 8) & 7
+        cause = (w >> 8) & (0xF if LAYOUT == "v7" else 7)
     else:
         frz = (w >> 12) & 1
         cause = (w >> 8) & 3
@@ -321,7 +331,8 @@ def decode_snapshot(e5, e6, e7):
     wp = w & 0xF
     cause_names = {0: "stall (no completed CPU cycle for 2^22 clk16)",
                    1: "time (2^27 clk16 after gbaon)",
-                   2: "cartridge -> BIOS handover"}
+                   2: "cartridge -> BIOS handover",
+                   3: "literal-pool read of 0x080002E0"}
     hit = [n for b, n in cause_names.items() if (cause >> b) & 1]
     causes = " and ".join(hit) if hit else "none"
     m = e5[1] >> 24
@@ -417,6 +428,86 @@ def decode_v6_control(e3, e4):
         f"(blank off, BG2)={s_gpu403}, BIOS handover 0x1F80 "
         f"(blank on, BG0-3)={s_gpu_bios}",
     ]
+
+
+def decode_v7_pool(e5, e6, rom=None):
+    """Page 3 entries 5..6 of layout v7: the literal-pool read.
+
+    The question this answers is whether the `ldr r0,=0x0403` at the end of the
+    cartridge's checks returned the word the image holds there or the one before
+    it.  The values are reported against the image when one is supplied, because
+    the cartridge is the authority on what the load should have returned and the
+    instrument only reports what it did return.
+    """
+    v_e0, v_dc, v_e4 = e5[0], e5[1], e5[2]
+    last_addr = e5[3] & 0x0FFFFFFF
+    last_data, prev_data = e6[0], e6[1]
+    w2 = e6[2]
+    # Bit positions mirror the RTL concatenation exactly:
+    #   {17'h0, s_f2dc, s_f2e0, s_f2e4, f2e0_be, f2e0_n}
+    # A concatenation packs its leftmost term highest, so the flags land at
+    # 14:12 in reverse source order and `be` occupies 11:8.  Getting this wrong
+    # is the defect class BRD-027 records -- the words decode to plausible values
+    # either way -- so it is written out here and checked by round-trip test.
+    s_f2dc  = (w2 >> 14) & 1
+    s_f2e0  = (w2 >> 13) & 1
+    s_f2e4  = (w2 >> 12) & 1
+    f2e0_be = (w2 >> 8) & 0xF
+    f2e0_n  = w2 & 0xFF
+
+    lines = [
+        f"pool reads seen: 0x2DC={s_f2dc} 0x2E0={s_f2e0} 0x2E4={s_f2e4} "
+        f"(0x2E0 read {f2e0_n} time(s), byte enables {f2e0_be:04b})",
+        f"returned for 0x080002DC: 0x{v_dc:08X}",
+        f"returned for 0x080002E0: 0x{v_e0:08X}",
+        f"returned for 0x080002E4: 0x{v_e4:08X}",
+        f"last 32-bit cartridge data read: 0x{last_addr:08X} -> 0x{last_data:08X}; "
+        f"the read before it returned 0x{prev_data:08X}",
+    ]
+    if rom is None:
+        lines.append("no cartridge image supplied, so these are unscored; pass "
+                     "--expect ROM.gba to have them compared against the image")
+        return lines, {}
+    verdict = {}
+    for name, addr, got in (("0x2DC", 0x2DC, v_dc), ("0x2E0", 0x2E0, v_e0),
+                            ("0x2E4", 0x2E4, v_e4)):
+        want = int.from_bytes(rom[addr:addr + 4], "little") if addr + 4 <= len(rom) else None
+        if want is None:
+            continue
+        before = (int.from_bytes(rom[addr - 4:addr], "little")
+                  if addr >= 4 else None)
+        if not s_f2e0 and name == "0x2E0":
+            verdict[name] = None
+            lines.append(f"{name}: not read on this run")
+            continue
+        if got == want:
+            state = "CORRECT"
+        elif before is not None and got == before:
+            state = f"LAGGED - this is the word belonging to 0x{addr-4:03X}"
+        elif got == 0:
+            state = "ZERO - neither the word nor its predecessor"
+        else:
+            state = "WRONG - matches neither the word nor its predecessor"
+        verdict[name] = state
+        lines.append(f"{name}: ROM holds 0x{want:08X} (predecessor 0x{before:08X}); "
+                     f"read returned 0x{got:08X} -> {state}")
+    if verdict.get("0x2E0"):
+        if verdict["0x2E0"] == "CORRECT" and not verdict.get("0x2E4", "CORRECT").startswith("LAGGED"):
+            lines.append("VERDICT: the pool read returned the correct word, so the "
+                         "one-word lag does not explain the 0xFFE0 store (BRD-044 is "
+                         "REFUTED) and the search moves to the address path or to the "
+                         "store itself")
+        elif verdict["0x2E0"].startswith("LAGGED"):
+            lines.append("VERDICT: the pool read returned its predecessor, so the "
+                         "one-word lag is present on the board and is the reason the "
+                         "store carried 0xFFE0 (BRD-044 is CONFIRMED)")
+        else:
+            lines.append(f"VERDICT: neither hypothesis holds for 0x2E0 ({verdict['0x2E0']})")
+    if prev_data == v_e0:
+        lines.append("cross-check: the value returned for 0x2E0 is identical to the "
+                     "word the preceding 32-bit cartridge read returned, which is a "
+                     "one-transaction offset independently of the image")
+    return lines, verdict
 
 
 def decode_mmio(words):
@@ -568,7 +659,7 @@ def field_of(word, kind):
 KINDS = ["addr", "data32", "ramctl", "ramdata"]
 
 
-def report(name, capture):
+def report(name, capture, rom=None):
     size, px = capture
     win = locate_window(size, px, WINDOW_OVERRIDE)
     W, H = size
@@ -626,7 +717,7 @@ def report(name, capture):
                     print(f"        {line}")
             if not ent["valid"]:
                 problems.append(f"status page entry {idx} is not marked valid")
-        if LAYOUT in ("v5", "v6"):
+        if LAYOUT in ("v5", "v6", "v7"):
             print("  freeze snapshot (entries 5..7)" +
                   ("" if entries[5]["valid"] else "  [strip dark: not frozen]"))
             try:
@@ -636,21 +727,24 @@ def report(name, capture):
                     print(f"        {line}")
             except AssertionError as exc:
                 problems.append(str(exc))
-    elif LAYOUT in ("v5", "v6") and pg in RING_BASE:
+    elif LAYOUT in ("v5", "v6", "v7") and pg in RING_BASE:
         entries = decode_page(size, px, win, pg, base=RING_BASE[pg])
         for ent in entries:
             flag = "V" if ent["valid"] else "-"
             w = ent["words"]
             print(f"  [{flag}] slot {ent['index']:2d}  {field_of(w[0], 'addr')}  "
                   f"rom_data=0x{w[1]:08X}  {field_of(w[2], 'ramctl')}  data=0x{w[3]:08X}")
-    elif LAYOUT in ("v5", "v6") and pg == 3:
+    elif LAYOUT in ("v5", "v6", "v7") and pg == 3:
         entries = decode_page(size, px, win, pg, base=0)
         for line in decode_live(entries):
             print(f"        {line}")
-        if LAYOUT == "v6":
+        if LAYOUT in ("v6", "v7"):
             for line in decode_v6_control(entries[3]["words"], entries[4]["words"]):
                 print(f"        {line}")
-        for i in range(5 if LAYOUT == "v6" else 3):
+        if LAYOUT == "v7":
+            for line in decode_v7_pool(entries[5]["words"], entries[6]["words"], rom)[0]:
+                print(f"        {line}")
+        for i in range(7 if LAYOUT == "v7" else 5 if LAYOUT == "v6" else 3):
             if not entries[i]["valid"]:
                 problems.append(f"live page entry {i} is not marked valid")
     elif LAYOUT == "v3" and pg <= 1:
@@ -733,8 +827,11 @@ def assemble(rom):
         print("live counters (page 3):")
         for line in decode_live([{"words": e["words"]} for e in p3]):
             print(f"  {line}")
-        if LAYOUT == "v6" and len(p3) > 4:
+        if LAYOUT in ("v6", "v7") and len(p3) > 4:
             for line in decode_v6_control(p3[3]["words"], p3[4]["words"]):
+                print(f"  {line}")
+        if LAYOUT == "v7" and len(p3) > 6:
+            for line in decode_v7_pool(p3[5]["words"], p3[6]["words"], rom)[0]:
                 print(f"  {line}")
     slots = {}
     for page in (0, 2):
@@ -822,20 +919,24 @@ def main(argv):
         print("no capture named", file=sys.stderr)
         return 2
 
+    # The cartridge is loaded before anything is decoded, because layout v7
+    # scores the returned words against the image and a verdict read without the
+    # image is unscored (TCL-024: a sampling point must be calibrated against
+    # something known, not asserted).
+    rom = None
+    if expect:
+        with open(expect, "rb") as f:
+            rom = f.read()
+
     bad = 0
     for path in args:
         if not os.path.isfile(path):
             print(f"missing {path}", file=sys.stderr)
             return 2
-        problems = report(path, load_png(path))
+        problems = report(path, load_png(path), rom)
         if problems:
             bad = 3
-
-    rom = None
-    if expect:
-        with open(expect, "rb") as f:
-            rom = f.read()
-    if LAYOUT in ("v5", "v6"):
+    if LAYOUT in ("v5", "v6", "v7"):
         aproblems = assemble(rom)
         if aproblems:
             print("--- assembly problems")
