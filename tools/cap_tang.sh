@@ -8,6 +8,15 @@
 #
 #   tools/cap_tang.sh build/tang_status2 /tmp/probe
 #
+#   --no-flash        skip the flash step and capture whatever the board is
+#                     already running.  Needed for every cartridge session:
+#                     flashing reloads the FPGA, which clears SDRAM, so a ROM
+#                     loaded after the flash is destroyed by a second flash.
+#                     The rest of the script -- the pinned format, the map-id
+#                     sidecar, the histogram -- is identical either way.
+#
+#   tools/cap_tang.sh build/v7_s18 /tmp/rom1 --no-flash
+#
 # Why this is a script and not two commands someone remembers.  Two separate
 # traps have already produced wrong readings in this project:
 #
@@ -30,12 +39,25 @@ set -uo pipefail
 export LC_ALL=C
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-build="${1:-}"
-prefix="${2:-/tmp/capture}"
+build=""
+prefix=""
+flash=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-flash) flash=0 ;;
+        -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'; exit 0 ;;
+        *)
+            if   [[ -z "$build"  ]]; then build="$arg"
+            elif [[ -z "$prefix" ]]; then prefix="$arg"
+            else echo "unexpected argument: $arg" >&2; exit 2
+            fi ;;
+    esac
+done
+prefix="${prefix:-/tmp/capture}"
 device=/dev/video0
 loader="${OPENFPGALOADER:-$HOME/oss-cad-suite/bin/openFPGALoader}"
 
-[[ -n "$build" ]] || { echo "usage: tools/cap_tang.sh <build-dir> [output-prefix]" >&2; exit 2; }
+[[ -n "$build" ]] || { echo "usage: tools/cap_tang.sh <build-dir> [output-prefix] [--no-flash]" >&2; exit 2; }
 [[ -f "$build/tinygba.fs" ]] || { echo "no $build/tinygba.fs" >&2; exit 2; }
 [[ -x "$loader" ]] || { echo "missing openFPGALoader: $loader" >&2; exit 2; }
 
@@ -45,9 +67,14 @@ if fuser "$device" >/dev/null 2>&1; then
     exit 3
 fi
 
-echo "=== flash ==="
-"$loader" -b tangconsole "$build/tinygba.fs" 2>&1 | tail -2
-sleep 5
+if [[ $flash -eq 1 ]]; then
+    echo "=== flash ==="
+    "$loader" -b tangconsole "$build/tinygba.fs" 2>&1 | tail -2
+    sleep 5
+else
+    echo "=== flash skipped (--no-flash) ==="
+    echo "capture: assuming the board is already running $build/tinygba.fs"
+fi
 
 echo "=== capture ==="
 # MJPEG at 1920x1080, pinned.  See trap 1 above.

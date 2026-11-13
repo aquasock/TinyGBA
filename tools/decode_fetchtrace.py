@@ -503,7 +503,7 @@ def decode_v7_pool(e5, e6, rom=None):
                          "store carried 0xFFE0 (BRD-044 is CONFIRMED)")
         else:
             lines.append(f"VERDICT: neither hypothesis holds for 0x2E0 ({verdict['0x2E0']})")
-    if prev_data == v_e0:
+    if s_f2e0 and prev_data == v_e0:
         lines.append("cross-check: the value returned for 0x2E0 is identical to the "
                      "word the preceding 32-bit cartridge read returned, which is a "
                      "one-transaction offset independently of the image")

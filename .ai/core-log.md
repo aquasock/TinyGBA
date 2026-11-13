@@ -1445,3 +1445,35 @@ Resume by settling BRD-047 before spending another build on BRD-044, because the
 - User Test: NOT RUN
 
 ---
+
+## 45 COMMIT Unreleased 2026-11-13T10:54:45-07:00
+
+#### Coming From:
+
+Unreleased 7d41f1b
+
+#### Purpose:
+
+Settle BRD-047 by re-placing layout v7 at a seed whose clock plane matches the working control, then read the `0x080002E0` literal-pool word on the board to confirm or refute BRD-044.
+
+#### Outcome:
+
+BRD-044 is confirmed and the chain BRD-043 left open is closed. Re-placing the v7 netlist needed no synthesis: `build/v7_base/tinygba.json` was hardlinked into each seed directory and the build took its cached-synthesis path, so seeds 10 to 26 cost placement time only. Entry 44 had reported seeds 10 to 16 as routed and awaiting gate inspection; all seven were instead dead from the previous session, `exit=1` with `nextpnr.log` ending mid-progress and no `tinygba.json`, and they were re-run rather than read. Of seventeen seeds attempted, seven reached a bitstream and five were killed in flight at the operator's request: seeds 11, 13, 14, 15, 17, 18 and 24 passed every gate with zero hold violations, seed 20 was refused by the clock-plane gate with `clk67` on general routing and no bridge pip, and seed 21 aborted on BRD-024's `hclk5` route failure. `tools/clock_plane_select.py` was written for this cycle because BRD-047's test condition was prose applied by hand to one clock at a time; it compares all four clocks against a reference routed netlist at once and reports each pip's measured-good state, and its two verdicts were exercised in both directions before any seed was read, which caught a crash on a narrow `--require` and a summary line that claimed more than the filter checked. Its `--require-good` predicate was added after the board result, because set-exact matching cannot express "this clock must cross a measured-good pip": the reference placement may itself be unmeasured, and testing the predicate found that the first version asked whether every pip was good rather than whether any was, which would have rejected the working seed. With the rule applied as a check, `clk67` on the two good spines plus a good `hclk` pip selects `v7_s13` and `v7_s24` and rejects `v7_s9` and `v7_s18`, which is exactly the decision that this cycle got wrong by hand. Selecting on `clk67` alone then produced the cycle's own error: `build/v7_s18` satisfies BRD-047's condition exactly, passed every gate with zero hold violations and `hclk` at 99.532 MHz, and was flashed, and the operator reported the HDMI screen unsynchronised. The capture card returned a pinned 1920x1080 frame of pure black with 255 colours, which is BRD-012's fallback rather than a machine drawing nothing, so that reading was discarded rather than interpreted. `hclk` is the 74.25 MHz pixel clock, and `v7_s18` is the only packed seed whose `hclk` crosses no measured-good pip at all, using `SPINE16/BOTTOM2` and `SPINE24/BOTTOM2` where every other placement -- and both images that have ever displayed, `v6_s9` and `v7_s9` -- carry it across `SPINE19/BOTTOM2` and/or `SPINE26/BOTTOM2`, both measured good; flashing `build/deploy_v7s13`, same two good `clk67` spines and an `hclk` that includes them, restored sync immediately and that is recorded as BRD-048. With the cartridge loaded, `v7_s13` executes the blink delay loop at `0x080002A4` to `0x080002AC`, which is the loop `stl_s5` and `v6_s9` measured and not the `0x0800020C` loop the withdrawn `v7_s9` produced, so BRD-047's prediction held: reach is `0x080002AC` with 7 of 8 tail-ring fetches exact, the miss being `0x0800028C` returning `0xEAFFFFED` from `0x080002AC`, the same one-transaction offset. The pool read itself is direct rather than inferred: two page-3 frames seconds apart agree that the 32-bit read of `0x080002E0` returned `0x0000FFE0` with byte enables `1111` and a read count of 1, while `0x080002DC` and `0x080002E4` returned their correct words, and three of four fresh loads then carry it the whole way, the `strh` to `0x04000000` putting `0xFFE0` on the bus with sticky `0x0403` never seen and the drawer settling at forced blank with BG0..BG3 set. One load of four wrote `0xFEE0`, which is `0xFFE0` with bit 8 clear and a value present nowhere in the image; it is recorded inside BRD-044 rather than smoothed over, and it is a separate load-dependent data-bit fault that the parked repair does not address. Two tool defects were found and fixed before the board was touched: `tools/cap_tang.sh` always reflashed, which reloads the FPGA and clears SDRAM, so it could not capture a cartridge session at all and now takes `--no-flash`; and `tools/decode_fetchtrace.py` printed its "value equals the preceding read" cross-check even when the pool read had not been captured, where an absent record and an empty history are both zero, which would have been a false independent confirmation. The entry-5 and entry-6 valid strips read invalid on page 3, and the cause is instrument-side rather than data-side: `stl_valid` returns `16'h1F00` for that page, marking display entries 0 to 4 only, so the pool-read records never set their own validity bit. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 44 were not rewritten, confirmed BRD-044 retains its canonical field order with a changed status and that BRD-048 is a new unique id, and validated this entry as entry 45 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of forty-five against the 100-entry limit.
+
+#### Next Steps:
+
+Apply the parked `cpu_en` repair of entries 39 and 40, which is now unblocked because the read fault it was parked for is measured, and require it to show both properties together per TCL-027, the white field gone and reach undiminished at `0x080002AC`, since a change that stops the machine earlier would make the surviving reads look correct. Treat the `0xFEE0` load as its own fault and do not fold it into that repair: it lost one bit between a correct `0xFFE0` return and the bus, it appears in one load of four, and no transaction-ordering change addresses it, so it needs an instrument that records the byte enables and the data bus of the store alongside the read. Any further board image must be selected with `tools/clock_plane_select.py` against a reference placement rather than by filtering one clock, and must require a measured-good `hclk` pip as well as good `clk67` spines, because this cycle's single wasted flash came from applying the rule to the cartridge clock and not the pixel clock. Capture from a cartridge session with `--no-flash`, always, or the flash clears the image that was loaded. BRD-019 still governs wording, since `clk16` remains on `*/TOP3` pips this board has never measured on every placement this tree produces, and the clock-plan measurement that would close it is still undone.
+
+#### Files Modified:
+
+- tools/cap_tang.sh
+- tools/clock_plane_select.py
+- tools/decode_fetchtrace.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
