@@ -1537,3 +1537,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 48 COMMIT Unreleased 2026-11-13T13:49:35-07:00
+
+#### Coming From:
+
+Unreleased 4fdf6d6
+
+#### Purpose:
+
+Re-read the whole log at the operator's request, to decide whether entries 36 to 47 were pursuing the right fault, and record what that reading changed.
+
+#### Outcome:
+
+The reading changes the plan and no code was touched. Four findings, none of them new measurements and all of them available in records this project already had. First, the two halves of the read-lag repair were already isolated by entry 37: the controller acknowledgement change alone moved nothing measurable, the output mux alone left the eleven failures, and driving the mux wider removed them only by cutting reach to `0x080000de`. Entries 46 and 47 then built the same two halves again from the control side and the data side and reproduced entry 37's outcome in both directions, which means entries 38 to 47 produced no new information about the repair beyond what entry 37 already contained. Second, entry 33 identified three departures from upstream and its Next Steps named the experiment to test the one that sits on this boundary: put `clk16` and `clk67` back on upstream's `CLKOUT` assignment, one PLL and one VCO, and drop the `CLOCK_LOC "clk67" BUFG`. No entry after 33 mentions that experiment, so the single test the log itself recommended for this boundary has never been run, while ten entries were spent editing the logic of a controller whose only functional deviation from upstream is the `[31:15]` to `[31:16]` repair, which is inert because the masked high half is overwritten on the next collect. Third, the harness cannot see the quantity in dispute. `sim_main.cpp` derives `clk50`, `clk16` and `clk67` from one counter with ideal wires, so it models static phase exactly and arrival delay not at all, and the board has twice been shown to be decided by exactly the class it cannot model: BRD-047 separates two bitstreams of one netlist by a `clk67` spine and obtains a different program, and BRD-048 separates two by an `hclk` spine and obtains a picture against no picture. A correction to my own first reading is recorded rather than dropped: I initially concluded the harness was blind to phase as well, and computing its own clock expressions shows the opposite, since shifts 0, 3, 6 and 9 put a `clk16` edge where `clk67` is high and the other eight put it where `clk67` is low, so entry 38's twelve-offset sweep did test phase and did answer it; what it could not test is arrival, and that narrower claim is the one now written down as TCL-031. Fourth, reading the RTL for the handshake found a hazard the project has never recorded: `cpu_ready` is registered in the `clk67` domain, leaves `sdram_gba` as the bare net `cpu_mem_ready` with no synchroniser, and is consumed as a level by `gba_memory`, `gba_dma` and a third block in the `clk16` domain, while being one `clk67` cycle wide, a quarter of the receiving period; the comment at `gba_memory.sv:385` calls it a single-`clk16` pulse, which the RTL does not produce. That is BRD-049, and it makes a board measurement of this boundary unattributable to logic while BRD-019 remains open. Separately the objective had drifted: reach is measured against the blink loop at `0x080002AC` of a purpose-built test cartridge, and even a perfect read path does not produce a picture from a retail title because BRD-045, Super Mario Advance wedging in `REQ1_WAIT` behind a DMA3 IWRAM write, has been verified since entry 43 and untouched. Nothing was built, nothing was deployed, the tree is clean at `4fdf6d6` and `sdram_gba` is byte-identical to the image the board has run. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 47 were not rewritten, confirmed BRD-049 and TCL-031 carry unique ids and the canonical field order, and validated this entry as entry 48 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set, `None.` for Files Modified because no engineering file changed, and a count of forty-eight against the 100-entry limit.
+
+#### Next Steps:
+
+Run entry 33's experiment before any further work on the read lag, because it is the only test that separates a clock-plan cause from a logic cause and it has been available since entry 33: move `clk16` and `clk67` back to upstream's `CLKOUT` assignment on one VCO and drop `CLOCK_LOC "clk67" BUFG`, then read the literal pool on the board with the v7 instrument, which returns `0x00000403` if the lag was phase-dependent and `0x0000FFE0` if it was not, and report reach beside it per TCL-027. Treat that as a board question and not a simulation one, because TCL-031 establishes the harness has no authority over arrival and the model reproduced the lag deterministically with ideal wires, so a model result there settles nothing either way. Expect to have to satisfy the clock-plane gate non-strictly, since apicula models plane pips only for `CLKOUT0` and `CLKOUT2` and upstream's assignment puts `clk67` on a lane without one. Second and independent of the first, close BRD-049's hazard with a synchroniser on the `cpu_mem_ready` crossing, which is a mechanism change that neither state machine's logic depends on and can be built and reasoned about without the board; it is worth doing even if the clock-assignment test explains the lag, because a one-cycle strobe sampled directly across domains is unsafe regardless of whether it is the current fault. Third, restate the objective before spending another cycle on reads: a retail title booting and drawing is the goal, reach against `test_logo`'s blink loop is a proxy, and BRD-045 is a verified second fault on that path which no read-path change addresses. Do not re-apply the control-path deferral of entry 46 or the pipelined pair of entry 47, both measured and falsified; do not re-run entry 38's phase sweep expecting it to say something about arrival; and keep every cartridge-read claim going through `tools/check_cartread.py` with reach quoted beside accuracy.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
