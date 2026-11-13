@@ -1507,3 +1507,33 @@ Revise the plan before another attempt, because the enable-deferral shape entrie
 - User Test: NOT RUN
 
 ---
+
+## 47 COMMIT Unreleased 2026-11-13T13:38:23-07:00
+
+#### Coming From:
+
+Unreleased 39babb4
+
+#### Purpose:
+
+Replace the failed control-path repair with the data-path one the operator chose, by reading both halfwords of a 32-bit cartridge access from the controller before it acknowledges, so the word is complete when the CPU takes it.
+
+#### Outcome:
+
+The controller's read pipeline was measured for the first time, and the pipelined-read change built on that measurement does not work; nothing was built or deployed. A `TINYGBA_MEM32DBG` trace was added to `sdram_gba` and armed on a 32-bit cartridge read, printing the cycle counter, the registered command, DQ and the ready and port signals for twenty-six consecutive clk67 cycles. It shows the structure directly: a command registered in `cycle[0]` produces data on the pin in `cycle[3]` of the same four-cycle group, so the pipeline presents a word three clk67 after the command register, and each halfword of a 32-bit access occupies a whole group, the low halfword in `cycle[3]` of one group and the high halfword in `cycle[3]` of the next, with `cpu_ready` asserting after the first. That corrects the assumption behind the previous cycle's failed deferral, which had the completion one cycle later than it is. The change implemented from it issues the second READ one clk67 after the first rather than one group later, with auto-precharge moved from the first command to the second so the row stays open across the pair, captures the low halfword in `cycle[3]` and the high halfword on the following cycle, and asserts `cpu_ready` only once both are in `cpu_rdata`. The boot logo and BIOS still run, and 156,000 more CPU cycles execute than in the unmodified tree, but the machine completes one pipelined read in 300 million steps and that read assembled `0xff240000`, with the low halfword empty, and no cartridge data read is consumed at all. Stalling rises from 66.4 to 79.6 percent, so the CPU waits rather than diverging: instruction fetches are 32-bit reads as well, they take the same path, and the first one does not complete correctly, which stops the machine before it can reach the checks. The attempt is recorded rather than pursued because three separate changes to this interface have now each been built, measured and falsified, and the measured trace is the durable result: the honest next step is to instrument the pair path itself, not to guess at it again. The tree is restored to `39babb4` with the change preserved outside the repository, so `sdram_gba` is byte-identical to the version the board has been running. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 46 were not rewritten, and validated this entry as entry 47 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set, `None.` for Files Modified because no engineering file changed, and a count of forty-seven against the 100-entry limit.
+
+#### Next Steps:
+
+Decide how to proceed rather than build again on the same assumption, because the pipeline is now measured and the remaining unknown is the pair path itself. The specific question to answer with the next instrument is why the low halfword read as empty and why only one pair completed: the trace should print `rd32_pair`, `rd32_fin`, `port[0]`, `addr_latch[0]`, `ds_latch[0]` and `dq_in` on every cycle of a single cartridge access, from the request being latched to `cpu_ready`, so the pair can be corrected against evidence instead of inference. One concrete suspicion to test first is that instruction fetches share the path: `gba_memory` drives `bram_be` as `4'b1111` for ROM fetches, so a fetch is a 32-bit read and takes the new branch, which is why the machine stops at the first fetch rather than at the checks; if the pair is to be scoped to data reads only, the controller needs a signal that distinguishes the two, and `gba_memory` does not currently send one. Do not re-apply the control-path deferral of entry 46, which is disproven. BRD-044 remains confirmed and unaffected: the board read of `0x080002E0` returning `0x0000FFE0` stands, and the repair is still parked. Any board image still needs `tools/clock_plane_select.py` selection with a measured-good `hclk` pip (BRD-048); the Tang was powered down by the operator during this cycle and no board work was done.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
