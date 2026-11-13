@@ -881,6 +881,8 @@ always @(posedge clk16) ram_addr_d1 <= ram_addr[27:0];
 (* keep *) reg [4:0]    s_vram;           // VRAM store ever carried
                                           // {7FFF, 0000, FFE0, 001F, 03E0}
 (* keep *) reg [2:0]    s_dc;             // DISPCNT written with {FFE0, 0403, 0000}
+(* keep *) reg [15:0]   last_dc_data;     // data carried by the last write to 0x04000000
+reg  [7:0]  dc403_n;                      // writes of 0x0403 to DISPCNT, saturating
 (* keep *) reg [27:0]   last_cart_addr;
 (* keep *) reg          last_cart_thumb;
 (* keep *) reg [27:0]   last_vram_addr;
@@ -916,6 +918,8 @@ always @(posedge clk16) begin
         s_iw            <= 1'b0;
         s_vram          <= 5'd0;
         s_dc            <= 3'd0;
+        last_dc_data    <= 16'd0;
+        dc403_n         <= 8'd0;
         last_cart_addr  <= 28'd0;
         last_cart_thumb <= 1'b0;
         last_vram_addr  <= 28'd0;
@@ -956,6 +960,9 @@ always @(posedge clk16) begin
                     16'hFFE0: s_dc[2] <= 1'b1;
                     default:  ;
                 endcase
+                last_dc_data <= ram_wdata[15:0];
+                if (ram_wdata[15:0] == 16'h0403 && ~&dc403_n)
+                    dc403_n <= dc403_n + 8'd1;
             end
         end
         if (tr_mmio) begin
@@ -1019,7 +1026,13 @@ always @(*) begin
         2'd1: case (tr_ent)
                   3'd0: case (tr_wd)
                             2'd0: tr_word_mux = {25'h0, gpu_dc};      // live DISPCNT
-                            2'd1: tr_word_mux = {26'h0, s_dc, mm_wrapped, mm_n};
+                            // 25 bits, not 26: the padding was one bit too wide, so
+                            // the 33-bit concatenation was silently truncated into
+                            // this 32-bit register and the low 32 bits were what the
+                            // decoder already read.  Written out as the width it has
+                            // instead of the width it claimed, so
+                            // tools/check_ring_width.py can check it.
+                            2'd1: tr_word_mux = {25'h0, s_dc, mm_wrapped, mm_n};
                             2'd2: tr_word_mux = {16'h0, dc_wr};
                             default: tr_word_mux = {30'h0, halt, gbaon};
                         endcase
@@ -1421,7 +1434,7 @@ reg  [3:0]  stl_pidx;
 reg         stl_pwen;
 reg  [31:0] stl_pwdata;
 (* keep *) reg          stl_frz;
-(* keep *) reg [1:0]    stl_cause;        // bit 0 stall, bit 1 time
+(* keep *) reg [2:0]    stl_cause;        // bit 0 stall, bit 1 time, bit 2 cart->BIOS
 (* keep *) reg [31:0]   stl_gap;          // clk16 since the last completed cycle, live
 (* keep *) reg [23:0]   stl_maxgap;       // longest gap ended by a completed cycle, pre-freeze
 reg  [27:0] stl_age;                      // clk16 since gbaon, stops at bit 27
@@ -1447,8 +1460,88 @@ reg  [2:0]  stl_st_prev;
 (* keep *) reg [15:0]   f_dbgdma;
 (* keep *) reg [31:0]   f_dma_rd, f_dma_wr;
 
+// ---------------------------------------------------------------- layout v6
+// Control-flow records (core-log entry 42's Next Steps).  Entry 41 answered "is
+// the CPU alive" with the stall tail and entry 42 showed the picture is still a
+// white field on an overlay-free image, so the open question is no longer whether
+// the CPU runs but where it goes and what it does to the display on the way.
+//
+// Two things are watched here.  The first is the handover: on test_logo.gba the
+// CPU is measured inside the cartridge's own blink loop, while Super Mario
+// Advance is measured alive in BIOS code after exactly 84 cartridge fetches, and
+// the difference between those two is a control-flow transition neither
+// instrument could see.  A transition is a completed BIOS-region fetch that
+// follows a cartridge fetch, which covers both an ordinary return to the BIOS and
+// an exception taken through the 0x00000018 vector -- the case BRD-042 is a lead
+// about.  The second is DISPCNT, because the cartridge's `strh 0x0403` is issued
+// on the bus (BRD-023, BRD-025) while the register keeps its BIOS value (BRD-022,
+// BRD-024), and nothing has yet measured both ends of that chain in one image.
+//
+// Every record here is sticky: it says "this happened at least once since gbaon",
+// never "this is happening now".  That is deliberate.  A live sample of a cycling
+// register aliases across frames when the capture and the raster are locked, which
+// is BRD-014's and TCL-010's failure mode, and it is what made entry 21's freeze
+// reading unsafe (entry 22).  A sticky bit cannot alias.
+(* keep *) reg        s_cart_seen;   // a cartridge fetch since the last BIOS fetch
+(* keep *) reg        s_xfer;        // a cartridge -> BIOS transition ever happened
+(* keep *) reg [7:0]  xfer_n;        // how many, saturating
+(* keep *) reg        s_vec8;        // fetched the 0x00000008 vector (SWI)
+(* keep *) reg        s_vec18;       // fetched the 0x00000018 vector (IRQ)
+(* keep *) reg        s_vec1c;       // fetched the 0x0000001C vector (FIQ)
+(* keep *) reg        s_hnd;         // read 0x03FFFFFC, where the IRQ pointer lives
+(* keep *) reg [31:0] hnd_val;       // the word found there
+(* keep *) reg [7:0]  hnd_n;         // how many such reads, saturating
+(* keep *) reg        s_cfc;         // fetched 0x080000FC, the ARM IRQ handler
+(* keep *) reg [31:0] bios_fetch;    // BIOS-region instruction fetches
+reg         stl_hnd_pend;            // the handler-pointer read's data arrives now
+
+// Register side of the DISPCNT question, latched in clk50 where `gpu_dc` lives so
+// this adds no clock-domain crossing.  `gpu_dc` is
+// {BLDCNT effect[1:0], BG3, BG2, BG1, BG0, Forced_Blank}, bit 0 first, so the three
+// values this cartridge can put DISPCNT in are exact constants:
+//   0x0000  forced blank set, every BG off, no effect  -> 7'b0000001
+//   0x0403  forced blank clear, BG2 on                -> 7'b0001000
+//   0x1F80  forced blank set, BG0..3 on (BIOS handover) -> 7'b0011111
+// The first one is the trap: forced blank is active HIGH in bit 7 of DISPCNT, so
+// 0x0000 is not the all-clear value and an all-zero compare would have measured
+// nothing at all.
+(* keep *) reg        s_gpu0;        // drawer saw DISPCNT 0x0000: forced blank, no BGs
+(* keep *) reg        s_gpu403;      // drawer saw forced blank clear with BG2 on
+(* keep *) reg        s_gpu_bios;    // drawer saw forced blank set with BG0..3 on
+
+always @(posedge clk50) begin
+    if (~resetn) begin
+        s_gpu0    <= 1'b0;
+        s_gpu403  <= 1'b0;
+        s_gpu_bios <= 1'b0;
+    end else if (~gbaon) begin
+        s_gpu0    <= 1'b0;
+        s_gpu403  <= 1'b0;
+        s_gpu_bios <= 1'b0;
+    end else begin
+        if (gpu_dc == 7'b0000001) s_gpu0    <= 1'b1;
+        if (gpu_dc == 7'b0001000) s_gpu403  <= 1'b1;
+        if (gpu_dc == 7'b0011111) s_gpu_bios <= 1'b1;
+    end
+end
+
+wire stl_fetch  = rom_en & cpu_en & ~halt;                   // a completed fetch
+wire stl_fcart  = stl_fetch & (rom_addr[27:24] == 4'h8);     // from the cartridge
+wire stl_fbios  = stl_fetch & (rom_addr[27:24] == 4'h0);     // from the BIOS
+wire stl_fxfer  = stl_fbios & s_cart_seen;                   // the handover itself
+wire stl_fvec8  = stl_fbios & (rom_addr[27:0] == 28'h0000_0008);
+wire stl_fvec18 = stl_fbios & (rom_addr[27:0] == 28'h0000_0018);
+wire stl_fvec1c = stl_fbios & (rom_addr[27:0] == 28'h0000_001C);
+wire stl_fcfc   = stl_fetch & (rom_addr[27:0] == 28'h0800_00FC);
+wire stl_hndrd  = ram_cen & ~ram_wen & cpu_en & ~halt &
+                  (ram_addr[27:0] == 28'h03FF_FFFC);
+
 wire stl_go   = stl_cyc & ~stl_frz;
-wire stl_trig = ~stl_frz & (stl_gap[22] | stl_age[27]);
+// v6 adds the handover to the two time-based triggers rather than replacing them.
+// The stall trigger is cheap and entry 41 measured it never fire, and the 8-second
+// trigger is what still yields a coherent window for a cartridge that never returns
+// to the BIOS at all -- which is exactly what test_logo.gba does.
+wire stl_trig = ~stl_frz & (stl_gap[22] | stl_age[27] | stl_fxfer);
 wire stl_stch = stl_mem_state[2:0] != stl_st_prev;
 
 always @(posedge clk16) begin
@@ -1486,6 +1579,18 @@ always @(posedge clk16) begin
         f_dbgdma    <= 16'd0;
         f_dma_rd    <= 32'd0;
         f_dma_wr    <= 32'd0;
+        s_cart_seen <= 1'b0;
+        s_xfer      <= 1'b0;
+        xfer_n      <= 8'd0;
+        s_vec8      <= 1'b0;
+        s_vec18     <= 1'b0;
+        s_vec1c     <= 1'b0;
+        s_hnd       <= 1'b0;
+        hnd_val     <= 32'd0;
+        hnd_n       <= 8'd0;
+        s_cfc       <= 1'b0;
+        bios_fetch  <= 32'd0;
+        stl_hnd_pend <= 1'b0;
     end else begin
         // Ring.
         stl_pend <= stl_go;
@@ -1542,10 +1647,35 @@ always @(posedge clk16) begin
             stl_dma_wr_addr <= dma_addr;
         end
 
+        // Layout v6: control-flow records.  `s_cart_seen` is set by a cartridge
+        // fetch and cleared by a BIOS fetch, so it means "the last instruction the
+        // CPU fetched came from the cartridge"; a BIOS fetch while it is set is the
+        // handover.  The BIOS runs before any cartridge fetch, so this cannot fire
+        // on the boot sequence.
+        if (stl_fcart) s_cart_seen <= 1'b1;
+        if (stl_fbios) s_cart_seen <= 1'b0;
+        if (stl_fxfer) begin
+            s_xfer <= 1'b1;
+            if (~&xfer_n) xfer_n <= xfer_n + 8'd1;
+        end
+        if (stl_fvec8)  s_vec8  <= 1'b1;
+        if (stl_fvec18) s_vec18 <= 1'b1;
+        if (stl_fvec1c) s_vec1c <= 1'b1;
+        if (stl_fcfc)   s_cfc   <= 1'b1;
+        if (stl_fbios & ~&bios_fetch) bios_fetch <= bios_fetch + 32'd1;
+        // The handler pointer's data arrives on the cycle after the completed access,
+        // for the same reason the ring samples rom_data a cycle late.
+        stl_hnd_pend <= stl_hndrd;
+        if (stl_hndrd) begin
+            s_hnd <= 1'b1;
+            if (~&hnd_n) hnd_n <= hnd_n + 8'd1;
+        end
+        if (stl_hnd_pend) hnd_val <= ram_rdata;
+
         // Freeze.
         if (stl_trig) begin
             stl_frz    <= 1'b1;
-            stl_cause  <= {stl_age[27], stl_gap[22]};
+            stl_cause  <= {stl_fxfer, stl_age[27], stl_gap[22]};
             f_mem      <= stl_mem_state;
             f_flags    <= stl_flags;
             f_dma_addr <= dma_addr;
@@ -1574,7 +1704,7 @@ always @(*) begin
         2'd0, 2'd2: stl_word_mux = stl_ring_word;
         // Page 1 entries 5..7: the freeze snapshot.  Fixed once frozen.
         2'd1: case (tr_sel[4:0])
-                  5'd20: stl_word_mux = {16'h57A1, 3'b000, stl_frz, 2'b00, stl_cause,
+                  5'd20: stl_word_mux = {16'h57A2, 2'b00, stl_frz, 2'b00, stl_cause,
                                          3'b000, stl_full, stl_wp};
                   5'd21: stl_word_mux = {f_mem, 8'h00, f_flags};
                   5'd22: stl_word_mux = {4'h0, f_dma_addr};
@@ -1604,6 +1734,19 @@ always @(*) begin
                   5'd9:  stl_word_mux = {stl_st_age, stl_st_chg};
                   5'd10: stl_word_mux = {16'h0000, stl_debug_dma[15:0]};
                   5'd11: stl_word_mux = {15'h0000, dma_eepromcount};
+                  // Layout v6: the handover and the exception records.
+                  5'd12: stl_word_mux = {5'h00, 8'h00, s_cfc, s_hnd, s_vec1c,
+                                         s_vec18, s_vec8, 3'b000, s_xfer,
+                                         s_cart_seen, 1'b0, hnd_n};
+                  5'd13: stl_word_mux = {16'h0000, 8'h00, xfer_n};
+                  5'd14: stl_word_mux = bios_fetch;
+                  5'd15: stl_word_mux = hnd_val;
+                  // Layout v6: the DISPCNT landing chain, register side.
+                  5'd16: stl_word_mux = {18'h00000, s_gpu_bios, s_gpu403, s_gpu0,
+                                         s_dc, dc403_n};
+                  5'd17: stl_word_mux = {24'h0, gpu_dc, 1'b0};
+                  5'd18: stl_word_mux = {16'h0000, last_dc_data};
+                  5'd19: stl_word_mux = {16'h0000, dc_wr};
                   default: stl_word_mux = 32'd0;
               endcase
     endcase
@@ -1615,7 +1758,7 @@ assign stl_word  = stl_word_mux;
 assign stl_valid = (tr_sel[6:5] == 2'd0) ? {8'h00, stl_vld[7:0]}
                  : (tr_sel[6:5] == 2'd2) ? {8'h00, stl_vld[15:8]}
                  : (tr_sel[6:5] == 2'd1) ? {{3{stl_frz}}, 13'h0000}
-                 :                         16'h0700;
+                 :                         16'h1F00;
 `endif
 
 ////////////////////////////

@@ -122,6 +122,25 @@ def balanced_brace(src, start):
 # concatenation on the right, which is the form these packings are written in.
 ASSIGN = re.compile(r"\+\:\s*(\d+)\s*\]\s*<=\s*\{")
 
+# `name = { ... }` -- a plain assignment of a concatenation to a declared register
+# or net, optionally after a `case` label (`5'd20: stl_word_mux = {...}`).  The
+# declared width is the size the right-hand side must total.  This form is the one
+# every readout word in the stall-trace mux uses, and it truncates just as silently
+# as the `+:` form: a 33-bit concatenation assigned to a 32-bit reg drops its top
+# bit with no warning.  It found one on its first run -- the status word packed
+# `{26'h0, s_dc, mm_wrapped, mm_n}`, 33 bits into 32 -- which was harmless only
+# because the bit it dropped was padding, and which is exactly why it is worth
+# checking rather than recomputing by hand.
+PLAIN = re.compile(r"(?:^|:)\s*([A-Za-z_]\w*)\s*=\s*\{", re.M)
+
+# `name = other;` -- a plain whole-identifier assignment.  Widths have to agree or
+# the right-hand side is truncated or zero-extended, exactly as for a
+# concatenation, and a readout word assigned straight from a narrower register
+# would read as a plausible smaller number rather than as an error.  The v6
+# readout assigns four words this way, so the form is checked rather than left
+# to inspection.
+PLAIN_IDENT = re.compile(r"(?:^|:)\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*;", re.M)
+
 # `[ {name, K'd0} +: N ]` -- an entry index built by shifting a counter into
 # place.  K must equal log2(N), or consecutive entries overlap (K too small) or
 # leave gaps (K too large).  Both are silent: the array is simply indexed wrongly
@@ -145,6 +164,64 @@ def check_strides(src, path):
                   f"{1 << zeros} but the slice is {width} bits", file=sys.stderr)
             bad += 1
     return seen, bad
+
+
+def check_plain(src, path, widths):
+    """Every `name = { ... }` must total the declared width of `name`.
+
+    Returns (checked, failed, unresolved) so main() can decide whether the gate
+    actually saw anything, and whether it understood what it saw.  A `case` label
+    prefix is allowed; the expression is only ever measured, never interpreted.
+    """
+    checked = failed = unresolved = 0
+    for m in PLAIN.finditer(src):
+        name = m.group(1)
+        declared = widths.get(name)
+        body, _ = balanced_brace(src, m.end() - 1)
+        if body is None:
+            print(f"{path}: unterminated concatenation near offset {m.start()}",
+                  file=sys.stderr)
+            return checked, failed + 1, unresolved
+        if declared is None:
+            # A name whose declaration this parser cannot size.  Refuse rather
+            # than guess, for the same reason width_of() refuses.
+            unresolved += 1
+            continue
+        total = 0
+        bad_terms = []
+        for t in split_terms(body):
+            t = re.sub(r"//.*", "", t).strip()
+            if not t:
+                continue
+            w = width_of(t, widths)
+            if w is UNKNOWN:
+                bad_terms.append(t)
+            else:
+                total += w
+        line = src[: m.start()].count("\n") + 1
+        if bad_terms:
+            print(f"{path}:{line}: cannot resolve {bad_terms} in the packing for "
+                  f"`{name}` -- it is NOT being checked; teach width_of() about it",
+                  file=sys.stderr)
+            return checked, failed, unresolved + 1
+        checked += 1
+        if total != declared:
+            failed += 1
+            print(f"{path}:{line}: concatenation for `{name}` is {total} bits, "
+                  f"declared {declared} bits", file=sys.stderr)
+    for m in PLAIN_IDENT.finditer(src):
+        dst, srcexpr = m.group(1), m.group(2)
+        dw, sw = widths.get(dst), widths.get(srcexpr)
+        if dw is None or sw is None:
+            unresolved += 1
+            continue
+        checked += 1
+        if dw != sw:
+            failed += 1
+            line = src[: m.start()].count("\n") + 1
+            print(f"{path}:{line}: `{dst}` is {dw} bits but is assigned "
+                  f"`{srcexpr}`, which is {sw} bits", file=sys.stderr)
+    return checked, failed, unresolved
 
 
 def main(path, context=()):
@@ -198,10 +275,14 @@ def main(path, context=()):
         print(f"{path}: no packings matched -- the gate checked nothing, which is "
               f"a failure, not a pass", file=sys.stderr)
         return 2
-    if failed or stride_bad:
+    plain_checked, plain_failed, plain_unresolved = check_plain(src, path, widths)
+    if plain_unresolved:
+        return 2
+    if failed or stride_bad or plain_failed:
         return 1
     print(f"  packings: {checked} checked, all widths match; "
-          f"strides: {stride_seen} checked, all match their slice size")
+          f"strides: {stride_seen} checked, all match their slice size; "
+          f"plain assignments: {plain_checked} checked, all match")
     return 0
 
 

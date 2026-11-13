@@ -1382,3 +1382,35 @@ None.
 - User Test: FAIL
 
 ---
+
+## 43 COMMIT Unreleased 2026-11-12T23:06:00-07:00
+
+#### Coming From:
+
+Unreleased 8549292
+
+#### Purpose:
+
+Build the control-flow instrument entry 41 specified and entry 42 approved, and use it to place the white screen that eight cycles of display-side instruments could not explain.
+
+#### Outcome:
+
+The white screen is explained, and it is a wrong word on the bus rather than anything after it. Layout `v6` keeps the `v5` stall ring and adds two things to `TINYGBA_STALLTRACE`: a third freeze cause, the first BIOS-region instruction fetch that follows a cartridge fetch, and sixteen new sticky records covering the handover, the exception vectors, the handler pointer the BIOS IRQ stub reads from `0x03FFFFFC`, whether `0x080000FC` is ever fetched, and both ends of the DISPCNT chain, the data carried by each write to `0x04000000` and the value the GPU drawer actually registers. Every new record is sticky, because a live sample of a cycling register aliases across frames and made entry 21's reading unsafe. Two instrument defects were found and fixed before any capture was read: `tools/check_ring_width.py` covered only `+:` part-select packings and none of the readout muxes' plain assignments, and extending it to those forms plus whole-identifier assignments found a real pre-existing slip, the page-1 status word packing 33 bits into 32, which was harmless only because the bit dropped was padding. The gate now checks 51 such assignments where it checked none, and both new checks were mutation-tested. My own first draft also had DISPCNT `0x0000` decoded as `7'b0000000` when forced blank is active high and the correct comparison is `7'b0000001`, which would have measured nothing; it was corrected before the netlist was built. The netlist needed a fresh build directory and 583,265 iterations at seed 9, the only seed of eight to close: seeds 1, 2, 3 and 5 all aborted with BRD-024's `Net hclk5 has no route to the FCLK of video.hdmi.serializer.gwSer0`, which is now recorded as a seed property rather than a run of bad luck, and seeds 4, 6, 7 and 8 were still routing at 15,000 to 43,000 unrouted nets when seed 9 finished and were stopped. `build/v6_s9` passed every gate with zero hold violations, `clk16` 19.543, `clk50` 55.559, `clk67` 32.631 under the documented GBATang multicycle allowance, `hclk` 102.459 MHz and cross-domain paths at 42.66 and 39.40 ns against 59.70, `clk67` on both measured-good spines, and all sixteen new registers were confirmed present and driven in the routed netlist with the flip-flop count rising 116 against an expected 115. Deployed one-wire as `.fs` SHA-256 `71324ac4442c8ac01a80efbaaf1f1c81c2bed7ea3e4a94b88dc0a63b13fd36d6` and read with two cartridges. With `test_logo.gba`, five page-3 frames over eight seconds agree: 213 writes to `0x04000000`, none of them carrying `0x0403`, the last carrying `0xFFE0`, and the drawer holding forced blank with BG0..BG3 set, with `0x0000` seen, `0x0403` never seen and `0x1F80` seen. So the cartridge's `strh` is issued, the CPU is past it per BRD-040, and the value on the bus is `0xFFE0`, which sets exactly the forced-blank and BG bits observed and paints the white backdrop entry 42 saw; the word immediately before `0x0403` in the cartridge's literal pool is `0x0000FFE0`, so a literal load returning its predecessor explains it, and that is the one-word lag of BRD-038 and BRD-039 arriving on the board at last, recorded as BRD-044 and left as a lead because the pool read itself was not captured. With Super Mario Advance the stall trigger fired instead of the time trigger: after 9,309,508 completed cycles the machine wedged in `REQ1_WAIT` with `dma_on` and `dma_ena` high, `cpu_en` low, `dma_addr=0x03001190`, the arbiter on channel 3 and zero `sdram_ready` pulses in a saturated 65,535 clk16 state, and three frames over six seconds all read zero completed cycles after the freeze, which makes the `REQ1_START` deadlock entry 14 read in the source and BRD-041 reported as unobserved a measured board fault on this load, and establishes the machine is bimodal across loads rather than contradicting BRD-041's three loads. The same build never fetches `0x080000FC` under the game, never transitions from cartridge to BIOS after handover, and reads `0x00000000` from `0x03FFFFFC`, which closes both of BRD-042's alternatives with measurement while noting the pointer reads happen during the intro before handover. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 42 were not rewritten, confirmed the five new records carry unique ids and the canonical field order, and validated this entry as entry 43 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of forty-three against the 100-entry limit.
+
+#### Next Steps:
+
+Capture the literal read itself, because BRD-044 is the whole remaining distance and it is one measurement away: arm the existing `v5` tail ring on a 32-bit data read of `0x080002E0` with the region nibble and image bound checked per TCL-029, keep the `v6` controls, rebuild as layout `v7` and read whether the returned word is `0x00000403` or `0x0000FFE0`, since the former kills the lead and moves the search back to the address path while the latter confirms the lag on the board and makes the parked `cpu_en` repair of entries 39 and 40 the next change -- and that repair must then be required to show both properties together, the white field gone and reach undiminished, per TCL-027. Treat BRD-045 as the second fault and do not conflate the two: the DMA deadlock stops Super Mario Advance in the first second on some loads and not others, so any run must take at least three loads and report which behaviour appeared, and the `REQ1_START` wait on `sdram_ready` is a separate change from the read lag even though both end in the same white screen. Do not rebuild seed 1, 2, 3 or 5 for this netlist; seed 9 is the one recorded clean placement and seeds 4, 6, 7 and 8 never converged. Keep `tools/check_ring_width.py`'s new plain and identifier checks in the build, since they found a real slip on their first run, and re-read any new readout word against them because a truncated packing decodes to plausible values. BRD-019 still governs wording, since `clk16` sat on six `*/TOP3` pips this board has never measured on this placement, and the clock-plan measurement that would close it remains undone.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- tools/check_ring_width.py
+- tools/decode_fetchtrace.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

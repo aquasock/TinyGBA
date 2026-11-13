@@ -1018,3 +1018,74 @@ Field meanings:
     - "This repository, `build/test/roms/sma.gba` disassembled with capstone at `0x080000C0` to `0x08000340` and its literals at `0x08000270` and `0x08000274`"
     - "This repository, records BRD-025, BRD-029 and BRD-041"
   verification: "Not verified. The crt0 reading is static, and the coincidence of addresses and the sound-DMA difference are observations that no captured transition yet explains."
+
+- record_id: BRD-043
+  kind: BOARD
+  topic_id: BRD
+  title: "The cartridge's `DISPCNT <= 0x0403` store is issued with 0xFFE0, so the display is never enabled"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "`build/v6_s9` (`TINYGBA_FETCHTRACE` + `TINYGBA_STALLTRACE`, layout `v6`, `.fs` SHA-256 `71324ac4442c8ac01a80efbaaf1f1c81c2bed7ea3e4a94b88dc0a63b13fd36d6`) adds sticky records of every write to `0x04000000` and of the DISPCNT value the GPU drawer registers. With `test_logo.gba`, five page-3 frames spread over eight seconds agree on every field: 213 writes to `0x04000000`, **zero of them carrying `0x0403`**, `last_dc_data=0xFFE0`, and the bus saw `0x0000=1`, `0x0403=0`, `0xFFE0=1`. The drawer meanwhile holds forced blank with BG0..BG3 all enabled, and its sticky states read: cartridge entry value `0x0000` seen, display-on value `0x0403` **never seen**, BIOS handover value `0x1F80` seen. The two writes the cartridge makes to `0x04000000` are therefore `0x0000` and then `0xFFE0`, not `0x0403`; `0xFFE0` has bit 7 (forced blank) and bits 8..11 (BG0..BG3) set, which is exactly the drawer state observed and produces the white backdrop that entry 42 saw. BRD-040 independently measured this same cartridge executing the blink loop past the store, so the store is issued and the CPU is past it; what is wrong is the data it carries."
+  consequence: "This is the fault the project has been circling since BRD-022, stated on the board for the first time with both ends of the chain measured in one image: the store is issued, the drawer never receives `0x0403`, and the value it receives instead is `0xFFE0`. It also withdraws BRD-023's withdrawn lead. Ordering the ring entry in BRD-023 that carried `ram_addr=0x04000000`, `ram_wdata=0xFFE0FFE0` was correct data seen through a broken packing, and entry 27 was right to withdraw it only because the *packing* was wrong, not because the observation was. Do not look for the fault between the CPU and the register: the register is faithfully storing what the bus delivered, and the bus delivered the wrong word."
+  sources:
+    - "This repository, `build/v6_s9/` — gates, routed netlist and bitstream, seed 9"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: `s_dc`, `last_dc_data`, `dc403_n`, `s_gpu0`/`s_gpu403`/`s_gpu_bios`"
+    - "This repository, `tools/decode_fetchtrace.py --layout v6`, page 3 entries 3..4"
+    - "Captures `/tmp/v6/f04.png` through `/tmp/v6/f31.png`, 2026-11-12, MJPEG pinned at 1920x1080 per BRD-012"
+  verification: "Observed on the board 2026-11-12 after flashing `build/v6_s9` one-wire and streaming `build/test/test_logo.gba` over `/dev/ttyUSB1`. Five page-3 frames, each classified by its page strip first (TCL-019), agree field for field; all 16 new v6 registers were confirmed present and driven in the routed netlist before the load (`tools/gatelevel_report.py`, 0 undriven bits) and the flip-flop count rose by 116 against an expected 115."
+
+- record_id: BRD-044
+  kind: BOARD
+  topic_id: BRD
+  title: "LEAD: the 0x0403 store carried 0xFFE0 because the literal load returned the preceding pool word"
+  status: LEAD
+  verified_date: 2026-11-12
+  statement: "BRD-043 measures that the cartridge's second `strh` to `0x04000000` carries `0xFFE0` where the source says `0x0403`. The instruction is `ldr r0, =0x0403` followed by `strh r0, [r11]`, so a wrong stored value means the literal load returned a different word. In `build/test/test_logo.gba` the literal `0x00000403` sits at image offset `0x2E0`, and the word immediately before it at `0x2DC` is `0x0000FFE0` -- exactly the value measured on the bus. The same one-word lag is what BRD-038 and BRD-039 characterised in the Verilator model under the real SDRAM controller: every 32-bit cartridge data read returns the word belonging to the previous transaction, eleven failures out of 532 reads, all 32-bit, with repeated reads of one address converging. The first store to `0x04000000` is unaffected (`0x0000` reaches the drawer, BRD-043), which is consistent with a lag that only bites the first read of a distinct address."
+  consequence: "This is the leading mechanism and it is not yet a finding, because the pool read itself was not captured: layout v6 records the handler-pointer read and the exception vectors but not the data returned by the `0x0403` literal load. If it holds, it joins the board to the model for the first time -- the one-word read lag has so far been recorded as a model-only defect (BRD-033), and every previous attempt to make it explain the board's blank picture was made against a corrupt or unavailable measurement. The decisive instrument is a sticky record of the 32-bit data reads whose returned word disagrees with a known value, or a tail ring armed on `ram_addr == 0x080002E0`, which is cheap because the address is in the image and satisfies TCL-029. Do not apply the parked `cpu_en` repair of entries 39 and 40 until that trace exists."
+  sources:
+    - "This repository, `build/test/test_logo.gba`, literal pool at image offsets `0x2D0`..`0x2EC`; `0x2DC` holds `0x0000FFE0` and `0x2E0` holds `0x00000403`"
+    - "This repository, records BRD-038, BRD-039 and BRD-043"
+    - "This repository, `build/test/test.s`: the `ldr r0, =0x0403` / `strh r0, [r11]` pair at the end of the checks"
+  verification: "Not verified as a mechanism. The pool contents and the measured bus value are both recorded facts and they agree, but no capture shows the word the load actually returned, so the inference is stated as a lead."
+
+- record_id: BRD-045
+  kind: BOARD
+  topic_id: BRD
+  title: "Super Mario Advance wedges in REQ1_WAIT behind a DMA3 IWRAM write, and makes no progress at all"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "On `build/v6_s9` with Super Mario Advance (`build/test/roms/sma.gba`, SHA-256 `d29dec02caacbf449e2a93c6042258b0669542e102eb0e6fd0eb92a5411e0244`), the stall trigger fired rather than the time trigger: with no completed CPU memory cycle for 2^22 clk16 the ring froze and the snapshot read `gba_memory` FSM state 2 (`REQ1_WAIT`), `dma_on_r=1`, `double_req=1`, `dma_sdram=1`, `dma_on`/`dma_ena` high, `dma_rnw=0` (a write), `cpu_en` low, `rom_en` and `ram_cen` low, `halt` low, `dma_addr=0x03001190`, `ram_addr=0x03007DEC` with SDRAM byte address `0x000000FC`, the DMA arbiter switched to channel 3 with channel 3 on and allowed, and **zero `sdram_ready` pulses since the FSM last changed state, with `clk16` in that state saturated at 65535**. The freeze happened after 9,309,508 completed cycles and 102,825 DMA read beats / 102,824 write beats. Three page-3 frames spanning six seconds all read `completed CPU cycles after freeze = 0`, so the machine is not merely slow: it has stopped."
+  consequence: "This is the DMA `REQ1_START` defect that entry 14 recorded as a code reading and BRD-041 reported as unobserved, now measured on the board: a DMA SDRAM access leaves the FSM waiting in `REQ1_WAIT` with `cpu_en` held low and no acknowledgement, and the CPU never completes another cycle. It does not contradict BRD-041, whose three loads ran on to eight seconds and never stalled; it establishes that the machine is bimodal across loads of one fixed bitstream, which is BRD-014's finding recurring -- one load hangs in the first second, another runs for twenty. Any future attempt to reproduce this must take several loads and say which behaviour was seen, because a single capture is a coin flip. `dma_addr=0x03001190` is the destination BRD-025 and BRD-042 record for the DMA3 copy from `0x080000FC`, so the deadlock is on the cartridge's own self-copy, which is the first thing `crt0` does."
+  sources:
+    - "This repository, `build/v6_s9/` — seed 9, gates clean, zero hold violations"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: the v6 freeze snapshot and the live counters on page 3"
+    - "Captures `/tmp/sma/f06.png`, `f16.png` and `f17.png`, 2026-11-12"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv`: the `REQ1_WAIT` branch that waits on `sdram_ready`"
+  verification: "Observed on the board 2026-11-12, one load, three page-3 frames over six seconds agreeing exactly and all reading zero completed cycles after the freeze."
+
+- record_id: BRD-046
+  kind: BOARD
+  topic_id: BRD
+  title: "Super Mario Advance never fetches 0x080000FC, and the BIOS IRQ stub reads 0 from 0x03FFFFFC"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "This answers BRD-042 with a measurement instead of a static reading. On `build/v6_s9` with Super Mario Advance, the layout-v6 sticky records read: cartridge fetch seen since the last BIOS fetch = 1 with cartridge-to-BIOS transitions = 0, so after the BIOS hands over, no BIOS-region instruction fetch follows a cartridge fetch at all; the IRQ vector at `0x00000018` and the FIQ vector at `0x0000001C` were fetched, and the SWI vector at `0x00000008` was not; the BIOS IRQ stub's read of the handler pointer at `0x03FFFFFC` happened (255 reads, the counter saturating) and the last word it read was `0x00000000`; and **`0x080000FC` was never fetched**. The last DMA read address recorded at the same time was `0x080000FC` with the last DMA write to `0x03007BFC`, and the cartridge fetch count was 84, reproducing BRD-029 exactly. On `test_logo.gba` the same build reads `0x080000FC` fetched = 1, which is shown as a prefetch rather than an execution because the ARM7TDMI prefetches past a taken branch and that address lies inside the test cartridge's literal pool."
+  consequence: "BRD-042's two open alternatives are both closed for this cartridge: no interrupt is dispatched through the game's handler, and the pointer the BIOS reads is zero rather than the game's stored value, so the game's ARM IRQ handler at `0x080000FC` is never entered and is never even fetched. The `0x080000FC` coincidence with the BRD-025 DMA3 source is confirmed from the other side, since the last DMA read address is that word. Note the 255 saturating reads of `0x03FFFFFC` all happen during the BIOS intro, before handover, so a zero handler pointer there is the BIOS's own default and says nothing about what the game stored; the absence of any cartridge-to-BIOS transition afterwards means the BIOS never looks again on this load. Because BRD-045 shows this load dies in the first second, do not conclude that interrupts are never dispatched in a load that survives; the measurement describes a run that stopped."
+  sources:
+    - "This repository, `build/v6_s9/`, page 3 entries 3..4 decoded by `tools/decode_fetchtrace.py --layout v6`"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: `s_xfer`, `xfer_n`, `s_vec8`/`s_vec18`/`s_vec1c`, `s_hnd`, `hnd_val`, `s_cfc`"
+    - "This repository, records BRD-042 and BRD-045"
+  verification: "Observed on the board 2026-11-12 across three page-3 frames that agree field for field, with every v6 register confirmed present and driven in the routed netlist before the load."
+
+- record_id: TCL-030
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A diagnostic packing assigned to a plain register truncates as silently as a part-select one"
+  status: VERIFIED
+  verified_date: 2026-11-12
+  statement: "`tools/check_ring_width.py` checked only concatenations assigned through a `+:` part-select, which is the form the ring and the MMIO ring use. The readout muxes assign instead to a plain 32-bit register with a `case` label in front, as in `5'd20: stl_word_mux = { ... };`, and that form truncates exactly as silently: a 33-bit concatenation assigned to a 32-bit reg drops its top bit with no error and no warning at this flow's verbosity. A check for the plain form and for whole-identifier assignments (`name = other;`, where the widths must match) was added after this form was found to be unchecked, and it immediately found one pre-existing slip: the page-1 status word packed `{26'h0, s_dc, mm_wrapped, mm_n}`, 33 bits into 32. That one was harmless because the bit dropped was padding, and it is now written as `25'h0` so the gate can measure it. The extended gate checks 51 plain assignments on `gbatang_top.sv` where it previously checked none."
+  consequence: "Both additions were mutation-tested before being trusted: widening a padding field to make 33 bits into 32 reports `concatenation for 'stl_word_mux' is 33 bits, declared 32 bits` and exits 1, and assigning an 8-bit register to a 32-bit one reports the width mismatch, while an unchanged tree still exits 0. A gate that only covers the syntax its author happened to be using is worth very little, and this one had been covering roughly half of the diagnostic packings in this file while reporting a clean pass."
+  sources:
+    - "This repository, `tools/check_ring_width.py`: `PLAIN`, `PLAIN_IDENT` and `check_plain()`"
+    - "This repository, `fpga/gba/src/gbatang_top.sv`: the `tr_word_mux` and `stl_word_mux` readout muxes"
+  verification: "Measured 2026-11-12: the gate reports 5 part-select packings, 2 strides and 51 plain assignments checked, and both new failure modes reproduce under mutation while the unmodified tree passes."

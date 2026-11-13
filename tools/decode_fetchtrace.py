@@ -244,17 +244,27 @@ LAYOUTS = {
         2: "stall tail ring, slots 8..15",
         3: "live stall counters",
     },
+    #   v6  as v5, but the freeze also triggers on the cartridge -> BIOS
+    #       handover, and page 3 entries 3..4 carry the control-flow and
+    #       DISPCNT records.  The freeze marker changes 0x57A1 -> 0x57A2 so a
+    #       v5 capture cannot be decoded as v6 or the reverse.
+    "v6": {
+        0: "stall tail ring, slots 0..7",
+        1: "status pages + freeze snapshot",
+        2: "stall tail ring, slots 8..15",
+        3: "live counters + handover records",
+    },
 }
 LAYOUT = "v4"
 PAGE_NAMES = LAYOUTS[LAYOUT]
 
 # Which page carries the MMIO ring and which carries the status entries, per layout.
-MMIO_PAGE = {"v3": 2, "v4": 0, "v5": None}
-STATUS_PAGE = {"v3": 3, "v4": 1, "v5": 1}
+MMIO_PAGE = {"v3": 2, "v4": 0, "v5": None, "v6": None}
+STATUS_PAGE = {"v3": 3, "v4": 1, "v5": 1, "v6": 1}
 # Status entries per layout: v3 had four; entry 4 (IWRAM) arrived with v4.
-STATUS_ENTRIES = {"v3": 4, "v4": 5, "v5": 5}
+STATUS_ENTRIES = {"v3": 4, "v4": 5, "v5": 5, "v6": 5}
 RING_BASE = {0: 0, 2: 8}            # v5 ring page -> first slot
-STALL_MARKER = 0x57A1
+STALL_MARKER = {"v5": 0x57A1, "v6": 0x57A2}
 
 MEM_STATES = {0: "MAIN", 1: "REQ1_START", 2: "REQ1_WAIT", 3: "REQ2_BRAM",
               4: "REQ2_START", 5: "REQ2_WAIT", 6: "?6", 7: "?7"}
@@ -287,22 +297,37 @@ def decode_debug_dma(d):
 
 
 def decode_snapshot(e5, e6, e7):
-    """Page 1 entries 5..7 of layout v5: the freeze snapshot."""
+    """Page 1 entries 5..7: the freeze snapshot (layout v5 and v6).
+
+    v6 moved the frozen bit from bit 12 to bit 13 to make room for a third cause
+    bit, and changed the marker to 0x57A2.  Both are read from the layout, never
+    inferred, because guessing between layouts mislabels every field and that is
+    TCL-019's rule.
+    """
     w = e5[0]
     marker = w >> 16
-    if marker != STALL_MARKER:
+    want = STALL_MARKER.get(LAYOUT, 0x57A1)
+    if marker != want:
         raise AssertionError(f"stall marker reads 0x{marker:04X}, expected "
-                             f"0x{STALL_MARKER:04X}; packing or word order is wrong")
-    frz = (w >> 12) & 1
-    cause = (w >> 8) & 3
+                             f"0x{want:04X} for layout {LAYOUT}; packing, word "
+                             f"order or layout is wrong")
+    if LAYOUT == "v6":
+        frz = (w >> 13) & 1
+        cause = (w >> 8) & 7
+    else:
+        frz = (w >> 12) & 1
+        cause = (w >> 8) & 3
     full = (w >> 4) & 1
     wp = w & 0xF
-    causes = {0: "none", 1: "stall (no completed CPU cycle for 2^22 clk16)",
-              2: "time (2^27 clk16 after gbaon)", 3: "stall and time together"}
+    cause_names = {0: "stall (no completed CPU cycle for 2^22 clk16)",
+                   1: "time (2^27 clk16 after gbaon)",
+                   2: "cartridge -> BIOS handover"}
+    hit = [n for b, n in cause_names.items() if (cause >> b) & 1]
+    causes = " and ".join(hit) if hit else "none"
     m = e5[1] >> 24
     flags = e5[1] & 0xFFFF
     lines = [
-        f"frozen={frz} cause={causes[cause]} ring full={full} write pointer={wp}",
+        f"frozen={frz} cause={causes} ring full={full} write pointer={wp}",
         f"at freeze: {decode_mem_state(m)}",
         f"at freeze: {decode_flags(flags)}",
         f"at freeze: dma_addr=0x{e5[2] & 0x0FFFFFFF:08X} rom_addr=0x{e5[3] & 0x0FFFFFFF:08X}",
@@ -334,6 +359,63 @@ def decode_live(entries):
         f"clk16 in state={e2[1] >> 16} state changes={e2[1] & 0xFFFF}",
         f"live: {decode_debug_dma(e2[2] & 0xFFFF)}",
         f"DMA3 transfer count (dma_eepromcount)={e2[3] & 0x1FFFF}",
+    ]
+
+
+def decode_v6_control(e3, e4):
+    """Page 3 entries 3..4 of layout v6: the handover and DISPCNT records.
+
+    All of these are sticky: each says "this happened at least once since gbaon".
+    The point of reading them together is that they place the fault.  A bus write
+    of 0x0403 seen with the drawer's register never leaving the BIOS value means
+    the store is issued and lost between the CPU and the register; a register that
+    reaches 0x0403 while the screen stays blank would mean the fault is past it.
+    """
+    w0, w1, w2, w3 = e3[0], e3[1], e3[2], e3[3]
+    s_cfc      = (w0 >> 18) & 1
+    s_hnd      = (w0 >> 17) & 1
+    s_vec1c    = (w0 >> 16) & 1
+    s_vec18    = (w0 >> 15) & 1
+    s_vec8     = (w0 >> 14) & 1
+    s_xfer     = (w0 >> 10) & 1
+    s_cartseen = (w0 >> 9) & 1
+    hnd_n      = w0 & 0xFF
+    xfer_n     = w1 & 0xFF
+    bios_fetch = w2
+    hnd_val    = w3
+
+    g0, g1, g2, g3 = e4[0], e4[1], e4[2], e4[3]
+    s_gpu_bios = (g0 >> 13) & 1
+    s_gpu403   = (g0 >> 12) & 1
+    s_gpu0     = (g0 >> 11) & 1
+    s_dc       = (g0 >> 8) & 7
+    dc403_n    = g0 & 0xFF
+    gpu_dc     = (g1 >> 1) & 0x7F
+    last_dc    = g2 & 0xFFFF
+    dc_wr      = g3 & 0xFFFF
+
+    fb   = gpu_dc & 1
+    bgs  = (gpu_dc >> 1) & 0xF
+    bld  = {0: "none", 1: "alpha", 2: "brighten", 3: "darken"}[(gpu_dc >> 5) & 3]
+    return [
+        "handover: cartridge fetch seen since the last BIOS fetch="
+        f"{s_cartseen}, cartridge->BIOS transitions={xfer_n} "
+        f"({'seen' if s_xfer else 'NEVER seen'})",
+        f"exception vectors fetched: SWI 0x08={s_vec8} IRQ 0x18={s_vec18} "
+        f"FIQ 0x1C={s_vec1c}",
+        f"IRQ handler pointer read at 0x03FFFFFC={s_hnd} ({hnd_n} read(s)), "
+        f"value=0x{hnd_val:08X}",
+        f"ARM IRQ handler 0x080000FC fetched={s_cfc}",
+        f"BIOS-region instruction fetches={bios_fetch}",
+        f"DISPCNT writes issued on the bus: {dc_wr} total, {dc403_n} carrying "
+        f"0x0403; bus saw 0x0000={s_dc & 1} 0x0403={(s_dc >> 1) & 1} "
+        f"0xFFE0={(s_dc >> 2) & 1}; last data written=0x{last_dc:04X}",
+        f"drawer DISPCNT now: forced_blank={fb} BG0={bgs & 1} BG1={(bgs >> 1) & 1} "
+        f"BG2={(bgs >> 2) & 1} BG3={(bgs >> 3) & 1} BLDCNT={bld}",
+        "drawer DISPCNT states ever seen: cartridge entry 0x0000 "
+        f"(forced blank, no BGs)={s_gpu0}, display on 0x0403 "
+        f"(blank off, BG2)={s_gpu403}, BIOS handover 0x1F80 "
+        f"(blank on, BG0-3)={s_gpu_bios}",
     ]
 
 
@@ -544,7 +626,7 @@ def report(name, capture):
                     print(f"        {line}")
             if not ent["valid"]:
                 problems.append(f"status page entry {idx} is not marked valid")
-        if LAYOUT == "v5":
+        if LAYOUT in ("v5", "v6"):
             print("  freeze snapshot (entries 5..7)" +
                   ("" if entries[5]["valid"] else "  [strip dark: not frozen]"))
             try:
@@ -554,18 +636,21 @@ def report(name, capture):
                     print(f"        {line}")
             except AssertionError as exc:
                 problems.append(str(exc))
-    elif LAYOUT == "v5" and pg in RING_BASE:
+    elif LAYOUT in ("v5", "v6") and pg in RING_BASE:
         entries = decode_page(size, px, win, pg, base=RING_BASE[pg])
         for ent in entries:
             flag = "V" if ent["valid"] else "-"
             w = ent["words"]
             print(f"  [{flag}] slot {ent['index']:2d}  {field_of(w[0], 'addr')}  "
                   f"rom_data=0x{w[1]:08X}  {field_of(w[2], 'ramctl')}  data=0x{w[3]:08X}")
-    elif LAYOUT == "v5" and pg == 3:
+    elif LAYOUT in ("v5", "v6") and pg == 3:
         entries = decode_page(size, px, win, pg, base=0)
         for line in decode_live(entries):
             print(f"        {line}")
-        for i in range(3):
+        if LAYOUT == "v6":
+            for line in decode_v6_control(entries[3]["words"], entries[4]["words"]):
+                print(f"        {line}")
+        for i in range(5 if LAYOUT == "v6" else 3):
             if not entries[i]["valid"]:
                 problems.append(f"live page entry {i} is not marked valid")
     elif LAYOUT == "v3" and pg <= 1:
@@ -609,7 +694,7 @@ def assemble(rom):
             continue
         if not fr["problems"]:
             use.setdefault(fr["page"], []).append(fr)
-    print("=== assembled (layout v5)")
+    print(f"=== assembled (layout {LAYOUT})")
     print("frames used per page: " + ", ".join(
         f"page {p}: {len(use.get(p, []))}" for p in range(4)))
 
@@ -648,6 +733,9 @@ def assemble(rom):
         print("live counters (page 3):")
         for line in decode_live([{"words": e["words"]} for e in p3]):
             print(f"  {line}")
+        if LAYOUT == "v6" and len(p3) > 4:
+            for line in decode_v6_control(p3[3]["words"], p3[4]["words"]):
+                print(f"  {line}")
     slots = {}
     for page in (0, 2):
         pw = words_of(page)
@@ -747,7 +835,7 @@ def main(argv):
     if expect:
         with open(expect, "rb") as f:
             rom = f.read()
-    if LAYOUT == "v5":
+    if LAYOUT in ("v5", "v6"):
         aproblems = assemble(rom)
         if aproblems:
             print("--- assembly problems")
