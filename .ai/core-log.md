@@ -1352,3 +1352,33 @@ The plan's premise that both cartridges stop is falsified on this image, so the 
 - User Test: NOT RUN
 
 ---
+
+## 42 COMMIT Unreleased 2026-11-12T22:10:00-07:00
+
+#### Coming From:
+
+Unreleased 2574ec9
+
+#### Purpose:
+
+Build the current tree as an overlay-free production image at a clean placement seed and put it on the board with `test_logo.gba`, to close the question BRD-040 left open by measuring whether the cartridge draws its own picture now that the CPU is known to execute past the `DISPCNT <= 0x0403` store.
+
+#### Outcome:
+
+Stage 1 was a build-only cycle with no source change, and it answers its question negatively. The tree at `2574ec9` was synthesised once with `TINYGBA_OVERLAY_OFF` and the official BIOS via `TINYGBA_BIOS_HEX` pointing at `build/test/official_bios.hex`, matching every prior board image rather than the production default `gba_bios_cultofgba.hex`, and that netlist was placed across eight seeds. Seed 1 aborted with the BRD-024 route error, `Net hclk5 has no route to the FCLK of video.hdmi.serializer.gwSer0 (sink wire X181Y102/FCLKA)`, which is the second seed-1 batch in a row to fail exactly there and is now a reproducible property of seed 1 rather than a coincidence. Seeds 2, 3 and 5 passed every gate and packed; seeds 4 and 6 through 8 were still routing when the cycle closed and were stopped. The deployed image is seed 3, `build/ovb_s3/tinygba.fs` SHA-256 `c0a890d7f47684d753a264e8ae0e3fed093d79e5ac7e85f6e9420b22f1a2161e` with `.bin` `45840d3638a78fe7ee2e2d4b586b534b43cfde5d582282720d30707ffb0597b2`, 11,495 flip-flops and 148 block RAM, zero hold violations, `clk16` 20.111 against 16.750, `clk50` 83.542 against 50.251, `clk67` 40.987 against 67.002 under the documented GBATang four-cycle allowance with a 24.40 ns worst path against a 59.70 ns budget, `hclk` 88.082 against 74.250, cross-domain paths 38.28 and 36.11 ns, and `clk67` on both measured-good spines `SPINE16/TOP0` and `SPINE25/TOP1`, while `clk16` sits on seven `*/TOP3` pips this board has never measured, so BRD-019 still bounds how this result may be worded. The define provably reached the compiler and the machine proves it again on screen: with `test_logo.gba` loaded over `/dev/ttyUSB1` (header `TINYGBATEST1`, Nintendo logo present, byte `$B2` `$96`, complement check `$40`), the official BIOS intro plays and the operator watched it load, so the 960-pixel OSD window that hid the field in entries 3 and 24 is conclusively not what was hiding the picture. After the intro the field holds solid white and nothing else appears. Two freshly loaded sessions were captured, seven frames over eight seconds and six frames over ten seconds, and every frame is a uniformly white active area with the pillarbox grey as the only other colour in the image: there is no green or red field, which is what `test_logo` paints from its own eight-check result, no yellow column, which would count out a failing check bit, and no toggling square. A white field is therefore a positive reading rather than an absence, because the cartridge is a self-describing instrument, and it says the cartridge's `DISPCNT <= 0x0403` store has not taken effect and the display is still in forced blank, whose backdrop is white. That reproduces entry 24's `fix_ov_s1` result on a tree that now carries the SDRAM model repairs, the GPU fixes and entry 41's stall instrument, and the honest summary is that the picture has not moved in eight entries. What this cycle narrows is the question rather than the fault: BRD-040 measured the CPU executing the blink loop past the store on `stl_s5`, and this image shows the store's effect absent, so the remaining candidates are that the store is issued and lost between the CPU and the `DISPCNT` register or that it is never issued, and because this image is uninstrumented no CPU state is claimed from it. Two procedure faults cost time and are recorded rather than glossed: a first capture attempt left an `ffmpeg` holding `/dev/video0` so the next one returned `Device or resource busy`, which must be checked before the board is blamed, and the deploy set's first checksum verification ran from the wrong directory and reported a false failure before the same hashes verified clean in place. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 41 were not rewritten, and validated this entry as entry 42 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set, `None.` for Files Modified because no engineering file changed, and a count of forty-two against the 100-entry limit.
+
+#### Next Steps:
+
+Build the Stage 2 instrument, which is the one entry 41 specified and the only thing that can now separate the two remaining candidates: keep the `v5` ring but freeze it on control flow instead of time, arming on the first BIOS-region fetch that follows a cartridge fetch, and make sticky the exception-vector fetches at `0x00000008`, `0x00000018` and `0x0000001C`, the word the BIOS IRQ stub reads from `0x03FFFFFC`, whether `0x080000FC` is ever fetched, whether `DISPCNT` ever receives `0x0403` beside the drawer's live register copy, and the existing cartridge, BIOS and IWRAM counters, which together test BRD-042's lead directly instead of by inference and at the same time show where the `0x0403` store stops if it is being issued. That change needs approval before it is built because it touches `gbatang_top.sv` and `gba2hdmi.sv`, and it should be built from a fresh build directory because a re-synthesis into an existing one reuses the cached netlist. Do not reuse seed 1, which has now cost two builds to the same `hclk5` route abort, and prefer seeds 2, 3 or 5, which were clean here. Before any board result from the new instrument is worded as a statement about the design, settle the clock plan measurement BRD-019 still holds open, since `clk16` has never been on a pip this board has measured. Keep every cartridge-read claim going through `tools/check_cartread.py` with reach reported beside accuracy per TCL-027, keep weight-bearing simulations at 3000 million steps launched with `setsid` per TCL-028, do not arm a trace without bounding it to the region and image per TCL-029, leave the parked `cpu_en` repair parked because the board shows no read fault and no stall for it to address, and note that a register-parity baseline for `TINYGBA_OVERLAY_OFF` still does not exist and should be recorded only from a build whose behaviour is understood.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: FAIL
+
+---
