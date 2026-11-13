@@ -318,7 +318,7 @@ sdram_probe probe (
     .clk(clk16), .resetn(resetn),
     .cpu_addr(probe_addr), .cpu_wdata(probe_wdata), .cpu_port(probe_port),
     .cpu_rd(probe_rd), .cpu_wr(probe_wr), .cpu_be(probe_be),
-    .cpu_ready(cpu_mem_ready), .cpu_rdata(cpu_mem_rdata),
+    .cpu_ready(cpu_mem_ready_raw), .cpu_rdata(cpu_mem_rdata),
     .result(dbg_bits), .done(dbg_done)
 );
 
@@ -517,7 +517,11 @@ always @(posedge clk67) begin
     end else begin
         st_clk67_tog <= st_clk67_tog + 2'd1;
         if (st_clk67_tog[1])     st_clk67_alive    <= 1'b1;
-        if (cpu_mem_ready)       st_mem_ready_fast <= 1'b1;
+        // Samples the RAW net deliberately: this flop is clocked by clk67, the
+        // domain that produces the strobe, so it must not take the clk16
+        // synchroniser's output or it would introduce the very crossing it exists
+        // to observe across.
+        if (cpu_mem_ready_raw)   st_mem_ready_fast <= 1'b1;
     end
 end
 
@@ -1189,7 +1193,26 @@ wire [31:0] cpu_mem_wdata;
 wire [31:0] cpu_mem_rdata [1:3];
 wire        cpu_mem_rd, cpu_mem_wr;
 wire [3:0]  cpu_mem_be;
-wire        cpu_mem_ready;
+wire        cpu_mem_ready_raw;
+// TinyGBA (BRD-049): `cpu_ready` is registered in the controller's `clk67` domain
+// and left this block as a bare net, sampled as a level by `gba_memory` in
+// `clk16` with no synchroniser.  It is a full `clk16` period wide -- four `clk67`
+// cycles, measured as 556,000 `clk16` samples of it against 345,000 `clk67`
+// rises -- so it is wide enough for a two-flop synchroniser to capture reliably;
+// what it was missing is the two flops.  Without them the receiving flop sees a
+// signal that changes asynchronously to its own clock, which is a metastability
+// hazard on the exact boundary that carries BRD-044's one-word read lag.
+//
+// The cost is real and is the reason this is a separate change from any read-path
+// fix: every memory access now completes two `clk16` cycles later than it did, so
+// a reach figure taken at a fixed step budget will fall for reasons that are
+// speed and not correctness.  Any before/after comparison must say so, and the
+// property that matters is whether the program still reaches the same address.
+reg  [1:0]  cpu_mem_ready_s;
+always @(posedge clk16)
+    if (~resetn) cpu_mem_ready_s <= 2'b00;
+    else         cpu_mem_ready_s <= {cpu_mem_ready_s[0], cpu_mem_ready_raw};
+wire        cpu_mem_ready = cpu_mem_ready_s[1];
 wire [1:0]  cpu_mem_port;
 
 // TinyGBA: the memory controller's view of the SDRAM port.  Normally these are
@@ -1293,7 +1316,7 @@ sdram_gba sdram (
 
 	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata), 
     .cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
-    .cpu_ready(cpu_mem_ready), .cpu_port(cpu_mem_port),
+    .cpu_ready(cpu_mem_ready_raw), .cpu_port(cpu_mem_port),
     .config_backup_type(config_backup_type), .backup_written(backup_written),
 	
     .rv_addr(rv_mem_addr), .rv_din(rv_mem_din), .rv_ds(rv_mem_ds), 
@@ -1319,7 +1342,7 @@ gba_sdram_rtl sdram (
 	.clk(clk67), .mclk(clk16), .resetn(resetn),
 	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata),
 	.cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
-	.cpu_ready(cpu_mem_ready), .cpu_port(cpu_mem_port),
+	.cpu_ready(cpu_mem_ready_raw), .cpu_port(cpu_mem_port),
 	.config_backup_type(config_backup_type), .backup_written(backup_written),
 	.rv_dout(), .rv_req_ack(), .total_refresh(), .busy(),
 `ifdef TINYGBA_SDRAM_DEBUG
@@ -1334,7 +1357,7 @@ sdram_sim sdram (
 	.clk(clk16),
 	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata), 
     .cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
-    .cpu_ready(cpu_mem_ready), .cpu_port(cpu_mem_port), 
+    .cpu_ready(cpu_mem_ready_raw), .cpu_port(cpu_mem_port), 
     .config_backup_type(config_backup_type)
 );
 `endif   // TINYGBA_SDRAM_RTL

@@ -1597,3 +1597,33 @@ None.
 - User Test: NOT RUN
 
 ---
+
+## 50 COMMIT Unreleased 2026-11-13T16:48:27-07:00
+
+#### Coming From:
+
+Unreleased e17c88c
+
+#### Purpose:
+
+Close BRD-049's hazard by synchronising the controller's ready strobe into `clk16`, on the reasoning that the defect lives on the clock-domain boundary rather than inside either state machine.
+
+#### Outcome:
+
+The read lag is gone in the model, and the change is one synchroniser on a wire. `cpu_ready` left `sdram_gba` as a bare net, registered in `clk67` and sampled as a level by `gba_memory` in `clk16`; `gbatang_top.sv` now declares `cpu_mem_ready_raw` for the three controller instances to drive, puts it through a two-flop synchroniser clocked by `clk16`, and keeps `cpu_mem_ready` as the synchronised net that `gba_memory`, `gba_dma`, `sdram_probe` and the two clk16-domain status latches consume, while the one indicator clocked in `clk67` deliberately keeps sampling the raw net so the change introduces no new crossing. A two-flop stage is the right instrument rather than a handshake because the strobe is a full `clk16` period wide, which this cycle measured rather than assumed: 556,000 `clk16` samples of it against 345,000 `clk67` ack rises gives 1.6 samples per rise, and a single `clk67` cycle would have given 0.25. The result is categorical under `-DTINYGBA_SDRAM_RTL` at 3000 million steps against `test_logo.gba`: 47 cartridge reads, 47 matching the image, zero failures, reach `0x08000C00` and 889 frames, where the unmodified tree gives 984 reads, 973 correct, eleven failures, reach `0x080002E4` and 865 frames. The read BRD-044 turned on returns its own word for the first time, `addr=080002E0 data_now=00000403 data_prev=0000FFE0`, and `data_prev` is exactly the value the board measured, so the harness's two candidate columns now disagree and its calibrated column confirms the fix rather than merely permitting it. The display register follows the same way: the `0x0403` store is issued four times and `0xFFE0` never, against the unmodified tree's `0xFFE0` twice and `0x0403` never. The mechanism is the one BRD-039 identified, with the delay on the handshake rather than on `cpu_en`, which is why entries 36, 46 and 47 all failed: `sdram_gba` acknowledges at the first halfword collect while `cpu_rdata` still holds a stale high half, the second collect completes the word one `clk67` cycle later, and two `clk16` cycles of synchroniser delay put the CPU's consume after it. The cost is invisible in this model, since frames rise from 865 to 889. Both of TCL-027's properties therefore hold together: accuracy 47 of 47 and reach `0x08000C00` against `0x080002E4`, so this is not a truncation wearing a clean read set. It is recorded as BRD-050 at status MEASURED and not VERIFIED, because the harness has ideal zero-delay clocks and BRD-033 governs: the model cannot show that the metastability hazard was the board's fault as well as its own, and only a board reading can. No bitstream was built and nothing was deployed, because the Tang was powered down by the operator at the start of the previous cycle and has not been asked for since; the change touches `gbatang_top.sv`, which is in the synthesis source list, so a board image is possible from it. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 49 were not rewritten, confirmed BRD-050 carries a unique id and the canonical field order, and validated this entry as entry 50 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty against the 100-entry limit.
+
+#### Next Steps:
+
+Put it on the board, which is the only thing that can raise BRD-050 from MEASURED to VERIFIED: build with `-DTINYGBA_FETCHTRACE -DTINYGBA_STALLTRACE` and the official BIOS so the v7 instrument reports the pool read, select the placement with `tools/clock_plane_select.py` requiring a measured-good `hclk` pip as well as the two good `clk67` spines per BRD-048, and require both properties together per TCL-027. Two specific predictions to check and report as predictions rather than inferences: the 32-bit read of `0x080002E0` should return `0x00000403` instead of `0x0000FFE0`, and the drawer's DISPCNT should reach `0x0403` with forced blank released, which would mean the white field of entries 42 and 43 is gone. If the board disagrees with the model, the disagreement itself is the next instrument, because it would separate metastability from the delay the model can see. Do not re-apply the control-path deferral of entry 46 or the pipelined pair of entry 47; both are measured and falsified, and this cycle's result explains why they were aimed at the wrong side of the boundary. Do not re-run entry 33's clock-lane experiment, closed by TCL-032. If the board confirms, the next real question is the objective rather than the read path: `test_logo` reaching its `ROMCHK` fetches is a proxy, BRD-045's DMA `REQ1_START` deadlock still blocks a retail title, and that record has been verified and untouched since entry 43.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
