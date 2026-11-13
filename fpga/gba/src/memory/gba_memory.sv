@@ -605,6 +605,40 @@ always @* begin
     end
 end
 
+`ifdef TINYGBA_MEM32DBG
+// TinyGBA: simulation-only tracing for the 32-bit read path, added while
+// investigating BRD-044's one-word lag.  Never defined in a synthesised build
+// (no build script sets it), so the shipped design is unchanged.
+//
+// Two sampling points, both on `cpu_en`, which is the cycle in which the CPU
+// takes the word the memory block is presenting:
+//
+//   PC    every 2M cycles, so a wedge is visible as a repeated PC rather than
+//         inferred from a short capture.
+//   MEM32 every 32-bit cartridge data read the CPU consumes, with the FSM state
+//         and `double_req` beside it, so a wrong word can be attributed to the
+//         transaction rather than guessed at.
+//
+// Deliberately absent: a fetch-word trace.  One was written here and is not kept
+// because it was miscalibrated -- it sampled `rom_data` on the `cpu_en` edge and
+// reported a one-word lag in BOTH this tree and the known-good baseline, which
+// is a property of the sampling point and not of either machine.  A trace that
+// says a working build is broken is worse than no trace (TCL-024).
+integer dbg_period = 0;
+always @(posedge clk) begin
+    if (~resetn) dbg_period <= 0;
+    else begin
+        dbg_period <= dbg_period + 1;
+        if (dbg_period % 2000000 == 0)
+            $display("PC: n=%0d st=%0d cpu_en=%b rom_en=%b rom_addr=%08x ram_cen=%b ram_addr=%08x rdy=%b",
+                     dbg_period, state, cpu_en, rom_en, rom_addr, ram_cen, ram_addr, sdram_ready);
+        if (cpu_en & ram_cen & ~ram_wen & (ram_be == 4'b1111) & ((ram_addr >> 24) == 8'h08))
+            $display("MEM32: addr=%08x data=%08x state=%0d dbl=%b",
+                     ram_addr, ram_rdata, state, double_req);
+    end
+end
+`endif
+
 // bram_rdata is result for bram access from the last cycle
 reg  [31:0] rdata_bios;
 reg  [31:0] rdata_iwram;

@@ -1477,3 +1477,33 @@ Apply the parked `cpu_en` repair of entries 39 and 40, which is now unblocked be
 - User Test: NOT RUN
 
 ---
+
+## 46 COMMIT Unreleased 2026-11-13T12:42:37-07:00
+
+#### Coming From:
+
+Unreleased 63d0406
+
+#### Purpose:
+
+Apply the parked `cpu_en` repair of entries 39 and 40 in the Verilator model, so that the 32-bit read lag confirmed as BRD-044 is removed and the change can be judged by TCL-027's two-property rule before any build is spent on it.
+
+#### Outcome:
+
+The repair removes the lag and collapses reach, so it is not a repair and nothing was built or deployed. The model is decisive because the baseline was re-run at 3000 million steps first and reproduced BRD-038 exactly: `build/sim_base` with `-DTINYGBA_SDRAM_RTL` gave 973 of 984 cartridge reads matching the image, all 11 failures 32-bit, every one returning its predecessor. The repair registers a 32-bit acknowledgement (`ram32_ack_now`) and moves the CPU's consume one cycle forward into the following `MAIN`, where `ram_rdata` carries the word `sdram_gba` has finished splicing, and it suppresses the acknowledgement-cycle term so the stale word is never taken. Three defects in my own patch were found by running it rather than by reading it: it first patched only the concurrent rom+ram branch exactly as entries 39 and 40 worded it, and a 32-bit cartridge read with no fetch in flight lands in the ram-only branch, whose `MAIN` cycle asserts `cpu_en = issingle(0x08..) = 0`, so the machine consumed a stale word, re-issued the same read and wedged after ten reads; it then covered only the request-2 states, and a request-1 acknowledgement consumed `0x080002c8` twice; and once both were fixed by stating the rule once outside the `casez` instead of inside four branches, the read data was fully correct, with `0x080002b0` returning `0x08000400` and `0x080002dc` returning `0x0000ffe0`, byte enables `1111`, and no lag anywhere. That is the trap: correct reads and fewer of them. At equal 1000-million-step budgets the unmodified tree produced 261 cartridge reads and was still climbing, reaching `0x080002e4`, while the repaired tree produced 12 and stopped at `0x080002dc` with the CPU looping in the failed-check column painter at `0x08000238` to `0x0800024C`, a loop whose control registers are literal constants `0xA0` and `0x10` and whose store pointer had run away into region `0x0D`. The repaired build is not stalled -- it stalls 64.5 percent against the baseline's 66.4 percent and executes more fetches per cycle -- so the change is fast and the program is wrong, which is a flow divergence and not a timing shortfall. One instrument was built and discarded: a fetch-word trace sampling `rom_data` on the `cpu_en` edge reported a one-word lag in the repaired build and, on re-run, in the known-good baseline too, so it was measuring its own sampling point and not the machine, exactly the failure TCL-024 records, and it is not kept. The `TINYGBA_MEM32DBG` trace that was kept is the calibrated half -- a periodic PC dump and the consumed 32-bit word with its FSM state -- and both define-on and define-off builds compile. No board image was produced, so the Tang was not flashed; the operator had powered it down in any case. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 45 were not rewritten, and validated this entry as entry 46 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of forty-six against the 100-entry limit.
+
+#### Next Steps:
+
+Revise the plan before another attempt, because the enable-deferral shape entries 39 and 40 proposed is disproven in the model: it produces correct data and the wrong program, and the two are not reconciled by covering more branches. The finding that matters for the next proposal is that the repaired machine diverges in control flow, so the next instrument should record the executed instruction sequence rather than the returned words -- a calibrated fetch trace anchored on a signal that reproduces the ROM in the known-good baseline first, per TCL-024 -- and it should locate the first divergence between the two builds rather than the last correct read. The alternative to the enable shift, and the one I would put first, is to keep `cpu_en` on the acknowledgement cycle and instead make `ram_rdata` carry the assembled word at that cycle, which is a data-path change rather than a control-path one and does not touch request issue at all; the risk to check is that `sdram_gba`'s second collect is not yet complete then, in which case the honest conclusion is that the controller's acknowledgement is early rather than the enable being late. BRD-044 remains confirmed and unaffected by this entry: the board read of `0x080002E0` returning `0x0000FFE0` stands, and the parked repair is still parked. Any board image still needs `tools/clock_plane_select.py` selection with a measured-good `hclk` pip (BRD-048), and BRD-019 still governs wording.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
