@@ -1471,3 +1471,57 @@ Field meanings:
     - "mGBA 0.10.5 gdb stub: `pc` 0x08000100 -> 0x00000008 -> 0x00000140, `ldrb r12,[lr,#-2]` at 0x144"
     - "`/tmp/official_bios.bin`, SHA1 300c20df6731a33952ded8c436f7f186d25d3492, vector table `0x08: ea00004c b 0x140`"
     - "This repository, `tools/roms/swidiv.s`"
+
+- record_id: BRD-059
+  kind: BOARD
+  topic_id: BRD
+  title: "BRD-045 no longer reproduces: Super Mario Advance boot-loops the BIOS instead of freezing in REQ1_WAIT"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "On `build/deploy_prod` reflashed 2026-11-14, Super Mario Advance (`build/test/roms/sma.gba`, SHA-256 `d29dec02caacbf44...`, the same file BRD-045 tested) does not freeze. It boots the BIOS, renders the Game Boy logo and the Nintendo wordmark, and then restarts from the BIOS entry, for as long as it is left running. A 60-second capture at 2 fps (120 frames, 96 unique) shows the cycle repeating with a period of about 4.5 s and no exact frame periodicity, because the machine's speed varies within the cycle. The decisive observation is the direction of the animation: each cycle draws the logo letters in from the left, one at a time, followed by the rainbow colour sweep on the Game Boy lettering, so the animation starts from its beginning every cycle rather than being re-entered part-way. That is a reset to the BIOS entry and not a hung animation. A cartridge cannot return to the BIOS by itself; the two mechanisms are a CPU exception, whose four vectors all branch to the BIOS handler at `0x1C`, and SWI 0 `SoftReset`, which writes `POSTFLG` at `0x04000300`. The board captures are `/tmp/loop/f_001..120.png`, and the operator watching the same screen independently reported a BIOS boot loop. mGBA 0.10.5 with the official BIOS boots and runs the same image normally, so the cartridge is sound."
+  consequence: "BRD-045's freeze is not reproducible on the current image, and its wording must not be quoted as the current behaviour of Super Mario Advance: the machine no longer stops in `REQ1_WAIT` with `cpu_en` low and zero `sdram_ready` pulses, it executes and then resets. This is the third distinct board behaviour recorded for a retail cartridge on one fixed bitstream -- BRD-014's bimodal halt, BRD-045's `REQ1_WAIT` freeze, and now a reset loop -- so the machine's behaviour across carts and loads is multimodal rather than bimodal, and no single capture of any cart may be treated as the machine's behaviour. The reset mechanism itself is not yet identified: exception and `SoftReset` are both consistent with these captures, and separating them needs the MMIO write ring to record a write to `POSTFLG`, which is compiled out of the production build. Until that is measured this record establishes only that the machine resets, not why."
+  sources:
+    - "This repository, `build/deploy_prod/tinygba.fs` (reflashed with `openFPGALoader -b tangconsole` from `~/oss-cad-suite/bin`, 2026-11-14)"
+    - "This repository, `build/test/roms/sma.gba`, SHA-256 prefix `d29dec02caacbf44`"
+    - "Board captures `/tmp/loop/f_001..120.png`, 60 s at 2 fps, and `/tmp/sma_1..4.png`"
+    - "mGBA 0.10.5 with `/tmp/official_bios.bin`, running the same image to its intro normally"
+    - "The retail BIOS disassembly: `0x1C: ldr sp,[pc,#416]`, and the four word constants at `0x274`/`0x278` that the handler dispatches through"
+- record_id: BRD-060
+  kind: BOARD
+  topic_id: BRD
+  title: "A 1 MiB retail cartridge completes the BIOS and then never enables the display, on a freshly loaded core"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "Classic NES Series - Dr. Mario (USA, Europe), 1,048,576 bytes exactly, was extracted from its zip, loaded over UART and captured for 45 seconds at 2 fps after a Tang power cycle had been followed by an explicit reflash of `build/deploy_prod/tinygba.fs`. The first fraction of a second shows the dark letterbox, and every frame from 0.5 s onward is uniform white in the active area: 90 frames, 4 unique, no logo, no tile content, no transition. White is what the BIOS leaves on screen at handover, with `DISPCNT` in forced blank, so the cartridge never reaches the point of enabling its display. The same image boots normally in mGBA 0.10.5 with the official BIOS, where its title screen is black and green, and the operator confirmed the boot independently. Choosing a 1 MiB cartridge was deliberate: BRD-053 measured cartridge reads at every 64 KiB boundary to 1 MiB, so this image's whole address range has been read correctly by this machine and the failure is not a reach limit of the read path."
+  consequence: "Two retail cartridges of different sizes now fail in two different ways on one bitstream -- Super Mario Advance resets the machine (BRD-059) and Dr. Mario stops without ever writing `DISPCNT` -- while the purpose-built `test_logo` cart passes all eight of its own checks (BRD-051). The shared factor is not cartridge size, because BRD-053 reads to 1 MiB and `hioffset` executes at 448 KiB, and it is not the BIOS, which runs identically to mGBA. The difference between `test_logo` and these cartridges is that `test_logo` verifies a handful of addresses in each region while a retail `crt0` copies code and data across the whole of IWRAM and EWRAM before `main` runs. A write that lands at the wrong address, or a read that returns another address's data, would pass every probe built in this session, because those probes write and read back the same address immediately through the same path. That is the leading hypothesis this record creates and does not establish, and it is testable by writing unique patterns to many addresses and reading them all back."
+  sources:
+    - "This repository, `build/test/drmario.gba`, extracted from `/run/media/vash/MiSTer_Data/games/GBA/Classic NES Series - Dr. Mario (USA, Europe).zip`, SHA-256 prefix `0c8e7923a5fbb99f`"
+    - "Board captures `/tmp/d2/d_001..010.png` and `/tmp/d3/d_001..090.png` (45 s at 2 fps, 90 frames, 4 unique)"
+    - "mGBA 0.10.5 with `/tmp/official_bios.bin`: title screen renders, dominant colours black and green"
+    - "This repository, records BRD-051, BRD-053, BRD-059"
+
+- record_id: BRD-061
+  kind: BOARD
+  topic_id: BRD
+  title: "IWRAM and EWRAM hold unique patterns across their whole regions on the board, before and after full sweeps"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "BRD-060 raised the hypothesis that a write could be landing at the wrong address, which every earlier probe would have passed because they all read back the same address they had just written through the same path. `tools/roms/memorder.s` tests that directly: it fills a whole region with index * 257 + 0xA5A5, which is injective in the index so two addresses aliasing each other show up as a mismatch rather than cancelling out, then reads the whole region back and counts mismatches. It was required to pass in mGBA 0.10.5 with the official BIOS before any board result was read, per TCL-041, and it does. The board reports all four squares green: EWRAM 65536 words (256 KiB) before any other sweep, IWRAM 8192 words (32 KiB), EWRAM 65536 words again after the IWRAM sweep, and a reached-the-end marker. `tools/roms/memsize.s` independently confirms EWRAM at 1024, 8192, 32768 and 65536 words, all green in mGBA. So every word of both internal RAM regions holds its own value on this hardware, and neither a full IWRAM sweep nor a full EWRAM sweep disturbs the other region or itself."
+  consequence: "The address-aliasing hypothesis BRD-060 raised is refuted for IWRAM and EWRAM: a write reaches the address it was given and a read returns that address's data, across 288 KiB of internal RAM, on the board. That eliminates a class of explanation that would have accounted for every symptom at once -- the striped tilemap, the wrong glyph row and the retail hangs -- and it means the corruption seen in BRD-054 and in the striped diag capture must arise somewhere other than the storage holding its value. The regions this probe does not cover are VRAM, palette RAM and OAM, which are separate BRAM blocks with their own decoders, and the DMA engines that a cartridge's crt0 uses to move data into all of them. Two probe defects were found and discarded on the way to this result and neither is recorded as a finding: `tools/roms/memtest.s` reported EWRAM failing in mGBA while `memorder` and `memsize` reported it passing with instruction-identical fill and read-back loops, so it was deleted as a broken instrument rather than repaired, and its DMA checks were never read. The useful lesson is recorded as TCL-046."
+  sources:
+    - "This repository, `tools/roms/memorder.s` and `build/test/memorder.gba`"
+    - "mGBA 0.10.5 with `/tmp/official_bios.bin`: four squares green"
+    - "Board capture `/tmp/bd_mo.png`: four squares `(18, 255, 0)`"
+    - "This repository, `tools/roms/memsize.s`: 1024, 8192, 32768 and 65536 words all green in mGBA"
+    - "This repository, records BRD-060 and TCL-041"
+- record_id: TCL-046
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "When two probes of the same operation disagree, the one that disagrees with the validated control is the broken one"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "`tools/roms/memtest.s` and `tools/roms/memsize.s` perform the same EWRAM fill-and-read-back over the same 65536 words, with fill and read-back loops that disassemble to the same five instructions apart from whether the loop bound is a literal immediate or a register loaded from the literal pool. `memtest` reported four of its five checks failing under mGBA with the official BIOS, including the EWRAM check; `memsize` and `memorder` reported the same EWRAM check passing, and `memorder` reported it passing both before and after a full IWRAM sweep. mGBA is the validated control, so the divergence says one of the probes is wrong, and the two that agree with each other and with the control are not the broken ones. The cause in `memtest` was never established, because establishing it would have cost more than deleting the probe and keeping the two that agree: further work on it would have produced no measurement about the machine either way."
+  consequence: "A probe disagreement is itself a reading, and the right response is to find the side of the disagreement that also disagrees with the control. This is TCL-041 applied to a probe-versus-probe case rather than a probe-versus-machine case, and it is cheap because the control already exists and costs about a minute per run. The corollary is that a probe whose result cannot be reconciled with a validated probe of the same operation must be discarded rather than debugged indefinitely, since the only thing it can produce is a wrong finding about the machine. `memtest.s` was deleted under this rule; `memsize.s` and `memorder.s` remain, both clean in mGBA and both run on the board."
+  sources:
+    - "mGBA 0.10.5: `memtest.gba` four of five checks red on two separate runs, `memsize.gba` four of four green, `memorder.gba` four of four green"
+    - "This repository, `tools/roms/memorder.s`, `tools/roms/memsize.s`"
