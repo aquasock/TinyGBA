@@ -2030,3 +2030,35 @@ Settle what the BIOS `IntrWait` routine requires before writing another version 
 - User Test: NOT RUN
 
 ---
+
+## 64 COMMIT Unreleased 2026-11-14T09:40:00-07:00
+
+#### Coming From:
+
+Unreleased 8fc894c
+
+#### Purpose:
+
+Re-examine BRD-045's DMA deadlock against the current image, since it was verified before the display worked and had not been revisited.
+
+#### Outcome:
+
+DMA3 from cartridge ROM does not deliver data on the board. It completes and it writes zeroes. `tools/roms/dmawrote.s` pre-fills a destination with a sentinel, runs one transfer from cartridge ROM, and then asks three separate questions of the destination: did it change at all, does it hold the source word, and is it exactly zero. The binary is required to pass in mGBA before any board result is read, per TCL-041, and in mGBA it reports changed, correct and not-zero. On the board, on three consecutive captures, it reports changed green, correct red and zero green: the location was written, it is not the source data, and it is exactly zero. The RTL is consistent with that. In `gba_memory.sv` the BRAM write data is driven from `dma_wdata` while `state == MAIN`, and the buffered write path is armed by `if (~dma_on & rom_en & ram_cen)`, which is false throughout a DMA because `dma_on` is high; so a transfer from an SDRAM source to a BRAM destination never presents the fetched words to the destination's write port. IWRAM and VRAM are wired identically (`wre(bram_wr & sel_iwram)` and `vram_lo_we = bram_wr & sel_vram`, both with `bram_wdata`), so the account predicts the same fault for both, which is what was measured. This withdraws BRD-055, whose `minidma` probe painted green when the destination read `0x0000` -- and `0x0000` is exactly what a transfer that writes zeroes leaves -- so its green certified the broken path rather than the working one. That blind spot is recorded as TCL-047 and BRD-055 now carries a WITHDRAWN title and status rather than being quietly reworded. BRD-045 was not reproducible on this image: Super Mario Advance does not freeze in `REQ1_WAIT`, it boot-loops the BIOS (BRD-059), and Dr. Mario completes the BIOS and then never enables the display (BRD-060); both are now explained by this one fault, because a `crt0` that copies its own code into IWRAM by DMA receives zeroes, and the ARM encoding of zero is `andeq r0, r0, r0` repeated, so execution either wanders into unmapped memory and resets or wedges. It also explains the shape of the whole investigation: every probe built in this session used CPU stores and every one of them passed, `test_logo.gba` passes and draws correctly because it uses no DMA, and the cartridges that fail are exactly the ones that do. Four probes were written and discarded during this cycle because each compared its destination only against an expected pattern, which cannot separate "not written" from "written wrongly"; `dma3dest`, `dmaalias`, `dmaalias64` and `dmamin` were deleted and `dmawrote` asks the question that separates them. `tools/roms/minidma.s` keeps its source but now carries an UNSOUND COMPARISON note. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 63 were not rewritten, the two new records carry unique ids and the canonical field order, BRD-055's withdrawal preserves its original text with the status changed, and this is entry 64 with the canonical sections and a count of sixty-four against the 100-entry limit.
+
+#### Next Steps:
+
+Fix the DMA-to-BRAM write path, because it is now the single fault standing between this core and a booting cartridge, and the RTL names where it is. The write data for a BRAM destination must come from the fetched SDRAM read data on the cycle after the acknowledgement, not from `dma_wdata` in `state == MAIN`; the mechanism the CPU path already uses for rom-plus-ram accesses, where `bram_wr_buf`, `bram_wdata_buf` and `bram_be_buf` are loaded in `REQ1_WAIT` and replayed in the wait states, is the shape the DMA path needs, and the `~dma_on` term that excludes DMA from arming it is the specific thing to change. Before any rebuild, re-run `dmawrote.gba` under mGBA to confirm it still passes there and then on the board, because that probe is the gate this fix has to satisfy. Then re-test Super Mario Advance and Dr. Mario, which are the two observations that should change: SMA should stop looping the BIOS and Dr. Mario should get past handover. Two records elsewhere still rest on the withdrawn BRD-055 and must be corrected when the tree is next reviewed -- BRD-055's consequence lists the DMA path among the subsystems measured good, and entry 61's summary repeats it. `minidma`'s zero-comparison blind spot may not be unique to it, so any other probe expecting `0x0000` should be re-read under TCL-047 before its result is quoted again.
+
+#### Files Modified:
+
+- tools/roms/dmawrote.s
+- tools/roms/minidma.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
