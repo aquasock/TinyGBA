@@ -60,7 +60,10 @@ clr:
     str     r1, [r0]
     ldr     r1, =0x06000000
     str     r1, [r0, #4]
-    ldr     r1, =0x8400003F         @ enable|32bit|src INC|dst inc, 64 words
+    @ The count field is a literal unit count, not a count-minus-one: 0x3F
+    @ transfers 63 words, not 64.  Harmless here because this probe only reads the
+    @ first destination word, but the comment said 64 and the register says 63.
+    ldr     r1, =0x8400003F         @ enable|32bit|src INC|dst inc, 63 words
     str     r1, [r0, #8]
 
     @ settle
