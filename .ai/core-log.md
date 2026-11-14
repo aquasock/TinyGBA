@@ -2173,3 +2173,35 @@ Write the audio instrument, because audio is now the largest subsystem that has 
 - User Test: PASS
 
 ---
+
+## 68 COMMIT Unreleased 2026-11-14T17:10:00-07:00
+
+#### Coming From:
+
+Unreleased 2bd9ddf
+
+#### Purpose:
+
+Drive the diagnostic cartridge's menu from the host, so input on the board becomes measurable rather than something a person has to supply by hand.
+
+#### Outcome:
+
+Input works on the board and the diagnostic cartridge navigates under scripted control. Nothing in this project could press a button before: every board result came from a cartridge that draws its answer and stops, so anything gated behind a keypress was unmeasurable here. The core's command table already carried the input command, so the work was a host tool and an instrument rather than an RTL change. `tools/gba_input.py` sends command `0x09` with a 16-bit joystick word, which the core stores into `hid1` and `gbatang_top.sv` ORs into the keypad; `tools/roms/keylive.s` polls `KEYINPUT` in a loop and paints one 16x16 square per button, green when held, which is what `keyprobe.s` could not do because it samples the register once at boot. Each button was verified in isolation with everything else released: START lights square 3 only, RIGHT square 7, UP square 4 and A square 0, and release returns all ten to red with `KEYINPUT` back at `0x3FF`. The diagnostic cartridge was then walked through its menu: START opens it, three DOWN presses moved the marker 8 native rows each time from 33 to 41 to 49 to 57, two UP presses reversed it exactly, and the hover description changed from `GUIDED FULL CHECKOUT WITH A PASS/FAIL SUMMARY` to `CPU + BIOS ID, BUS TIMING, SAVE CHIP DETECTION`, so the cartridge is reading the keypad every frame. A entered SYSTEM STATUS and B returned with the selection preserved. The page it drew is the cartridge's own report about this machine: `ARM7TDMI @ 16.78 MHZ`, `ARMu4T (ARM+THUMB)`, `BIOS SUM: 0xBAAE187F`, `GBA/SP/MICRO`, bus timing `IWRAM 1496` `EWRAM 2264` `ROM 2264` cyc/256 reads all `OK`, `WAITCNT: 0x0000`, and `CART SAVE (SRAM PROBE): NOT DETECTED`. That checksum is the same value the same cartridge reported under the Verilator model, which independently confirms the BIOS image on hardware. One tool defect cost two rounds of hardware measurement and is recorded as TCL-051: the input tool hard-coded a frame magic of `0xA5` where the working loader uses `0xAA`, so every frame was silently discarded as an unknown command and the symptom was indistinguishable from a dead input path. The lesson is to take framing from a working client rather than from a protocol comment that documents only the payload. Recorded as BRD-068 and TCL-051. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 67 were not rewritten, all 119 records carry unique ids and the canonical field order, and this is entry 68 against the 100-entry limit.
+
+#### Next Steps:
+
+Use the input path to let the cartridge verify the machine instead of building probes for what it already tests. The obvious next step is to walk to MEMORY TEST and run it, then the remaining entries in order, because that page reports IWRAM, EWRAM, VRAM, PRAM and OAM in one screen from a third-party suite rather than from a probe written here -- the same suite whose Verilator result is already recorded, so the board result becomes a direct comparison. Then read what `CART SAVE (SRAM PROBE): NOT DETECTED` means before treating it as a finding: the cartridge's probe search and the core's `config_backup_type` selection both need reading, and the likely candidates are that the core reports no backup type for this image or that the SRAM window is not where the probe looks. Audio remains the largest unmeasured subsystem (BRD-067) and the AUDIO TEST menu entry is now reachable, which makes an operator-verifiable audio check cheap. Leave the save path and audio alone until the memory test has been run, since it is one keypress away and answers a question the probes were about to be written for.
+
+#### Files Modified:
+
+- tools/gba_input.py
+- tools/roms/keylive.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
