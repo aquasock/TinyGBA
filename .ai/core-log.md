@@ -1658,3 +1658,33 @@ Wire `tools/memory_census.py` into `tools/build_tinygba.sh` beside the existing 
 - User Test: NOT RUN
 
 ---
+
+## 52 COMMIT Unreleased 2026-11-13T17:24:48-07:00
+
+#### Coming From:
+
+Unreleased 9a5974a
+
+#### Purpose:
+
+Turn TCL-035's nextpnr blind spot into a checked tool, and correct the depth figures that record carried from an ad-hoc analysis while the board image for the synchroniser change is being placed.
+
+#### Outcome:
+
+`tools/bsram_addr_check.py` now measures, on any synthesised netlist, how much logic sits between a dual-port BSRAM address port and the nearest flip-flop, and it corrected the record it was built from. The first figures in TCL-035 came from an ad-hoc traversal that walked *into* BSRAM cells, whose outputs are registered, so it never reached a flip-flop and its depths were clipped by a cap; the `twelve levels` that record first carried was that artefact. The tool stops traversal at every non-combinational cell and always measures against a fixed generous cap rather than the bound being tested, so a reported depth is the depth. It reproduces the corrected figures in half a second: 362 logic-driven `ADB` bits on 109 dual-port BSRAM cells, distributed as 38 bits at one level, 38 at two, 38 at three, 76 at five, 38 at six, 38 at seven, and 96 bits at 41 to 43 levels. All 96 deep bits belong to `mem.mem_bios` across eight `DPB` slices, and tracing one chain names its shape: it starts at `cpu.cmd`, runs through a long `ALU` carry chain of the CPU's address datapath, and arrives at `mem.ram_addr`, which is the address `mem_bios` is read with, so the path is the CPU's address generation meeting a port nextpnr does not time rather than a peripheral's local logic. TCL-035 was corrected in place, with the correction itself recorded in its `verification` field rather than made silently. The gate is built to catch a regression rather than to fail on what is already known: `--known` defaults to `mem.mem_bios`, so a recorded array is printed and does not fail, while a *new* array with a deep cone does. It was tested in four directions — the unmodified netlist passes, a cloned deep cone under a new name fails and is named, a generous `--max-depth` reports only, and a missing file exits 2 — and two of those runs found real defects in my own tool: the traversal bug above, and a closing message that claimed nothing exceeded the bound while the known array plainly did. It is not wired into `tools/build_tinygba.sh` for the same reason as `tools/memory_census.py`, that a placement sweep was running and a shell re-reads a running script. Separately, placement of the synchronised tree continues: eight seeds launched at 17:11, seed 13 has already aborted on BRD-024's `hclk5` route failure, and the other seven are between 134,000 and 224,000 iterations. Nothing was deployed and no board reading was taken. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 51 were not rewritten, confirmed TCL-035's correction preserves its canonical field order, and validated this entry as entry 52 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-two against the 100-entry limit.
+
+#### Next Steps:
+
+Finish the board cycle that this one ran alongside, which is still the thing that decides anything: pick a completed seed with `tools/clock_plane_select.py` requiring a measured-good `hclk` pip and the two good `clk67` spines per BRD-048, and read the pool word and DISPCNT on the board against BRD-050's two predictions at two seeds with two loads each per TCL-034. If the board confirms the synchroniser, the `mem_bios` cone becomes the next thing to look at for the remaining placement sensitivity, and the cheapest test is to register `mem.ram_addr` one level before `mem_bios`'s address port so the 43-level cone feeds a flip-flop; that is a change to the address datapath and must be judged with the box on the same two-seed two-load bar. Wire both `tools/memory_census.py` and `tools/bsram_addr_check.py` into `tools/build_tinygba.sh` beside the register-parity and clock-plane gates once no build is running, so both classes are checked on every build rather than when someone looks. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment; all three are measured and closed.
+
+#### Files Modified:
+
+- tools/bsram_addr_check.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
