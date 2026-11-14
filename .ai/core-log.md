@@ -2269,3 +2269,34 @@ Update `README.md`, which is now well behind the tree: it still says no cartridg
 - User Test: PASS
 
 ---
+
+## 71 COMMIT Unreleased 2026-11-14T23:10:00-07:00
+
+#### Coming From:
+
+Unreleased ad773df
+
+#### Purpose:
+
+Bring the project's user-facing documentation into line with what the hardware has actually been shown to do, and correct two records that later evidence contradicted.
+
+#### Outcome:
+
+`README.md` was rewritten rather than patched, because its opening sentence still said no cartridge had run and its "Known gaps" list opened with the same claim; every section now states what was measured and cites the record. The new text leads with the result that a retail cartridge runs, naming Castlevania Aria of Sorrow at 8 MiB with 75 distinct frames in 75 seconds and six consecutive clean loads, then separates the two defects that blocked the machine -- the static-function mis-synthesis of BRD-064 and the undriven `dma_bus_unread` of BRD-065 -- from the earlier video, SDRAM and clock findings that remain true. The build section now documents the actual gates in the order they run, including the synthesis-conflict gate added this session and the reason each exists; the deploy section names the real image, `build/snd_prod`, since the earlier `build/deploy_prod` reference pointed at a November 13 image taken before the DMA fix and would have misled anyone following it. New sections cover host-side input injection, the capture card's ALSA input, and the `.ai/` record library with an explicit note that many records carry SUPERSEDED or WITHDRAWN titles deliberately. Two claims were deliberately weakened rather than stated as fact: the "first open-flow GBA core" line is attributed to the operator as an assessment about the wider field rather than something measured here, and the capture geometry is described as measured on this board rather than derived from a script that does not in fact contain it. `THIRD_PARTY.md` said the vendored tree was "verbatim except for the files listed below", which had not been true for some time; it now points at the `TinyGBA:` marker as the authoritative list, names the seventeen files carrying one, and groups them by kind. Two corrections were made in `.ai/core-reference.md`. BRD-049 claimed `cpu_ready` is high for a single `clk67` cycle, which the RTL contradicts: every assignment sits inside the `cycle[3]` slot of a one-hot counter over four values, so the strobe is a full `clk16` period wide, and the synchroniser added later was justified on exactly that width, so designing against the recorded figure would have made a safe synchroniser look unsafe. A paraphrase of the Thumb stale-acknowledgement claim was also removed from the same record rather than asserted, since the probe written to test that mechanism did not reproduce it. The core-syntax audit was run as required for a change under `.ai/`: `core-log.md` holds 70 entries numbered 1 to 70 with no gaps, all of type `COMMIT` and version `Unreleased`, every entry carrying exactly the six canonical sections in order and ending with `---`, no `???` placeholder, and the log is under the 100-entry limit; `core-reference.md` holds 130 records with 130 unique ids, no duplicates, every record in the canonical field order, all ids matching `BRD-` or `TCL-` and three digits, and a status vocabulary of 122 `VERIFIED`, 6 `LEAD` and 2 `MEASURED`. The audit also found that six historical entries, numbers 5 and 14 to 18, carry prose in their Status values where the current syntax allows only `PASS`, `FAIL`, `NOT RUN` or `N/A`; those are committed history and the syntax document forbids rewriting a recorded outcome, so they are left as they stand and noted here rather than corrected. Every command the README documents was executed and checked to work, including `make_probe_rom.py --list`, `load_gba_rom.py --dry-run` and `gba_input.py`, because a README with broken commands is worse than a stale one. No RTL was changed, so no build or hardware stage applied.
+
+#### Next Steps:
+
+The README and THIRD_PARTY now match the tree, so the documentation debt is cleared and the next cycle can return to hardware. Two items remain from the previous entry and are unaffected by this one: a seed sweep to recover `clk67` timing margin, since `build/snd_prod` needed the documented multicycle relaxation where `build/rev_prod` needed none and the netlist is cached so a sweep costs minutes rather than hours; and configuring a backup type in the loader so that the save path, which no cartridge has ever exercised here, becomes testable. Neither is urgent against a machine that runs retail software, and both are recorded rather than implied. If a release is wanted, this is the natural boundary for one: the versioning rule calls for a MINOR bump at a hardware-proven milestone and the first release is 0.1.0, but tagging is an external publication and awaits the operator's explicit decision.
+
+#### Files Modified:
+
+- README.md
+- THIRD_PARTY.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---

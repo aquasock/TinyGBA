@@ -10,8 +10,15 @@ is in this tree, and no external checkout is involved in a build.
   https://github.com/nand2mario/tangcore, GPL-3.0. That project is itself a port
   of the MiSTer GBA core, with the CPU replaced by risclite's ARM9-compatible
   soft core and the memory system rewritten. The vendored tree is upstream's
-  `src/` verbatim except for the files listed below, each change marked in place
-  with a `TinyGBA:` comment.
+  `src/` with every deviation marked in place by a `TinyGBA:` comment. That
+  marker is the authoritative list and `grep -rn 'TinyGBA:' fpga/gba/src/`
+  enumerates it; seventeen files carry one at the time of writing. They fall
+  into three groups: forced toolchain accommodations (slang rejecting `$error`,
+  undeclared parameters, block-scoped registers), `ifdef`-guarded diagnostics
+  that never reach a synthesised build, and fixes for real defects, each with a
+  `BRD-` or `TCL-` record behind it. The last group includes the sound channels
+  (`gba_sound.v`, `gba_sound_ch1.v`, `ch3`, `ch4`), `gba_memory.sv`,
+  `gba_dma_module.sv` and `gbatang_top.sv`.
 
 - **GBATang's Verilator harness** — `tools/sim/sim_main.cpp` is upstream's
   `verilator/sim_main.cpp` at the same commit, GPL-3.0, carried unmodified. It

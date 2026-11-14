@@ -4,50 +4,105 @@ GBATang, ported to the Tang Console 138K with the open flow — yosys with the
 slang front end, `nextpnr-himbaechel` against the GW5AST-138C database, and the
 apicula fork's `gowin_pack`. No Gowin EDA is involved.
 
-The video path is proven on hardware. The machine has not been booted yet: no
-cartridge has run on the board, so no game has produced a picture.
+**A retail GBA cartridge runs on the board.** Castlevania: Aria of Sorrow, an
+8 MiB image, boots to its title screen, plays its intro and continues into
+gameplay, producing 75 distinct frames in 75 seconds with correct picture,
+correct audio and a correct frame rate. Six consecutive loads of that same image
+all booted correctly. The diagnostic suite reports `RESULT: ALL REGIONS PASS` on
+hardware across IWRAM, EWRAM, VRAM, PRAM and OAM, and its button test counts
+10/10 controls pressed.
+
+The operator's assessment is that this is the first open-flow GBA core — yosys,
+nextpnr, no vendor EDA — to run retail software on hardware, following the same
+project's TinySNES core. That is a claim about the wider field rather than
+something measured here, and is stated as the operator's assessment, not as a
+verified fact.
+
+---
 
 ## Status
 
-- **Video chain: works.** `01_video` draws eight colour bars with a 16×16 white
-  orientation marker at the top left and the wide grey band on the right. That
-  exercises the PLL and divider topology, the clock placements in `tinygba.cst`,
-  the OSER10 serialiser path and the TMDS pair.
-- **SDRAM: verified good on the board.** The corrected probe reads sixteen green
-  bars and a green status band: 64 MiB, both dies, all sixteen patterns. Two
-  earlier readings of that probe were taken on images whose `clk67` crossed no
-  clock-plane pip at all and are superseded. See `core-reference.md` BRD-006.
-- **The machine: a retail-grade diagnostic suite passes it in simulation.** On
-  the board the boot halt now clears; in the Verilator model `RetroRegen GBA Test
-  v1.5` reports `ARM7TDMI @ 16.78 MHz`, `ARM v4T`, the official BIOS checksum, and
-  `RESULT: ALL REGIONS PASS` across IWRAM 32K, EWRAM 256K, VRAM 96K, PRAM 1K and
-  OAM 1K, plus LCD solid, LCD ramps and a GPU scene. The model has no SDRAM
-  controller — it substitutes an array — so that result says nothing about the
-  physical memory path, and running the same ROM on the board is the next
-  instrument. See `core-reference.md` BRD-011.
+### The machine: runs retail titles
 
-- **The board in detail.**
-  The CPU halted at the `HALTCNT` write because an undriven `gb_bus_rst` folded
-  to constant 1 under `synth_gowin`, deleting every MMIO register's write path
-  and about 4,500 of 9,100 flip-flops. Driving the wire low restores them, and on
-  the board the halt now clears and the CPU runs its boot halt loop — fifteen
-  halts, each one woken by VBlank, where the previous build entered one and
-  never left. See `core-reference.md` TCL-011, BRD-008 and BRD-009.
+- **Picture.** Three retail titles render correctly: the RetroRegen diagnostic
+  cartridge draws its full title screen and menu, Dr. Mario draws its title
+  screen, and Super Mario Advance reaches character select. Castlevania Aria of
+  Sorrow (8 MiB) runs from title through intro into gameplay. See
+  `core-reference.md` BRD-066 and BRD-075.
+- **Audio.** Stereo separation is correct on HDMI and both pitch and level are
+  now correct. Measured through the capture card's own audio input: CH1 SQUARE
+  plays 439.4 Hz at 3331 RMS for a stated 440 Hz, CH3 WAVE plays 440.1 Hz with a
+  textbook triangle spectrum, and the PCM path — which was never at fault —
+  sweeps cleanly from 40 to 7960 Hz against a claimed 100–8000. See BRD-071,
+  BRD-072 and BRD-074.
+- **Memory.** The diagnostic suite passes every internal region at full size:
+  IWRAM 32K, EWRAM 256K, VRAM 96K, PRAM 1K, OAM 1K, cells and decoder both, in
+  1377 ms. See BRD-069.
+- **Input.** Host-side joystick injection over the core's UART drives the
+  diagnostic cartridge's menu, and the cartridge's own button test confirms all
+  ten controls. See BRD-068.
+- **Multi-load behaviour.** The bimodality recorded in BRD-014 and BRD-045 — one
+  load halting, another running — did not reproduce across six consecutive loads
+  of one 8 MiB image on one bitstream. See BRD-077.
 
-  A cartridge fetch has since been observed on the board, but only in one of two
-  states the same bitstream alternates between across loads (BRD-014): the good
-  state fetches, the bad state halts once and never wakes. The GPU raster is
-  proven running (BRD-017) and the line reaches the drawer (BRD-018), where
-  `pixel_out_we` never asserts. That is the whole remaining distance to a
-  picture, and no retail title has produced one yet.
+### The two defects that blocked it, both now fixed
 
-- **The clock plan is not settled.** `clk16` reaches its sinks on six `*/TOP3`
+Both were synthesis and memory-arbitration faults rather than anything in the
+CPU, the GPU or a cartridge.
+
+- **The netlist was mis-synthesised.** Three helper functions in
+  `gba_memory.sv` were declared without `automatic`, so every call site drove one
+  shared argument variable. Yosys reported 72 `multiple conflicting drivers`
+  warnings against `issingle`, `isreadonly` and `tosdram` — the memory and DMA
+  arbitration — and resolved them arbitrarily. A minimal reproduction
+  synthesised the input bus shorted to ground and the output tied to VCC.
+  Verilator inlines functions per call site and never saw it, which is why every
+  simulation passed while the bitstream did not. **BRD-064, TCL-049.**
+- **An undriven wire in the DMA data path.** `dma_bus_unread` was connected to
+  nothing, and it sits in the one condition that decides whether a DMA transmits
+  the word it just read or a stale buffer. In simulation an undriven wire is 0, so
+  real data moved; under `synth_gowin` it is `x`, `opt` folded the condition to
+  constant false, and every DMA transmitted `last_dma_in` — zero on a first
+  transfer. **BRD-065, TCL-050.**
+- A third fix restored two lines of `gba_memory.sv` to upstream, undoing a port
+  change from 2026-11-02 that became both unnecessary and harmful once the ready
+  strobe was synchronised. **Commit `f38cebe`, BRD-066.** The fix is confirmed;
+  the proposed mechanism for it is not, and `DISSENT-req2-start-mechanism-2026-11-14.md`
+  records the contradiction rather than smoothing it over.
+
+### Earlier milestones, still true
+
+- **Video chain.** `01_video` draws eight colour bars with a 16×16 white
+  orientation marker and the wide grey band; that exercises the PLL and divider
+  topology, the clock placements in `tinygba.cst`, the OSER10 serialiser path
+  and the TMDS pair.
+- **SDRAM.** Verified good on the board: 64 MiB, both dies, all sixteen
+  patterns. See `core-reference.md` BRD-006.
+
+### Open
+
+- **The clock plan is not fully settled.** `clk16` reaches its sinks on `*/TOP3`
   pips this board has never measured, and `tools/clock_plane_report.py --strict`
   refuses every placement this tree produces. Only four clock-plane paths are
   measured-good here, and the sibling TinySNES project's BRD-005 records the same
-  netlist booting or not depending only on which spine the master clock takes. A
-  hardware reading from this tree cannot yet be attributed to the design rather
-  than to the pip.
+  netlist booting or not depending only on which spine the master clock takes.
+  A hardware reading from this tree is still attributable to the design only with
+  that caveat.
+- **Timing margin varies by seed.** Some images need the documented GBATang
+  multicycle relaxation for `clk67` and some do not; `build/rev_prod` reached
+  181 MHz with none, `build/snd_prod` needed the allowance at 53.6 MHz. That is
+  placement variance on one seed, not a property of a change, and a seed sweep
+  recovers it.
+- **The save path has never worked.** `tools/load_gba_rom.py` sends only commands
+  `0x06`, `0x07` and `0x08`, and `config_backup_type` is assigned from the loader
+  stream only in a fourth loading stage this loader never enters, so it stays
+  `BACKUP_NONE`, regions `0x0E000000` and `0x0F000000` are treated as read-only,
+  and every save write is discarded. No cartridge with a battery-backed save has
+  ever had one on this board. See BRD-070.
+- **Link port, RTC and solar sensor** are unexercised; no cartridge here uses
+  them.
+
+---
 
 ## Build
 
@@ -58,40 +113,72 @@ TINYGBA_BUILD_DIR=build/diag \
   TINYGBA_DEFINES=-DTINYGBA_VIDEO_TEST tools/build_tinygba.sh
 ```
 
+The production image, as built and tested (this produced `build/snd_prod`, the
+current best image — a retail title runs on it; see Status):
+
+```
+TINYGBA_BUILD_DIR=build/snd_prod TINYGBA_SEED=14 \
+TINYGBA_DEFINES='-DTINYGBA_OVERLAY_OFF -DTINYGBA_BIOS_HEX="/abs/path/official_bios.hex"' \
+TINYGBA_SYNTH_EXTRA=-nowidelut tools/build_tinygba.sh
+```
+
+`-nowidelut` is not the default and matters: without it wide muxes map to LUTs,
+cell count rises from 58,501 to 81,124 and builds take roughly three times
+as long. See TCL-036.
+
 | variable | meaning |
 |---|---|
 | `TINYGBA_STAGE` | `synth`, `pnr`, `pack` or `all` |
 | `TINYGBA_BUILD_DIR` | output directory |
 | `TINYGBA_SEED` | placement seed; the router is seed-sensitive and will fail to converge on some |
-| `TINYGBA_DEFINES` | preprocessor defines for a diagnostic build |
+| `TINYGBA_DEFINES` | preprocessor defines, including `-DTINYGBA_BIOS_HEX="/abs/path.hex"` to substitute a BIOS |
+| `TINYGBA_SYNTH_EXTRA` | extra arguments for `synth_gowin`, e.g. `-nowidelut` |
+| `TINYGBA_FORCE_SYNTH` | `1` re-synthesises even when a cached netlist exists |
 | `TINYGBA_ALLOW_HOLD` | `1` lets an unclean placement through; the Fmax gate still runs |
 | `TINYGBA_CLOCK_PLANE_STRICT` | `1` makes the clock-plane gate refuse a clock on a pip this board has never measured |
 
+Each build gets its own directory under `build/` and they accumulate — several
+hundred exist in a working tree, because a seed sweep or a before/after
+comparison creates one per attempt. `build/test/` holds probe cartridges.
+
 A build that fails in place and route with a few thousand nets unrouted is the
 known seed sensitivity, not a broken change — retry with another seed, or use
-`tools/sweep_tinygba_seeds.sh`.
+`tools/sweep_tinygba_seeds.sh`. Placement and routing dominates the wall clock;
+re-running with `TINYGBA_STAGE=pnr` reuses the cached netlist.
 
-Two gates run between routing and packing, because neither is visible in the
-timing report and both have shipped an image that was wrong:
+### Gates
 
-- **`tools/clock_plane_report.py`** reads the routed netlist and reports which
-  clock-plane bridge pip each clock takes. A clock on a pip measured as clocking
-  nothing, or on no pip at all (general routing), fails the build. It writes
-  `$out/clock-plane.log`. What it cannot yet do is require a measured-good path:
-  `clk16` lands on `*/TOP3` pips at every seed tried, and this board has never
-  measured those. `TINYGBA_CLOCK_PLANE_STRICT=1` turns that into a refusal.
-- **`tools/gatelevel_report.py`** reads the synthesised netlist and reports, per
-  named net, whether it exists and whether every bit has a driver. Use it before
-  trusting any hardware reading from a build, and `--compare` two netlists to see
-  what a change did to the fetch path.
-- **`tools/clock_edge_check.py`** (build step 1c) refuses a netlist in which one
-  clock drives both a true negedge flop and a LUT clock inverter. On GW5A,
-  `synth_gowin` keeps only a plain negedge flop as `DFFN` and legalises every
-  negedge flop with an enable or reset into a posedge `DFFRE` behind a LUT1
+Each of these exists because something shipped that was wrong and neither the
+timing report nor any simulation could see it.
+
+- **1a. Synthesis-conflict** — fails the build on any `multiple conflicting
+  drivers` warning. Read from both `synth.err` and `synth.log`, because those two
+  files have held different counts of the same warning on one design. **This is
+  the gate that would have caught the defect that blocked the machine for a
+  week**; see BRD-064.
+- **1b. Register parity** (`tools/synth_parity.py`) — compares a netlist's
+  register population against a recorded baseline for its configuration and
+  fails on a large loss. A netlist can lose most of its registers and still
+  build, pass timing and pack; on 2026-11-02 an undriven `gb_bus_rst` folded high
+  and deleted about 4,500 of 9,100 flip-flops. Record a baseline with
+  `--update-baseline`.
+- **1c. Clock edge** (`tools/clock_edge_check.py`) — refuses a netlist where one
+  clock drives both a true negedge flop and a LUT clock inverter. On GW5A
+  `synth_gowin` legalises negedge flops into posedge `DFFRE` behind a LUT1
   inverter, so the two halves clock a few ns apart with no hold check between
-  them. That deadlocked the SuperFX in the sibling TinySNES project; this port
-  had no gate for the class. Measured 2026-11-04: this tree has no `DFFN` at all,
-  so the gate is insurance rather than a fix.
+  them. That deadlocked the SuperFX in the sibling TinySNES project.
+- **3. Clock plane** (`tools/clock_plane_report.py`) — reports which clock-plane
+  bridge pip each clock takes, and fails on a pip measured as clocking nothing or
+  on no pip at all (general routing). `TINYGBA_CLOCK_PLANE_STRICT=1` additionally
+  refuses a pip this board has never measured.
+- **4. Timing** (`tools/timing_gate.py`) — applies the documented GBATang
+  multicycle allowances, prints each with the upstream line it comes from, and
+  gates the hold count and the cross-clock paths that the Fmax report never sees.
+  nextpnr implements no `set_multicycle_path` and its `set_false_path` is a
+  no-op, which is why this gate exists rather than a constraint file.
+
+The build also refuses a stale `fpga/gba/src/probe_bits.vh` and a diagnostic
+packing width that does not match its field map.
 
 ### Diagnostic builds
 
@@ -102,7 +189,9 @@ timing report and both have shipped an image that was wrong:
 | `TINYGBA_SDRAM_TEST` + `TINYGBA_SDRAM_LANES` | the low halfword's sixteen data bits, green = that lane returned 1 |
 | `TINYGBA_OVERLAY_OFF` | production machine with the OSD suppressed — use this in one-wire mode |
 | `TINYGBA_STATUS_TEST` | sixteen probe bits: fetch region, raster, halt state and interrupt enables |
-| `TINYGBA_PIXTEST` | sixteen drawer bands: live `drawstate`, `busy_mode345` and the VRAM fetch state, plus history controls |
+| `TINYGBA_PIXTEST` | sixteen drawer bands: live `drawstate`, `busy_mode345` and the VRAM fetch state |
+| `TINYGBA_FETCHTRACE` | the first sixteen completed CPU memory cycles after the jump to `0x08000000`, as bit cells; decoded by `tools/decode_fetchtrace.py` |
+| `TINYGBA_STALLTRACE` | an MMIO write ring and FSM snapshots around a detected stall |
 
 The `TINYGBA_STATUS_TEST` bar layout is **generated**, not hand-written. One field
 list in `tools/probe_map.py` produces both the RTL packing
@@ -110,30 +199,13 @@ list in `tools/probe_map.py` produces both the RTL packing
 stale include. Four consecutive cycles on the sibling SNES project mis-stated a
 field position and each produced a plausible number rather than an error; this
 project then repeated that class three times in one session. Decode a capture
-with `tools/probe_map.py --decode frame.png` and never by hand — the tool
-prints the map id, and a capture only decodes under the map that built it.
+with `tools/probe_map.py --decode frame.png` and never by hand — the tool prints
+the map id, and a capture only decodes under the map that built it.
 
 The OSD powers up asserted and its 960-pixel window hides the framebuffer behind
 an empty menu's black. In two-wire mode the BL616 menu closes it; in one-wire
 mode nothing does, so a production build **without** `TINYGBA_OVERLAY_OFF` will
 look black and that is not a machine fault.
-
-### Register-parity gate
-
-`tools/synth_parity.py` compares a netlist's register population against a
-recorded baseline for its configuration, and fails the build on a large loss.
-
-```
-tools/synth_parity.py build/x/tinygba.json --key TINYGBA_STATUS_TEST
-tools/synth_parity.py build/x/tinygba.json --key NAME --update-baseline
-```
-
-It exists because a netlist can lose most of its registers and still build, pass
-timing and pack — which is exactly what happened here, and what no simulation can
-detect, since a simulation sees the signal rather than its absence. It also
-reports every `used but has no driver` wire that synthesis found, grouped by
-instance, because an undriven wire that gates a conditional is the cause of this
-class.
 
 ### Simulation
 
@@ -142,44 +214,60 @@ The core runs under Verilator with SDL video, FST tracing and audio capture:
 ```
 tools/sim/build_gba_sim.sh build          # verilate and compile
 tools/sim/build_gba_sim.sh run game.gba   # SDL window; -s N limits steps
+TINYGBA_SIM_DEFINES=-DTINYGBA_SDRAM_RTL \
+  tools/sim/build_gba_sim.sh build        # real controller + pin-level model
 ```
 
-This is the only way to ask a question about *correctness* rather than about
-state. Every hardware result in this project before it came from a 16-bit strip
-on a capture card, and the sibling SNES project reached the same impasse and
-concluded the board had to be replaced by a bench for these questions.
+`-DTINYGBA_SDRAM_RTL` swaps the behavioural `sdram_sim.v` array for the real
+`sdram_gba.v` controller driving `fpga/gba/diag/sdram_model.v`. It is slower and
+it is the only way to exercise the controller at all; several real faults only
+appeared in that configuration.
 
-The harness is upstream's `verilator/sim_main.cpp`, which this port had never
-carried. It needed three repairs to build at all, which is evidence it had not
-been run against this revision: two `ifdef VERILATOR` `$display` statements in
-`gba_eeprom.sv` index an array whose declaration is commented out in that same
-file, `linebuffer.v` and `mem_eeprom.v` are missing from the upstream source
-list, and `mem_eeprom.v` still needs the `MUX2`, `DFFRE` and `DPB` primitives,
-carried in `tools/sim/gowin_cells_sim.v`.
+Two things the harness cannot tell you, learned the hard way:
 
-The simulation clocks `clk50:clk16` at exactly 3:1 from one counter, which
-matches the board's 50.25:16.75 MHz. That makes it a fair reference for logic
-and an unfair one for anything that depends on how two clock domains relate,
-since on the board `clk16` and `clk50` come from different PLLs.
+- **It cannot see a synthesis defect.** Verilator and `synth_gowin` differ on
+  undriven wires and on static function storage, and both differences produced
+  faults that ran correctly in the model and failed on the board. When hardware
+  and simulation disagree, read the synthesis log before doubting the RTL.
+- **It is unfair about cross-clock questions.** The harness clocks `clk50:clk16`
+  at exactly 3:1 from one counter, which matches the board's 50.25:16.75 MHz, but
+  on the board the two come from different PLLs with an arbitrary phase.
 
-### Test cartridge
+A unit testbench that instantiates one production module and drives its register
+bus is often the better instrument: minutes instead of forty, and it can be run
+against the pre-change module from git to give a matched before/after. That is
+how the two audio fixes were verified before any bitstream was built — see
+BRD-073 and TCL-053.
 
-`tools/make_gba_test_rom.py` writes a self-checking cartridge, so the first
-cartridge put on the board is a discriminator rather than an experiment:
+### Test cartridges
+
+`tools/make_probe_rom.py` assembles every probe in `tools/roms/` into a loadable
+cartridge. Each one paints green where the machine behaved and red where it did
+not, so a result reads off a screen rather than being inferred.
 
 ```
-tools/make_gba_test_rom.py -o build/test/test.gba
+tools/make_probe_rom.py --list
+tools/make_probe_rom.py irq3                  # -> build/test/irq3.gba
+tools/make_probe_rom.py all --out-dir build/test
 ```
 
-It forces blank, checks three constants at three cartridge offsets, writes and
-reads back IWRAM, EWRAM and VRAM including two individual byte lanes, then draws
-mode 3 — **green** if every check passed, **red** with one yellow full-height
-column per failed check if any did not — and blinks a white square so a capture
-can tell a running CPU from one that wedged. It enables no interrupt and writes
-no `WAITCNT`, so a pass says nothing about either. Needs `arm-none-eabi-as`; set
-`ARM_TOOLCHAIN` to its bin directory if it is not on `PATH`. The logo region is
-zero-filled because this core's BIOS is Cult-of-GBA built with `NO_LOGO`, which
-branches straight to `0x08000000` without validating it.
+`tools/make_gba_test_rom.py` writes the original self-checking cartridge, which
+forces blank, checks three constants at three cartridge offsets, writes and reads
+back IWRAM, EWRAM and VRAM including two byte lanes, then draws mode 3 — green if
+every check passed, red with one yellow column per failure. It enables no
+interrupt and writes no `WAITCNT`, so a pass says nothing about either.
+
+**Every probe must pass in mGBA before its board result is read.** A probe that
+fails in the emulator is telling you about itself. This rule (TCL-041) has caught
+at least eight separate instrument defects here — a PC-relative `adr` with the
+cartridge base added twice (TCL-042), an interrupt acknowledged through `IE`
+instead of `IF` (TCL-043), breakpoints taken from an older build (TCL-044), an
+SWI number in the wrong bits (TCL-045), a probe whose expected value was `0x0000`
+— exactly what a broken transfer writes, so its green certified a fault for three
+days (TCL-047), probes that never verified their own preconditions (TCL-048), and
+a frame magic one byte off the working loader's (TCL-051).
+
+---
 
 ## Deploy (one-wire)
 
@@ -188,20 +276,45 @@ straight at the core's UART. Use the oss-cad-suite copy of `openFPGALoader`; the
 system copy at v0.13.1 has no `tangconsole` board.
 
 ```
-~/oss-cad-suite/bin/openFPGALoader -b tangconsole build/diag_video/tinygba.fs
-```
-
-Diagnostic builds need no cartridge. For the machine:
-
-```
+~/oss-cad-suite/bin/openFPGALoader -b tangconsole build/snd_prod/tinygba.fs
 tools/load_gba_rom.py game.gba                 # /dev/ttyUSB1, 2 Mbaud
 tools/load_gba_rom.py game.gba --dry-run       # header check only, sends nothing
 ```
 
-Two operational facts that cost time when forgotten. A flash that reports `Done`
-can still leave the board silent, and the fix is to load the same file again — so
-a single flash is not a test of a bitstream. And flashing clears the core's
-`loaded` state, so a cartridge has to be streamed again after every flash.
+Operational facts that cost time when forgotten:
+
+- A flash that reports `Done` can still leave the board silent, and the fix is to
+  load the same file again — so a single flash is not a test of a bitstream.
+- Flashing clears the core's `loaded` state, so a cartridge must be streamed
+  again after every flash, and after any power cycle.
+- **A power cycle erases the FPGA.** After rebooting the board the core must be
+  flashed before a cartridge means anything.
+
+### Driving input
+
+The core's own command table carries a joystick command, so a menu or a game that
+waits for a button can be driven from the host:
+
+```
+tools/gba_input.py press START                 # press and release, 120 ms
+tools/gba_input.py hold DOWN --seconds 0.6     # hold, then release
+tools/gba_input.py set UP|RIGHT                # hold until changed
+tools/gba_input.py release                     # all buttons up
+```
+
+GBA keypad bits, and the states the diagnostic cartridge reports, are in
+`tools/roms/keylive.s` — a probe that polls `KEYINPUT` and paints one square per
+button, so a capture taken during a hold reports the keypad at that moment.
+
+### Capturing
+
+`tools/cap_tang.sh <build-dir> <prefix> [--no-flash]` flashes and captures
+`/dev/video0` at 1920×1080 MJPEG. Measured on this board the active area is x 149–1770
+with the frame full height, so the scale is about 6.76. The capture card also exposes its audio
+input as ALSA `hw:1,0`; `arecord -D hw:1,0 -f S16_LE -r 48000 -c 2` records what
+the HDMI link is carrying, which is how the audio measurements were taken.
+
+---
 
 ## Layout
 
@@ -209,33 +322,53 @@ a single flash is not a test of a bitstream. And flashing clears the core's
 fpga/gba/src/      vendored GBATang, deviations marked `TinyGBA:` in place
 fpga/gba/diag/     diagnostic probes, the pin-level SDRAM model and its testbench
 fpga/gba/*.cst     pin and clock placement for the Console 138K
-tools/             build, ROM loading, seed sweep, diagnostic simulation
-build/deploy/      a numbered image set: 01_video, 02_sdram, 03_prod, 04_machine
+tools/             build, ROM loading, probes, gates, simulation, input
+tools/roms/        probe cartridge sources, one discriminator each
+.ai/               core.md, core-log.md, core-reference.md, core-syntax.md
 ```
 
-`fpga/gba/src/` is upstream's, kept unbuilt so it can be diffed against
-[GBATang](https://github.com/nand2mario/gbatang). Every deviation is a forced
-toolchain accommodation — slang rejecting `$error`, undeclared parameters,
-block-scoped registers — rather than a design change. See `THIRD_PARTY.md`.
+`fpga/gba/src/` is upstream's, kept close enough to diff against
+[GBATang](https://github.com/nand2mario/gbatang). Deviations are marked `TinyGBA:`
+in place and fall into three groups: forced toolchain accommodations (slang
+rejecting `$error`, undeclared parameters, block-scoped registers), `ifdef`-guarded
+diagnostics that never reach a synthesised build, and fixes for real defects with
+a record behind each. See `THIRD_PARTY.md`.
+
+### Project memory
+
+`.ai/` is the authoritative record and it is worth reading before changing
+anything:
+
+- **`core.md`** — directives. Restricted; changed only on request.
+- **`core-log.md`** — one entry per cycle: what was attempted, what was measured,
+  what was got wrong. A ring buffer of 100 entries.
+- **`core-reference.md`** — the record library. `BRD-` for board findings,
+  `TCL-` for toolchain and instrument findings. Every hardware claim in this
+  README has a record id.
+- **`core-syntax.md`** — format rules for the above.
+
+Records are not append-only decoration. Many carry a `SUPERSEDED` or `WITHDRAWN`
+title after later evidence contradicted them, and that is deliberate: the useful
+part is often *which* conclusion turned out wrong and what the measurement was
+that killed it.
+
+---
 
 ## Known gaps
 
-- No cartridge has been run on the board.
-- **The machine image builds, but its timing is judged rather than proven.**
-  Its `clk67` path from the SDRAM readback through the CPU and back measures
-  29.77 ns, which exceeds one 67 MHz cycle and sits inside the four cycles
-  upstream GBATang's `gbatang.sdc` allows for exactly that path. nextpnr cannot
-  express a multicycle path — it implements no `set_multicycle_path` and its
-  `set_false_path` is a no-op — so it refused the build. `tools/timing_gate.py`
-  now applies the four documented allowances, prints each one with the upstream
-  line it comes from, and gates the hold count and the cross-clock paths that
-  the Fmax report never sees. The image is correct against the design's own
-  contract and unproven on silicon: only a cartridge on the board can confirm
-  the allowance. `build/prod` still has hold violations and is not buildable.
-- `tools/run_diag_sim.sh` cannot see faults in `sdram_gba.v`: it compiles
-  `sdram_sim.v`, a logic-level stand-in, so the controller is never simulated.
-  `fpga/gba/diag/sdram_model.v` and `tb_sdram_controller.sv` are the start of
-  closing that gap and are not yet a reliable authority.
-- Controller input arrives over the BL616 link and has not been exercised.
+- **Save hardware is not configured by the loader.** See Status above; no
+  cartridge with a battery-backed save has run here.
+- **`clk67` timing margins are seed-dependent.** Some placements need the
+  documented multicycle allowance, some do not.
+- **The clock-plane question is open.** Four paths are measured-good; `clk16`'s
+  `*/TOP3` pips are not, and `--strict` refuses every placement this tree makes.
+- **Long-run stability is unmeasured.** The longest continuous run recorded is 75
+  seconds of one retail title. That is a smoke test, not a soak, and nothing here
+  says anything about an hour of play.
+- **Attribution of the `REQ2_START` fix is unresolved.** The revert works; the
+  Thumb stale-acknowledgement mechanism proposed for it does not reproduce under
+  the probe written to test it. See the dissent document.
+- `tools/run_diag_sim.sh` compiles `sdram_sim.v` and so cannot see faults in
+  `sdram_gba.v`; use `-DTINYGBA_SDRAM_RTL` instead.
 - `sdram_gba.v` relies on the device powering one register to zero; it has no
-  reset term, so it is X in simulation.
+  reset term, so it is X in a plain simulation.
