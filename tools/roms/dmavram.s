@@ -36,8 +36,13 @@
 @ and the logo image is missing entirely.  Both of those are tile data; the
 @ tilemap is the only part that is right.
 @
-@ VRAM does not permit 32-bit CPU access, but a 32-bit DMA into VRAM is legal and
-@ is how a cartridge copies a font or a logo.  If such a transfer writes only
+@ A 32-bit DMA into VRAM is how a cartridge copies a font or a logo, and VRAM
+@ also permits 32-bit CPU access -- a claim this comment previously denied. On
+@ GBA hardware only 8-bit WRITES are special-cased (ignored for OAM and OBJ VRAM,
+@ duplicated for BG VRAM and palette), and the core passes 32-bit writes straight
+@ through (`bram_wdata16 = bram_wdata`, 4-bit byte enable). So 32-bit CPU stores
+@ and loads to VRAM, which every compiler memcpy into VRAM and CpuFastSet use,
+@ were excluded from probes on a false premise until this was corrected.  If such a transfer writes only
 @ part of each word, every tile is corrupted while everything that indexes it
 @ stays correct -- exactly the symptom.  `minidma` could not see this because it
 @ compared one halfword against 0x0000, which is also what a mistimed or partial

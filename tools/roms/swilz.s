@@ -42,6 +42,12 @@
 @ stream of pure literals for a 32-byte pattern, so the expected output is known
 @ exactly and no compressor is needed to check it.
 @
+@ LIMIT: this stream is pure literals.  LZ77's back-reference path -- reading
+@ from the destination buffer at disp+1 bytes back -- is the whole point of the
+@ format and is NOT exercised here.  For LZ77UnCompVram that read is a halfword
+@ load from VRAM and for LZ77UnCompWram it is a byte load from IWRAM or EWRAM, so
+@ a stream with back-references should be added before this is called measured.
+@
 @   0  green: LZ77 to IWRAM (SWI 0x11) produced the expected 32 bytes
 @   1  yellow: reached the end
 
