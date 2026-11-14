@@ -1998,3 +1998,35 @@ Find the `swiprobe` defect before reading anything from it. The remaining suspec
 - User Test: NOT RUN
 
 ---
+
+## 63 COMMIT Unreleased 2026-11-14T01:55:00-07:00
+
+#### Coming From:
+
+Unreleased eda5e33
+
+#### Purpose:
+
+Measure the BIOS call path a cartridge uses -- first that SWI dispatch works at all, then whether the frame wait retail software performs every frame returns.
+
+#### Outcome:
+
+BIOS SWI dispatch is measured good on the board, and the frame wait is not measured at all. `tools/roms/swidiv.s` paints blue when the cartridge reaches its first BIOS call and green when `swi 0x06` returns quotient 142 and remainder 6 for 1000 / 7. It passed in mGBA 0.10.5 with the retail BIOS first, per TCL-041, and the board agrees exactly: blue `(0, 0, 232)` and green `(18, 255, 0)`. Reaching that probe cost one more instrument defect, and it is the most instructive of the four: on GBA ARM code the SWI number belongs in bits 23-16, because the retail BIOS dispatcher reads it with `ldrb r12,[lr,#-2]` and in ARM mode `lr = address + 4`, so the byte fetched is at `address + 2`. `swi 0x06` assembles to `06 00 00 EF`, the dispatcher reads `0x00`, and calls SWI 0 -- SoftReset -- which reboots the cartridge. Every apparent hang in this cycle was a self-inflicted reboot, under the retail BIOS and under HLE alike, and a reboot is indistinguishable from a hang in a screenshot. An mGBA gdb session stepping the call showed `pc` 0x08000100 to 0x00000008 to 0x00000140 and then the `ldrb`. Recorded as BRD-058 and TCL-045, and it also gives a second explanation for a cartridge that appears to return to the BIOS startup sequence. Then `VBlankIntrWait` was attempted five ways and none of them passed in mGBA, so by TCL-041 none of them was taken to the board and no conclusion about the frame wait is drawn. The four shapes: with a handler that acknowledges IF, which deadlocks because the BIOS halts and polls IF while the handler clears it; with a handler that leaves IF set, which deadlocks the other way because the interrupt is re-taken before the BIOS can run its check; with no handler at all, which is how retail software calls it; with no handler plus `DISPSTAT` bit 3 enabled, because VBlank's IF bit may only be raised while that interrupt is enabled; and with no handler plus `DISPSTAT` bit 3 and `IE` bit 0 both enabled, which the disassembly suggests should be required. That last one follows from reading the routine: `IntrWait` at 0x330 halts via `HALTCNT` at 0x344 and calls 0x358, which writes IME and only IME -- `strb r3,[ip,#0x208]` before its check and `strb r4,[ip,#0x208]` after it -- so the caller must enable the bit in IE for the HALT to wake, and every earlier shape of this probe had cleared IE and never set it. That reasoning is sound and the probe still hangs, so either the caller must do something further or the decode of 0x358 is still not trustworthy: it reads a halfword at `[ip,#-8]`, which decodes to 0x03FFFFF8, an IWRAM mirror rather than the `IF` register the comparison implies. All five shapes show the blue square and then nothing, which puts the cartridge inside the call every time. The remaining difference from retail software is one this session has not established: what the BIOS's own `IntrWait` at 0x330 actually requires, which the disassembly so far has not settled -- its loop halts at `HALTCNT`, calls 0x358 to enable IME, read a halfword and conditionally clear flags, and re-halts while that comparison says nothing matched, and the halfword address decodes to 0x03FFFFF8, an IWRAM mirror rather than IF, so either the routine being read is the wrong one or the decode needs more care before it can be trusted. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 62 were not rewritten, the two new records carry unique ids and the canonical field order, and this is entry 63 with the five canonical sections plus Status and a count of sixty-three against the 100-entry limit.
+
+#### Next Steps:
+
+Settle what the BIOS `IntrWait` routine requires before writing another version of the probe, by disassembling 0x328-0x358 completely and confirming the table entry for SWI 5 rather than inferring it from the tail; the probe has now been rewritten four times against hypotheses that the routine itself can answer. If that shows a precondition the probe lacks, add it and require mGBA to pass before the board is touched. If it shows nothing missing, the honest next step is a different instrument: a cartridge that performs exactly one `VBlankIntrWait` and then writes a marker, run on the board with the display already proven, so that the board's behaviour is compared against mGBA's rather than against a theory. The other open candidate is BRD-045's DMA `REQ1_START` deadlock for Super Mario Advance, verified before the display worked and not revisited since, and it is now the only recorded cartridge-specific failure that has not been re-examined.
+
+#### Files Modified:
+
+- tools/roms/swidiv.s
+- tools/roms/irqprobe.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
