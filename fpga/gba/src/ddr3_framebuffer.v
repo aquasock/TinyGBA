@@ -491,7 +491,7 @@ end
 
 
 // Convert color to RGB888
-function [23:0] torgb(input [23:0] pixel);
+function automatic [23:0] torgb(input [23:0] pixel);
     case (COLOR_BITS)
     12: torgb = {pixel[11:8], 4'b0, pixel[7:4], 4'b0, pixel[3:0], 4'b0};
     15: torgb = {pixel[14:10], 3'b0, pixel[9:5], 3'b0, pixel[4:0], 3'b0};

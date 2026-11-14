@@ -128,7 +128,7 @@ begin
 end
 
 // and decide when is the good time to sample the RxD line
-function integer log2(input integer v); begin log2=0; while(v>>log2) log2=log2+1; end endfunction
+function automatic integer log2(input integer v); begin log2=0; while(v>>log2) log2=log2+1; end endfunction
 localparam l2o = log2(Oversampling);
 reg [l2o-2:0] OversamplingCnt = 0;
 always @(posedge clk) if(OversamplingTick) OversamplingCnt <= (RxD_state==0) ? 1'd0 : OversamplingCnt + 1'd1;

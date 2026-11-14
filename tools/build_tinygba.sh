@@ -251,6 +251,45 @@ fi
 
 [[ "$stage" == synth ]] && { echo "stopping after synthesis"; exit 0; }
 
+# ------------------------------------------- 1a. synthesis-conflict gate
+# `synth_gowin` warns `multiple conflicting drivers` when one signal is driven
+# from more than one process.  That is not cosmetic: on 2026-11-14 this design
+# carried 72 such warnings and the affected signals were `mem.issingle.region`,
+# `mem.isreadonly.region` and `mem.tosdram.addr` -- the memory and DMA
+# arbitration.  The cause was three helper functions declared *static*, so every
+# call site drove one shared argument variable; a minimal reproduction of the
+# same call pattern synthesised the input bus shorted to ground and the output
+# tied to VCC, while the same source with `function automatic` synthesised
+# correctly.  Verilator inlines functions per call site and is therefore immune,
+# which is why the fault appeared only on hardware and no simulation could see
+# it.  Yosys resolves the conflict silently and the JSON carries no trace, so the
+# warning is the only signal that the netlist differs from the RTL.  Fail the
+# build on it rather than ship a design nobody can reason about.
+echo "=== 1a. synthesis-conflict gate ==="
+# Both files are checked because they do not hold the same thing: `synth.err`
+# carries the tail of the yosys run this script captured, while `synth.log` can
+# carry a longer record from the same or an earlier stage, and they have been seen
+# to disagree by a factor of two on the same design.  A gate that reads only one
+# of them can miss the warning entirely.
+conflicts=0
+for f in "$out/synth.err" "$out/synth.log"; do
+    [[ -f "$f" ]] || continue
+    n=$(grep -c "multiple conflicting drivers" "$f" 2>/dev/null) || n=0
+    n=${n:-0}
+    [[ "$n" -gt "$conflicts" ]] && conflicts=$n
+done
+if [[ -f "$out/synth.err" || -f "$out/synth.log" ]]; then
+    if [[ "$conflicts" -ne 0 ]]; then
+        echo "  $conflicts conflicting-driver warning(s); a signal is driven from" >&2
+        echo "  more than one process and synth_gowin resolved it arbitrarily:" >&2
+        grep -h "multiple conflicting drivers" "$out"/synth.err "$out"/synth.log 2>/dev/null \
+            | sed 's/ \[.*//' | sed 's/^/    /' | sort -u >&2
+        echo "  see $out/synth.err" >&2
+        exit 1
+    fi
+    echo "  no conflicting drivers"
+fi
+
 # ---------------------------------------------------- 1b. register-parity gate
 # A netlist can lose most of its registers and still build, pass timing and pack:
 # on 2026-11-02 an undriven `gb_bus_rst` folded high, deleted every MMIO

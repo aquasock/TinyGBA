@@ -926,7 +926,7 @@ gba_eeprom eeprom (
 // Helper functions
 //////////////////////////////////////////////
 
-function [1:0] be2size(input [3:0] be);
+function automatic [1:0] be2size(input [3:0] be);
     casez (be)
     4'b0001,4'b0010,4'b0100,4'b1000: be2size = 2'b00;    // byte
     4'b0011,4'b1100:                 be2size = 2'b01;    // half-word
@@ -936,14 +936,14 @@ function [1:0] be2size(input [3:0] be);
 endfunction
 
 // is this region a single cycle region?
-function issingle(input [3:0] region);
+function automatic issingle(input [3:0] region);
     case (region)
     4'h0,4'h3,4'h4,4'h5,4'h6,4'h7,4'hD: issingle = 1;
     default: issingle = 0;
     endcase
 endfunction
 
-function isreadonly(input [3:0] region);
+function automatic isreadonly(input [3:0] region);
     case (region)
     4'h0,4'h8,4'h9,4'ha,4'hb,4'hc: isreadonly = 1;
     4'he,4'hf:                     isreadonly = config_backup_type != BACKUP_FLASH512K & 
@@ -954,7 +954,7 @@ function isreadonly(input [3:0] region);
 endfunction
 
 // convert GBA address to SDRAM address
-function [25:2] tosdram(input [27:0] addr);
+function automatic [25:2] tosdram(input [27:0] addr);
     casez (addr[27:24])
     4'b10??, 4'hC:  tosdram = {1'b0,             addr[24:2]};   // 32MB cartridge rom
     4'd2:           tosdram = {8'b1000_0000,     addr[17:2]};   // 256KB ewram

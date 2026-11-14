@@ -395,7 +395,7 @@ module gba_sound(clk, gb_on, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_
     assign sound_out_left = PSG_FIFO_Master_Enable ? soundmix8_l * 32 : {16{1'b0}};
     assign sound_out_right = PSG_FIFO_Master_Enable ? soundmix8_r * 32 : {16{1'b0}};
     
-    function signed [15:0] clip512(signed [15:0] in);
+    function automatic signed [15:0] clip512(signed [15:0] in);
         if (in < -512)
             clip512 = -512;
         else if (in > 511)

@@ -122,7 +122,7 @@ logic [8:0] r_cycle;
 // separates 'the probe has not run yet' from 'everything failed'.
 reg [7:0] pt_x, pt_y;
 
-function [17:0] pt_colour(input [7:0] x, input [7:0] y);
+function automatic [17:0] pt_colour(input [7:0] x, input [7:0] y);
     if (y < 8'd8)
         pt_colour = dbg_done ? {6'h00, 6'h3f, 6'h00} : {6'h00, 6'h00, 6'h3f};
     else if (x < 8'd232)
@@ -149,7 +149,7 @@ end
 // Bit meanings are at the measurement block in gbatang_top.sv.
 reg [7:0] ct_x, ct_y;
 
-function [17:0] ct_colour(input [7:0] x, input [7:0] y);
+function automatic [17:0] ct_colour(input [7:0] x, input [7:0] y);
     if (y < 8'd8)
         ct_colour = dbg_done ? {6'h00, 6'h3f, 6'h00} : {6'h00, 6'h00, 6'h3f};
     else if (x < 8'd232)
@@ -179,7 +179,7 @@ end
 // the probe in gbatang_top.sv for the bit meanings.
 reg [7:0] st_x, st_y;
 
-function [17:0] st_colour(input [7:0] x, input [7:0] y);
+function automatic [17:0] st_colour(input [7:0] x, input [7:0] y);
     if (y < 8'd8)
         st_colour = dbg_done ? {6'h00, 6'h3f, 6'h00} : {6'h00, 6'h00, 6'h3f};
     // IDENTITY mapping: the leftmost bar is bit 0 and the rightmost is bit 15.
@@ -285,7 +285,7 @@ always @(posedge clk) begin
 end
 assign tr_sel = ft_sel;
 
-function [17:0] ft_colour(input [7:0] x, input [4:0] b);
+function automatic [17:0] ft_colour(input [7:0] x, input [4:0] b);
     if (x >= 8'd236)
         ft_colour = ft_sel[6] ? {6'h3f, 6'h3f, 6'h3f} : 18'd0;
     else if (x >= 8'd232)
@@ -334,7 +334,7 @@ wire px_tint = ^{pixel_data, pixel_x, pixel_y};
 // Sixteen bands across the top, each 15 source pixels wide, showing dbg_bits[0..15]
 // left to right.  White means set, black means clear, and the boundaries are at
 // fixed x so a shifted or mirrored scan cannot be mistaken for a different read.
-function [17:0] px_colour(input [7:0] x, input [7:0] y);
+function automatic [17:0] px_colour(input [7:0] x, input [7:0] y);
     if (y < 8'd16)
         px_colour = dbg_bits[x / 8'd15] ? {6'h3f, 6'h3f, 6'h3f} : {6'h00, 6'h00, 6'h00};
     else
@@ -376,7 +376,7 @@ end
 // it.)
 reg [7:0] vt_x, vt_y;
 
-function [17:0] vt_colour(input [7:0] x, input [7:0] y);
+function automatic [17:0] vt_colour(input [7:0] x, input [7:0] y);
     reg [2:0] bar;
     if (x < 8'd16 && y < 8'd16) begin
         vt_colour = {6'h3f, 6'h3f, 6'h3f};      // top-left white marker

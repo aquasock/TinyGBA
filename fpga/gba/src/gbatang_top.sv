@@ -2077,7 +2077,7 @@ test_loader loader (
 
 // assign led = ~{init_calib_complete, overlay, cartram_dirty_clear, cartram_dirty, config_backup_type, gbaon};
 
-function [3:0] calc_byte_ena (input [1:0] size, input [1:0] addr);
+function automatic [3:0] calc_byte_ena (input [1:0] size, input [1:0] addr);
     casez ({size, addr})
     // byte access
     4'b00_??: calc_byte_ena = 1 << addr;
