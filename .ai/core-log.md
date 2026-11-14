@@ -2138,3 +2138,38 @@ The remaining fault is narrow and the diag cart now describes it precisely: its 
 - User Test: PASS
 
 ---
+
+## 67 COMMIT Unreleased 2026-11-14T15:40:00-07:00
+
+#### Coming From:
+
+Unreleased 04b086e
+
+#### Purpose:
+
+Adopt the substantive findings of a second agent's analysis of the boot failure, test them, and land the change that lets a retail cartridge run.
+
+#### Outcome:
+
+A retail cartridge runs on the board. The analysis proposed returning two lines of `gba_memory.sv` to their upstream form, on the theory that a port change from entry 14 let `REQ2_START` leave on the acknowledgements left over from the previous request. The two-line revert was applied and proved in the harness before any bitstream was built, against the real `sdram_gba.v` controller, with the RetroRegen diagnostic cartridge as the subject: before, a black field with one garbled orange text row at rows 130 to 137; after, the complete title screen, logo and all. That result was then confirmed on hardware. `build/rev_prod` was built from the reverted tree with seed 14, the official BIOS and `-nowidelut`, synthesised with 0 conflicting drivers and timed at clk16 21.590, clk50 83.500, clk67 181.061 and hclk 100.140 MHz with zero hold violations and no relaxation needed, and flashed to the board. The diagnostic cartridge draws its full title screen with 491,509 lit pixels. Dr. Mario draws its title screen with the capsule logo, the checkered background, the one-player panel, the Mario and virus sprites and the copyright line, 1,293,791 lit pixels. Super Mario Advance draws and animates its intro, 79 unique frames out of 80 across 80 seconds. The operator reported no graphical glitch in any of the three. The fix is confirmed; the mechanism proposed for it is not, and the difference is recorded rather than smoothed over. A Thumb discriminator was written to test the proposed mechanism, since no probe in this tree had ever executed a Thumb instruction and every failing cartridge is Thumb, and it passes on the board image that still contained the defect, including the arm predicted to fail. That contradiction is set out in `DISSENT-req2-start-mechanism-2026-11-14.md` with three questions whose answers would settle it, together with two failure modes in the discriminator itself: the exposure may need the prefetch buffer empty rather than merely Thumb data access, and the probe's expected value appears in its own literal pool so a stale read could pass by returning the right answer for the wrong reason. The analysis also corrected three things of mine and each was verified before being accepted: that the clk67 figure of about 152 MHz on the deployed image was an artefact of the mis-synthesised netlist rather than a property to recover, which is confirmed by a 1.87 ns `clk67` to `clk16` cross path in `build/deploy_prod` against 28.65 ns in this build; that VRAM does allow 32-bit CPU access so the premise that excluded it from the probe suite was false, confirmed in the RTL at `bram_wdata16 = bram_wdata`; and that `swilz` tests LZ77 literals only and never the back-reference path. Two probe sources were corrected accordingly and one Thumb probe added. Audio was heard from this board for the first time: the operator reports correct stereo separation on HDMI and a scratchy timbre, recorded as a lead with the tests that would settle it and explicitly not as a finding. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 66 were not rewritten, all 117 records carry unique ids and the canonical field order, and this is entry 67 against the 100-entry limit.
+
+#### Next Steps:
+
+Write the audio instrument, because audio is now the largest subsystem that has been observed but never measured and the operator's description is specific enough to discriminate between causes. A probe cartridge that plays a known waveform through channel 1 with sweep disabled, then channel 3, then channel 4, each for a second, would tell whether the scratchiness is per-channel or common to the mixer, and a sweep on channel 1 would separately exercise the four undriven sweep wires that `setundef -undriven -zero` has tied off. Then verify the save path, which no cartridge here has used: an EEPROM, SRAM and flash test each, because `gba_eeprom.sv`, `gba_flash_sram.sv` and the `config_backup_type` selection have never been exercised by a game. Then re-run `tools/roms/thumbprobe.s` against this image and against an image built from a tree with entry 14 restored, because that pair is the cleanest available test of the mechanism the analysis proposes: if the probe passes on both it is insensitive, and if it fails on the old tree and passes on the new one the mechanism is proven and the dissent can be withdrawn. Also correct BRD-049, which states `cpu_ready` is one clk67 cycle wide where the RTL and a 16-bit access make it one to two clk16 cycles, and update `README.md`, which is still ten entries behind and says no cartridge has run.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+- tools/roms/thumbprobe.s
+- tools/roms/dmavram.s
+- tools/roms/swilz.s
+- DISSENT-req2-start-mechanism-2026-11-14.md
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
