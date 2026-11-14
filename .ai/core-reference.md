@@ -1884,3 +1884,17 @@ This is a lead and not a finding, and it must not be reported as a save-path fai
     - "Board capture `/tmp/gba2w_rom.png`: diag cart title screen, 503,407 lit pixels"
     - "Board capture `/tmp/kl_held.png`: keylive all red, bar white, `KEYINPUT` 0x3FF while a Classic Controller button was held"
     - "Records BRD-075, TCL-054, and TinyNES's `wii_pads.sv`"
+
+- record_id: TCL-055
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "`gzip` stamps the wall clock into its header, so a plain `gzip -9` of one bitstream gives a different hash every run"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "The TinyGBA card pairing was first produced by copying the build's `.bin` and running `gzip -9` on the `.fs` by hand, which put `tinygba.fs.gz` at 1,404,785 bytes with SHA-256 `acb4185eecf69bb4...`. Rebuilding the same bitstream with `tools/ship_core.py`, which sets `mtime=0` in the `GzipFile` header, gives 1,401,896 bytes with SHA-256 `5a8ad985b2687bac...` from the same input, and running that tool twice in a row gives byte-identical output both times. The input did not change between the two: `tinygba.bin` is `f047a77ea0f1d854...` in every case. The whole difference is the four-byte MTIME field gzip writes from the current time unless it is told otherwise, plus deflate's response to it. `.ai/core.md` requires a generated artifact the operator uses to come from a committed deterministic script, and a `gzip` invocation that is not told `mtime=0` cannot satisfy that, so the hand-run command was not merely untidy but non-conforming."
+  consequence: "Any artifact this project records by hash must be produced with the clock excluded, or the hash identifies the run rather than the content and cannot be compared between two trees or two agents. The practical consequence for the card specifically: a `.fs.gz` whose hash is not reproducible cannot be used to tell whether the card holds the image that was built, which is exactly the question a handoff needs answered. `tools/ship_core.py` now produces both halves of the pair, copies the build's own `.bin` rather than repacking it so there is one converter in the tree, refuses a missing or empty `.bin`, and prints both hashes for the record. The `.bin` on the card was unaffected throughout -- `tangload` reads that file, not the `.gz` -- so the two-wire result in BRD-078 stands for the image that was measured."
+  sources:
+    - "`gzip -9` by hand: `tinygba.fs.gz` 1,404,785 bytes, SHA-256 `acb4185eecf69bb4...`"
+    - "`tools/ship_core.py build/snd_prod`: `tinygba.fs.gz` 1,401,896 bytes, SHA-256 `5a8ad985b2687bac...`, identical across two consecutive runs"
+    - "`tinygba.bin` SHA-256 `f047a77ea0f1d854...` unchanged"
+    - "This repository, `tools/ship_core.py`"

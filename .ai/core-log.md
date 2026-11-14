@@ -2300,3 +2300,33 @@ The README and THIRD_PARTY now match the tree, so the documentation debt is clea
 - User Test: N/A
 
 ---
+
+## 72 COMMIT Unreleased 2026-11-14T23:55:00-07:00
+
+#### Coming From:
+
+Unreleased 4983e0c
+
+#### Purpose:
+
+Establish the controller path before porting any of it, and leave the tree in a state a fresh agent can pick up without re-deriving what this session learned the hard way.
+
+#### Outcome:
+
+Two-wire deployment is now established for this project, and a controller cannot work any other way. The session began by flashing TinyNES's release `.fs` with `openFPGALoader` and finding the Classic Controller absent, and three explanations were tried and refuted before the right one: the adapter's power, then an I2C mux channel, then the image itself. The image was innocent -- the `.fs` decompressed from `TinyTang.v0.2.1.zip` is byte-identical to the one in the TinyNES build tree, SHA-256 `2a356060084bad43...`, and its `.bin` twin matches the card's listing at `5cd4ab004f7af3c9...`. The difference is the loading path. Flashed over JTAG the core runs, and Zelda's video and audio are perfect, but `pad_test` reports `PAD STATUS 50000000` on every bus with about eighty failed I2C transactions and zero reads; loaded with `tangload` from the card the same core reports `PAD1 connected classic ID=010320a40000 FAIL=0` on the first poll, and the operator played Zelda through the Old Man cave to confirm it end to end. TinyTang's `tang_ini_core_loaded()` pushes the socket declaration parsed from `/tinytang.ini` into the core as part of the load, so a bare JTAG flash configures no pad fabric at all, and in one-wire mode TinyTang does not run to send it; recorded as TCL-054. With that settled, TinyGBA was built as a first-class core on the card: `tinygba.bin` 5,000,172 bytes and `tinygba.fs.gz` 1,404,785 bytes written to `/root/cores/console138k/` alongside tiny89, tinygbc, tinynes, tinysnes, tinyphosphor and tinytang, `tangload` programming it and the RetroRegen cartridge drawing its title screen at 503,407 lit pixels, identical to the one-wire run; recorded as BRD-078. Controller input does not reach TinyGBA and correctly so, because it has no Wii-extension I2C logic: `wii_pads.sv` exists only in TinyNES, `USB1` and `USB2` are commented out in `console138k.v` leaving `joy_usb1` and `joy_usb2` tied to zero, and `keylive` reads `KEYINPUT 0x3FF` both idle and while a qualified controller's button was held. One standards gap was closed on the way: the card pair had been produced by copying a `.bin` and running `gzip -9` by hand, which stamps the wall clock into the header so the same bitstream hashes differently every run; `tools/ship_core.py` now produces both halves deterministically with `mtime=0`, refuses a missing or empty `.bin`, and prints both hashes, verified byte-identical across two consecutive runs; recorded as TCL-055. The core-syntax audit was run as required for changes under `.ai/`: `core-log.md` holds 72 entries numbered 1 to 72 with no gaps, counting this one, all `COMMIT` and `Unreleased`, every entry carrying the six canonical sections in order and ending with `---`, and the log is under the 100-entry limit; `core-reference.md` holds 133 records with 133 unique ids, no duplicates, every record in the canonical field order and every id `BRD-` or `TCL-` with three digits, across a status vocabulary of 125 `VERIFIED`, 6 `LEAD` and 2 `MEASURED`. Six historical entries, numbers 5 and 14 to 18, still carry prose in their Status values where the current syntax allows only `PASS`, `FAIL`, `NOT RUN` or `N/A`; they are committed history, the syntax document forbids rewriting a recorded outcome, and they remain noted rather than corrected.
+
+#### Next Steps:
+
+Port the controller, which is now a scoped job rather than an unknown. It needs three things, and the third is the one that would otherwise waste another session: `wii_pads.sv` from TinyNES adapted in, four I2C masters with the Classic Controller wake-up and format-3 selection, kept as a vendored adaptation with an entry in THIRD_PARTY.md rather than a copy; pin constraints for whichever socket the pad is seated in, and the first thing to check is whether `fpga/gba/src/boards/console138k.cst` carries the `pmod0` pins TinyNES uses at `V18` and `V19` onward, since TinyGBA's board file was written for `usb1_dp/dn` and `usb2_dp/dn` and may not; and the socket-declaration path, because TCL-054 shows a core loaded by a bare JTAG flash has no pad fabric and TinyGBA must therefore be loaded through TinyTang and accept the declaration the way TinyNES does. The pad state then joins the existing OR term at `assign joy_btns_gba = overlay ? 0 : joy_btns | joy_usb1 | joy_usb2 | hid1 | hid2;`, which is where `hid1` and `hid2` already arrive. Before any of that, take the operator's advice and test TinyGBA in two-wire mode with the host-side `tools/gba_input.py` path, which should work already and would prove the rest of the chain independently of the I2C port. Two smaller items stand from earlier entries and are unaffected: a seed sweep to recover `clk67` margin, since this image needs the documented multicycle relaxation where `build/rev_prod` did not, and configuring a backup type in the loader so the save path becomes testable for the first time. Nothing here is urgent against a machine that runs retail software, and none of it should be started without the operator's go-ahead.
+
+#### Files Modified:
+
+- tools/ship_core.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
