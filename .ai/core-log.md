@@ -2062,3 +2062,35 @@ Fix the DMA-to-BRAM write path, because it is now the single fault standing betw
 - User Test: NOT RUN
 
 ---
+
+## 65 COMMIT Unreleased 2026-11-14T11:20:00-07:00
+
+#### Coming From:
+
+Unreleased 1d5f8a7
+
+#### Purpose:
+
+Fix the DMA-to-BRAM write path that BRD-062 identified as the last fault between this core and a booting cartridge.
+
+#### Outcome:
+
+No fix was landed, and the fault was narrowed from two candidate ends to one. Two RTL changes were written and both were reverted without being built, because each altered the data seen in simulation, which is the signature of breaking working behaviour rather than repairing broken behaviour. The reasoning was that a latch was needed on the DMA read data inside `gba_memory`; the first version captured on the raw ready and produced a half-assembled word (`0x00001111` where `0x11111111` was correct), and the second captured at the acknowledgement and produced a one-word lag. Both were measured in the Verilator model with `-DTINYGBA_SDRAM_RTL -DTINYGBA_DMADBG`, in which the unmodified RTL prints `DMAWR: adr=3001000 dat=11111111`, `adr=3001004 dat=22222222` and so on, i.e. the design is correct there. That is the decisive fact of the cycle: the same binaries transfer correctly in simulation against the real `sdram_gba.v` controller and the pin-level SDRAM model, and fail on the board, so the remaining fault is hardware-only and a candidate patch cannot be tested against a model that does not exhibit it. Instead the fault was localised with two probes. `tools/roms/dmastep.s` verifies its own preconditions in the same image -- it writes 0xF00D to the destination and reads it back, and reads the source back -- and on the board both are green while the DMA copy is red and the destination holds neither the pattern nor its pre-fill. `tools/roms/dmaside.s` varies the source across IWRAM to EWRAM, IWRAM to IWRAM, EWRAM to IWRAM and cartridge ROM to IWRAM: all four are red on the board and all four are green in mGBA. The IWRAM-to-IWRAM case settles the question, because neither end touches SDRAM, so the SDRAM read path is cleared and the fault lies in the value presented on `bram_wdata` during the DMA write cycle. Recorded as BRD-063 and TCL-048. Four probes written earlier in the cycle were deleted for conflating "not run" with "ran wrongly", and `dmastep` exists because of that lesson: it reports its own preconditions rather than assuming them. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 64 were not rewritten, the two new records carry unique ids and the canonical field order, the RTL tree is unmodified by this entry, and this is entry 65 against the 100-entry limit.
+
+#### Next Steps:
+
+Build the instrument, not the patch, because the fault cannot be reproduced in simulation and every candidate patch therefore changes behaviour that currently works. What is needed is the value `gba_memory` drives on `bram_wdata` and the value of `dma_rdata` during the write cycle, read back from the board. The machinery for this already exists in `gbatang_top.sv`: pages 2 and 3 of the trace port carry the MMIO write ring and the status pages, and the stall-trace ring at 1440 already records 1,024 registers, so the cheapest path is a sixth page or a ring slot that captures the DMA write data and address on the cycle `bram_wr` is high while `dma_on` is set. An alternative that needs no rebuild at all is a probe that makes the wrong value self-identifying: DMA a source whose words are all distinct, then copy the destination back to VRAM with CPU stores as a bitmap, since the observed destination value is exactly zero and a distinct-pattern transfer would show how many words were written and in what order. Whichever route is taken, do not attempt another speculative `gba_memory` latch: two have already been tried, both were wrong, and both were visible as wrong in a model that does not have the bug.
+
+#### Files Modified:
+
+- tools/roms/dmaside.s
+- tools/roms/dmastep.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
