@@ -1627,3 +1627,34 @@ Put it on the board, which is the only thing that can raise BRD-050 from MEASURE
 - User Test: NOT RUN
 
 ---
+
+## 51 COMMIT Unreleased 2026-11-13T17:13:28-07:00
+
+#### Coming From:
+
+Unreleased 33c6dda
+
+#### Purpose:
+
+Review the sibling `fpt/tang-tiny-gpu` project's Gowin and open-tool findings, and turn the ones that apply to this tree into a checked record and a build-time gate while the board image for the synchroniser change synthesises.
+
+#### Outcome:
+
+The review found one live defect class in this netlist and one methodology error, and produced a gate for the first. The sibling project is not a candidate for reuse: it targets a Tang Nano 20K on a GW2AR-18 with an RP2350 host, its GPU is a command 2D rasteriser plus a PS1-class 3D engine rather than anything GBA-compatible, and its SDRAM controller serves a package-internal 32-bit part where this board has two external 16-bit dies on a 40-pin header, so adopting it would mean abandoning the GBA. Its `docs/ARCHITECTURE.md` section 10 is a different matter and is titled as the list of things that all passed Verilator and only misbehaved on hardware, which is this project's exact position. Of that list, the signed-multiply and `$buf` findings do not apply, and were checked rather than assumed: the netlist carries no `MULT` cell at all, and every one of the 745 `$buf` cells sits inside a blackbox library module with none in `gbatang_top`. The distributed-RAM finding does apply, and it is already happening here: `build/v7_base/synth.log` maps `gpu.drawer.linebuf_obj_settings.ram` to `$__GOWIN_LUTRAM_` and records `Extracted data FF from read port 0`, while the four wide line buffers in the same drawer and `linebuf_obj_color` all map to block RAM. The RTL did not ask for that: `linebuffer.v` carries `syn_ramstyle = "block_ram"` under `` `ifdef M138K `` and `M138K` is defined for this board, but the attribute is in comment syntax this flow's `read_slang` does not parse, which is the same failure class as the inert `(* keep *)` marks already recorded. It is the 4-bit instantiation that falls through, the four sound arrays and `mem.loader_buf` take the same path, and the netlist holds 66 `RAM16SDP4` cells, recorded as TCL-033 with the caveat that nothing here shows the array is wrong, only that the resource differs from the one asked for. `tools/memory_census.py` is the new gate: it groups flattened cell names back into array paths, prints which arrays are in distributed RAM, and fails on drift against `tools/memory_baseline.json` so a mapping change is a visible baseline update rather than an unnoticed side effect. It was mutation-tested in both directions, and the test found a real defect in my own first version, which compared scalar totals and crashed on the per-array structure; the corrected diff reports an array arriving in LUT RAM and another leaving it. The second finding is a methodology error this project has been making: BRD-047 and BRD-048 each separate two placements of one netlist that pass every gate, and the sibling project's own rule is that if a seed change alters the hardware result then a tool-level defect should be suspected, with completion defined as two or more seeds run twice each. This project has been deploying one seed and reading once, which cannot tell a property of the design from a property of the placement, so TCL-034 records the two-seed two-load requirement. The gate has deliberately not been wired into `tools/build_tinygba.sh` yet, because a placement sweep for the synchroniser build was running and a shell re-reads a running script; that integration belongs to that cycle. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 50 were not rewritten, confirmed TCL-033 and TCL-034 carry unique ids and the canonical field order, and validated this entry as entry 51 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-one against the 100-entry limit.
+
+#### Next Steps:
+
+Wire `tools/memory_census.py` into `tools/build_tinygba.sh` beside the existing register-parity and clock-plane gates once the synchroniser board build has finished, so the mapping is checked on every build rather than only when someone looks. Then finish the cycle that this one ran alongside: the synchronised tree has been synthesised into `build/sync_b` and is being placed across eight seeds, the placement must be chosen with `tools/clock_plane_select.py` requiring a measured-good `hclk` pip as well as the two good `clk67` spines per BRD-048, and the pool read and DISPCNT must be read on the board against the two predictions BRD-050 makes, at two seeds with two loads each per TCL-034. If the object-settings buffer turns out to matter, the GPU-path test is a real `(* ram_style = "block_ram" *)` attribute on that one array and the drawer instrument, as its own cycle; do not adopt `synth_gowin -nolutram` wholesale without measuring it, because it also moves the four sound arrays and the loader buffer. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment, all three measured and closed.
+
+#### Files Modified:
+
+- tools/memory_census.py
+- tools/memory_baseline.json
+
+#### Status:
+
+- Build: N/A
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

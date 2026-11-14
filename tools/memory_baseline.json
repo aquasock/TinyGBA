@@ -1,0 +1,376 @@
+{
+  "census": {
+    "TINYGBA_FETCHTRACE+TINYGBA_STALLTRACE": {
+      "gpu.drawer.ivram_hi.dpb_inst_0": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_1": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_10": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_11": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_12": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_13": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_14": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_15": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_2": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_3": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_4": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_5": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_6": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_7": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_8": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_9": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_0": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_1": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_10": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_11": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_12": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_13": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_14": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_15": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_16": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_17": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_18": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_19": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_2": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_20": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_21": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_22": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_23": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_24": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_25": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_26": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_27": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_28": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_29": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_3": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_30": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_31": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_4": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_5": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_6": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_7": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_8": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_9": {
+        "DPB": 1
+      },
+      "gpu.drawer.linebuf_bg0.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_bg1.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_bg2.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_bg3.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_obj_color.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_obj_settings.ram": {
+        "RAM16SDP4": 16
+      },
+      "gpu.drawer.oamram.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.oamram.dpb1": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_bg.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_bg.dpb1": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_oam.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_oam.dpb1": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.dpb_inst_0": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.dpb_inst_1": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.dpb_inst_2": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.dpb_inst_3": {
+        "DPB": 1
+      },
+      "mem.iwram.sp_inst_0": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_1": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_10": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_11": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_12": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_13": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_14": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_15": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_2": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_3": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_4": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_5": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_6": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_7": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_8": {
+        "SP": 1
+      },
+      "mem.iwram.sp_inst_9": {
+        "SP": 1
+      },
+      "mem.loader_buf": {
+        "RAM16SDP4": 2
+      },
+      "mem.mem_bios": {
+        "DPB": 8
+      },
+      "sound.igba_sound_ch3.waveram": {
+        "RAM16SDP4": 32
+      },
+      "sound.igba_sound_dmaA.fifo": {
+        "RAM16SDP4": 8
+      },
+      "sound.igba_sound_dmaB.fifo": {
+        "RAM16SDP4": 8
+      },
+      "video.u_fb.dpx9b_inst_0": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_1": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_10": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_11": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_12": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_13": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_14": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_15": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_16": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_17": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_18": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_19": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_2": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_20": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_21": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_22": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_23": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_24": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_25": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_26": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_27": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_28": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_29": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_3": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_30": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_31": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_32": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_33": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_34": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_35": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_36": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_37": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_4": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_5": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_6": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_7": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_8": {
+        "DPX9B": 1
+      },
+      "video.u_fb.dpx9b_inst_9": {
+        "DPX9B": 1
+      }
+    }
+  },
+  "note": "recorded by tools/memory_census.py; a change here is a deliberate change of memory placement"
+}
