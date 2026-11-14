@@ -174,6 +174,36 @@ module gba_sound(clk, gb_on, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_
 
     end    
 
+    // TinyGBA (BRD-072): the PSG channels were written for the Game Boy's
+    // 4.194304 MHz timebase.  Their own thresholds say so -- `soundcycles_sweep
+    // >= 32768 // 128 Hz` inside gba_sound_ch1.v is 4194304/32768 -- and the
+    // module is driven at clk16, 16.777 MHz, a factor of four too fast.  The
+    // original 4 MHz enable is visibly missing: `new_cycles_slow`,
+    // `new_cycles_valid` and `bus_cycles_sum` are declared at lines 54-56 and
+    // never used, and line 294 still reads "channels 1-4 are from GB, they still
+    // work with 4 MHZ".
+    //
+    // This restores that enable: a 2-bit counter round clk16, `ce4` high one
+    // cycle in four.  Only the `soundcycles_*` increments are gated, so the
+    // counters advance at 4.194 MHz and the thresholds keep their intended
+    // meaning, and sweep, envelope and length all run at the correct rate again
+    // rather than four times fast.
+    //
+    // Gating also removes a second, independent defect: in each channel
+    // `soundcycles_freq <= soundcycles_freq + 1` and
+    // `soundcycles_freq <= soundcycles_freq - 4` are non-blocking assignments to
+    // the same register in the same block, so on the cycle the counter reads 4
+    // the decrement wins and the increment is lost.  That made the prescaler
+    // divide by 5 instead of 4.  With the increments on a 1-in-4 enable the
+    // counter only reaches its threshold on an enable cycle and the compare
+    // fires on the next cycle, which is never an enable cycle, so the two can
+    // no longer collide.
+    reg [1:0] ce4_cnt;
+    always @(posedge clk)
+        if (reset) ce4_cnt <= 2'd0;
+        else       ce4_cnt <= ce4_cnt + 2'd1;
+    wire ce4 = (ce4_cnt == 2'd0);
+
     gba_sound_ch1 #(
         .has_sweep                     (1'b1), 
         .Reg_Number_of_sweep_shift     (SOUND1CNT_L_Number_of_sweep_shift), 
@@ -189,6 +219,7 @@ module gba_sound(clk, gb_on, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_
         .Reg_Initial                   (SOUND1CNT_X_Initial), 
         .Reg_HighZero                  (SOUND1CNT_XHighZero)
     ) igba_sound_ch1(
+        .ce4(ce4),
         .clk(clk),
         .reset(reset),
         .gb_on(gbsound_on),
@@ -211,7 +242,8 @@ module gba_sound(clk, gb_on, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_
          .Reg_Length_Flag                (SOUND2CNT_H_Length_Flag               ),
          .Reg_Initial                    (SOUND2CNT_H_Initial                   ),
          .Reg_HighZero                   (SOUND2CNT_HHighZero                   )       
-    ) igba_sound_ch2(		
+    ) igba_sound_ch2(
+        .ce4(ce4),		
         .clk(clk),
         .reset(reset),
         .gb_on(gbsound_on),
@@ -221,6 +253,7 @@ module gba_sound(clk, gb_on, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_
     );
     
     gba_sound_ch3 igba_sound_ch3(
+        .ce4(ce4),
         .clk(clk),
         .reset(reset),
         .gb_on(gbsound_on),
@@ -230,6 +263,7 @@ module gba_sound(clk, gb_on, reset, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_
     );
     
     gba_sound_ch4 igba_sound_ch4(
+        .ce4(ce4),
         .clk(clk),
         .reset(reset),
         .gb_on(gbsound_on),

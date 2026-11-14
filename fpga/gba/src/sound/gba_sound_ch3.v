@@ -1,11 +1,18 @@
 // Channel 3 is Wave Output
 module gba_sound_ch3(clk, reset, gb_on, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rnw, gb_bus_ena, gb_bus_done, gb_bus_acc, gb_bus_be, gb_bus_rst, 
-            sound_out, sound_on);
+            sound_out, sound_on, ce4);
     `include "pproc_bus_gba.sv"
     `include "preg_gba_sound.sv"
     input                      clk;
     input                      reset;
     input                      gb_on;
+
+    // TinyGBA (BRD-072): one-cycle-in-four enable from clk16, standing in for the
+    // Game Boy's 4.194304 MHz timebase these counters were written for.  Only the
+    // `soundcycles_*` increments are gated by it; the threshold compares and
+    // decrements stay ungated, which removes the lost-increment defect in the
+    // frequency prescaler at the same time.  See gba_sound.v for the account.
+    input                     ce4;
     
     `GB_BUS_PORTS_DECL;
     
@@ -218,9 +225,12 @@ module gba_sound_ch3(clk, reset, gb_on, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_
                 bank_play <= REG_SOUND3CNT_L_Wave_RAM_Bank_Number;
             
             if (ch_on) begin
-                // cpu cycle trigger
-                soundcycles_freq <= soundcycles_freq + 1;
-                soundcycles_length <= soundcycles_length + 1;
+                // cpu cycle trigger -- gated to one cycle in four, so these count at
+                // 4.194 MHz rather than four times too fast.  See gba_sound.v.
+                if (ce4) begin
+                    soundcycles_freq <= soundcycles_freq + 1;
+                    soundcycles_length <= soundcycles_length + 1;
+                end
                 
                 if (soundcycles_freq >= 2) begin		// freq / wavetable
                     freq_cnt <= freq_cnt + 1;

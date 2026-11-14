@@ -1,12 +1,19 @@
 
 // Channel 4 is white noise
 module gba_sound_ch4(clk, reset, gb_on, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_bus_rnw, gb_bus_ena, gb_bus_done, gb_bus_acc, gb_bus_be, gb_bus_rst, 
-            sound_out, sound_on);
+            sound_out, sound_on, ce4);
     `include "pproc_bus_gba.sv"
     `include "preg_gba_sound.sv"
     input                      clk;
     input                      reset;
     input                      gb_on;
+
+    // TinyGBA (BRD-072): one-cycle-in-four enable from clk16, standing in for the
+    // Game Boy's 4.194304 MHz timebase these counters were written for.  Only the
+    // `soundcycles_*` increments are gated by it; the threshold compares and
+    // decrements stay ungated, which removes the lost-increment defect in the
+    // frequency prescaler at the same time.  See gba_sound.v for the account.
+    input                     ce4;
     
     `GB_BUS_PORTS_DECL;
 
@@ -163,10 +170,13 @@ module gba_sound_ch4(clk, reset, gb_on, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_
             end 
             
             if (ch_on) begin
-                // cpu cycle trigger
-                soundcycles_freq <= soundcycles_freq + 1;
-                soundcycles_envelope <= soundcycles_envelope + 1;
-                soundcycles_length <= soundcycles_length + 1;
+                // cpu cycle trigger -- gated to one cycle in four, so these count at
+                // 4.194 MHz rather than four times too fast.  See gba_sound.v.
+                if (ce4) begin
+                    soundcycles_freq <= soundcycles_freq + 1;
+                    soundcycles_envelope <= soundcycles_envelope + 1;
+                    soundcycles_length <= soundcycles_length + 1;
+                end
                 
                 wave_on <= (~lfsr[0]);
                 
@@ -216,10 +226,18 @@ module gba_sound_ch4(clk, reset, gb_on, gb_bus_din, gb_bus_dout, gb_bus_adr, gb_
                 end 
                 
                 // sound out
+                // TinyGBA (BRD-072): `signed'(volume)` is wrong here.  The cast
+                // changes signedness and keeps the width, so a 4-bit unsigned
+                // volume is reinterpreted as two's complement and sign-extended:
+                // volume 15 becomes -1 and volume 8 becomes -8.  A full-volume
+                // tone therefore plays at magnitude 1, 32 dB below PCM, and every
+                // envelope crossing between 7 and 8 inverts the waveform, which is
+                // audible as a click.  Zero-extend first, as the mixer already
+                // does for the master volume on the line above it.
                 if (wave_on)
-                    sound_out <= signed'(volume);
+                    sound_out <= $signed({1'b0, volume});
                 else
-                    sound_out <= -1 * signed'(volume);
+                    sound_out <= -1 * $signed({1'b0, volume});
             end else
                 sound_out <= {16{1'b0}};
             
