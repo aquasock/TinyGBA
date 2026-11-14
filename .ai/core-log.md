@@ -1871,3 +1871,35 @@ Stop treating the harness as an authority on the machine's picture until its own
 - User Test: NOT RUN
 
 ---
+
+## 59 COMMIT Unreleased 2026-11-14T00:01:53-07:00
+
+#### Coming From:
+
+Unreleased 0115f10
+
+#### Purpose:
+
+Take the RetroRegen cartridge's failure to the board with purpose-built probes, after the harness was withdrawn as untrustworthy for picture questions.
+
+#### Outcome:
+
+Three new probes were built and all three pass on the board, which narrows the retail-cartridge failure without explaining it. `tools/make_vram_probe_rom.py` writes a four-band pattern into frame memory in mode 3 and reads every halfword back, painting a white border when all 38,400 readbacks matched; the board shows all four bands and a white border, so writing frame memory, reading it back, and the drawer's read are all correct. `tools/make_romprobe_rom.py` stores each checkpoint's own offset at that offset every 64 KiB across a 1 MiB image and paints one square per checkpoint; all fifteen are green, which is the first test of a cartridge read above 4 KiB on this board. `tools/make_alu_probe_rom.py` scores fifteen operations a text renderer depends on, five multiplies, `mla`, three shifts, add with wrap and carry, subtract with borrow, and the shift-pair forms of unsigned byte, signed byte and signed halfword extension; all fifteen are green and the end marker is reached. That last one matters most: a wrong multiply or shift would produce exactly the observed symptom, glyphs at the correct position and size with wrong patterns, because a renderer computes a glyph address as `base + (char - 32) * bytes_per_glyph`, and the hypothesis is now excluded by measurement rather than by argument. Two corrections to my own readings belong in this entry. The first VRAM capture appeared to show a red border, which would have meant every readback failed; re-measuring at the correct offset showed a white border and the earlier reading was a sampling error in my analysis script, not the machine. And a fourth probe testing VBlank interrupt delivery and HALT drew nothing in three runs, which is what a machine that never delivers an interrupt would do and also what a broken probe would do, so it is recorded as inconclusive and deleted rather than kept; two defects were found in it while trying, a counter placed inside the BIOS's interrupt stack region and an ARM `halt` instruction ARM7TDMI does not have, and fixing both did not make it draw. Recorded as BRD-053 for the three results and TCL-040 for the asymmetry that makes a silent probe unreadable. The Tang was used only to load cartridges over UART and read the capture; no bitstream was rebuilt or flashed, because the image under test is unchanged from BRD-051. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 58 were not rewritten, confirmed BRD-053 and TCL-040 carry unique ids and the canonical field order, and validated this entry as entry 59 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-nine against the 100-entry limit.
+
+#### Next Steps:
+
+Build the interrupt probe properly, with a control, because interrupts and HALT are now the largest untested subsystem and the most plausible remaining cause of a cartridge that draws some text and then stops. The control is the important part and it is cheap: a variant that draws a fixed green square with no interrupt setup at all, loaded immediately before the real probe in the same session, so that "the real probe drew nothing" can be distinguished from "this cartridge never ran". Then the real probe should test the pieces separately rather than in one program, one square each for: the handler pointer at `0x03007FFC` being taken, `IME` and `IE` enabling, the VBlank flag in `DISPSTAT` rising at all, `HALTCNT` waking the CPU, and the handler being entered. Each square reports independently, so a partial failure names itself. Separately the probe results say where not to look: do not re-test VRAM write, read or display, do not re-test cartridge reads below 1 MiB, and do not re-test multiply, shift or sign extension. If interrupts prove sound too, the remaining candidates for the RetroRegen failure are DMA, timers, execution of code spread across a large image, and the mode 0 tile path, which none of the three probes used because all three draw in mode 3. Closing mGBA on the diagnostic cartridge is still the cheapest way to learn whether the cartridge itself needs something unimplemented, and it has now been asked for three times.
+
+#### Files Modified:
+
+- tools/make_vram_probe_rom.py
+- tools/make_romprobe_rom.py
+- tools/make_alu_probe_rom.py
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
