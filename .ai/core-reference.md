@@ -1445,3 +1445,29 @@ Field meanings:
   sources:
     - "This repository, `arm-none-eabi-nm -n` on `tools/roms/irq3.s` before and after the prologue was added"
     - "mGBA 0.10.5 gdb stub sessions recorded in `.ai/core-log.md` entry 62"
+
+- record_id: BRD-058
+  kind: BOARD
+  topic_id: BRD
+  title: "BIOS SWI dispatch works on the board: SWI 0x06 Div returns the correct quotient and remainder"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "`tools/roms/swidiv.s` paints a blue square when the cartridge reaches its first BIOS call and a green square when `swi 0x06` returns quotient 142 and remainder 6 for 1000 / 7. It passed in mGBA 0.10.5 with the retail BIOS first, per TCL-041, and the board agrees exactly: blue `(0, 0, 232)` and green `(18, 255, 0)`. The BIOS call path a cartridge uses is therefore measured good on this hardware. Getting to this probe cost one more instrument defect of a kind that produces no error message: on GBA ARM code the SWI number must be encoded in bits 23-16 (`swi 0x060000`), because the BIOS dispatcher reads it with `ldrb r12,[lr,#-2]` and in ARM mode `lr = address + 4`, so the byte fetched is at `address + 2`. Writing the natural `swi 0x06` assembles to `06 00 00 EF`, the dispatcher reads `0x00`, and calls SWI 0 -- SoftReset -- which reboots the cartridge. Every such probe restarted itself instead of returning; the screen showed the BIOS's white backdrop because `DISPCNT` had not been written yet, and under HLE the same thing happened. Recorded as TCL-045."
+  consequence: "SWI dispatch joins interrupt dispatch (BRD-057) among the execution paths measured good on this board. The two remaining candidates for a cartridge that draws one text row and stops are now the software the cartridge runs against specific hardware: the `VBlankIntrWait` wait itself, which this probe could not measure because it deadlocks against any installed handler, and the DMA `REQ1_START` deadlock recorded as BRD-045, which was verified before the display worked and has not been revisited. The first of those needs a probe that installs no handler at all and lets the BIOS own the interrupt, which is what retail software does; the handler this probe installed was the thing preventing the measurement rather than the thing being measured."
+  sources:
+    - "This repository, `tools/roms/swidiv.s` and `build/test/swidiv.gba`"
+    - "mGBA 0.10.5 with `/tmp/official_bios.bin` (SHA1 300c20df6731a33952ded8c436f7f186d25d3492): square 0 blue, square 1 green"
+    - "Board capture `/tmp/board_swidiv.png`: square 0 `(0, 0, 232)`, square 1 `(18, 255, 0)`"
+    - "The retail BIOS disassembly: vector `0x08: b 0x140`, dispatcher `0x140: push {r11,r12,lr}`, `0x144: ldrb r12,[lr,#-2]`, `0x148: add r11,pc,#120`"
+- record_id: TCL-045
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "GBA ARM SWI numbers go in bits 23-16, because the BIOS reads the number from the byte at lr-2"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "A probe that called `swi 0x06` to test division instead rebooted the machine. The instruction assembles to `06 00 00 EF`, so the bytes in memory are 0x06 at the instruction address and 0x00 at address + 2. An mGBA gdb session stepping the call showed the sequence: `pc` 0x08000100 to 0x00000008 (the SWI vector `b 0x140`) to 0x140, where the dispatcher executes `ldrb r12,[lr,#-2]`. With `lr = 0x08000104` in ARM mode, `lr-2` is address + 2, which held 0x00, so the BIOS dispatched SWI 0 -- SoftReset -- and the cartridge restarted. Encoding the number as `swi 0x060000` puts it at address + 2 and the call returns correctly. Every earlier attempt in this session had been misread as a hang, and under both the retail BIOS and HLE, because a reboot and a hang look the same from a screenshot."
+  consequence: "Any hand-written ARM SWI in this tree must be written `swi 0x0N0000`. The natural spelling compiles without a warning, runs, and silently restarts the cartridge, so the mistake produces no error at any stage and cannot be caught by reading the source. It can be caught by disassembling the built image and reading the byte at `instruction + 2`, which is worth doing for any probe that makes a BIOS call. It also explains an observation that had been carried as unexplained: a cartridge appearing to return to the BIOS startup sequence is consistent with SWI 0 being called by mistake, not only with a machine fault."
+  sources:
+    - "mGBA 0.10.5 gdb stub: `pc` 0x08000100 -> 0x00000008 -> 0x00000140, `ldrb r12,[lr,#-2]` at 0x144"
+    - "`/tmp/official_bios.bin`, SHA1 300c20df6731a33952ded8c436f7f186d25d3492, vector table `0x08: ea00004c b 0x140`"
+    - "This repository, `tools/roms/swidiv.s`"

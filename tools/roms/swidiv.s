@@ -21,9 +21,9 @@
     .byte   0x65,0xc0,0x7c,0x63,0x87,0xf0,0x3c,0xaf
     .byte   0xd6,0x25,0xe4,0x8b,0x38,0x0a,0xac,0x72
     .byte   0x21,0xd4,0xf8,0x07
-    .ascii  "SWIPROBE"
-    .space  4
-    .ascii  "SWIP"
+    .ascii  "SWIDIV"
+    .space  6
+    .ascii  "SWDV"
     .ascii  "01"
     .byte   0x96
     .space  13
@@ -39,6 +39,16 @@
 @
 @ Required to pass under mGBA with the retail BIOS before any board result is
 @ read, per TCL-041.
+@
+@ The SWI numbers here are written as `swi 0x0N0000`, not `swi 0xN`.  That is not
+@ a typo and it is not optional.  The retail BIOS SWI dispatcher at 0x140 reads
+@ the call number with `ldrb r12,[lr,#-2]`; in ARM mode lr = address + 4, so the
+@ byte it reads is at address + 2, which is the high byte of the 24-bit comment
+@ field.  `swi 0x06` assembles to the bytes 06 00 00 EF, so the dispatcher reads
+@ 0x00 and calls SWI 0 -- SoftReset -- and the machine reboots the cartridge
+@ instead of returning.  Measured with an mGBA gdb session: the branch reached
+@ 0x08, then 0x140, then `ldrb r12,[lr,#-2]`.  With the number in bits 23-16 the
+@ byte at address + 2 is the number and the call returns.
 @
 @ Five 16x16 squares across the top, green pass / red fail:
 @   0  SWI 0x06 Div: 1000 / 7 returns quotient 142 and remainder 6
@@ -94,7 +104,7 @@ clr:
     @ ---- check 1: SWI 0x06 Div.  1000 / 7 = 142 remainder 6.
     mov     r0, #1000
     mov     r1, #7
-    swi     0x06
+    swi     0x060000
     cmp     r0, #142
     movne   r6, #1                  @ fail
     cmpeq   r1, #6
@@ -108,69 +118,14 @@ clr:
     mov     r4, #0
     bl      square                  @ square 1: Div
 
-    @ ---- check 1: does VBlankIntrWait return at all?
-    swi     0x05
-    ldr     r5, =0x03E0             @ reaching this line is the pass
-    mov     r0, #32
-    mov     r4, #0
-    bl      square                  @ square 2: one wait returned
-
-    @ ---- check 2: sixty consecutive waits, the per-frame pattern
-    mov     r7, #60
-wait60:
-    swi     0x05
-    subs    r7, r7, #1
-    bne     wait60
-    ldr     r5, =0x03E0
-    mov     r0, #48
-    mov     r4, #0
-    bl      square                  @ square 3: sixty waits returned
-
-    @ ---- check 3: the handler woke at least sixty times
-    ldr     r0, =0x03000000
-    ldr     r6, [r0]
-    mov     r5, #0
-    cmp     r6, #60
-    ldrhs   r5, =0x03E0
-    ldrlo   r5, =0x001F
-    mov     r0, #64
-    mov     r4, #0
-    bl      square                  @ square 4: handler woke >= 60 times
-
+    @ Interrupts off and stop.  This probe measures SWI dispatch only; the
+    @ IntrWait half was removed because VBlankIntrWait deadlocks against any
+    @ installed handler (it halts and polls IF, and a handler cannot leave IF in
+    @ a state the BIOS can both see and clear), so it is a probe-shape problem
+    @ rather than a machine measurement.
     ldr     r0, =0x04000208
     mov     r1, #0
-    strh    r1, [r0]                @ IME = 0 for the bar
-
-    ldr     r0, =0x03000000
-    ldr     r6, [r0]
-    mov     r7, r6, lsl #3
-    cmp     r7, #240
-    movhi   r7, #240
-    mov     r4, #24
-bar_y:
-    mov     r3, #0
-bar_x:
-    cmp     r3, r7
-    bhs     bar_next
-    mov     r1, #240
-    mul     r2, r1, r4
-    add     r2, r2, r3
-    add     r2, r9, r2, lsl #1
-    ldr     r5, =0x7FFF
-    strh    r5, [r2]
-bar_next:
-    add     r3, r3, #1
-    cmp     r3, #240
-    bne     bar_x
-    add     r4, r4, #1
-    mov     r1, r4
-    sub     r1, r1, #24
-    cmp     r1, #8
-    bne     bar_y
-
-    ldr     r11, =0x04000000
-    ldr     r0, =0x0403
-    strh    r0, [r11]
+    strh    r1, [r0]
 h:  b       h
 
 @ Minimal handler.  It acknowledges VBlank through IF at 0x04000202 -- not IE
@@ -179,9 +134,12 @@ h:  b       h
 @ so a plain bx lr is the correct return (BRD-057).
 _irq:
     stmfd   sp!, {r0-r3, r12, lr}
-    ldr     r0, =0x04000202
-    mov     r1, #1
-    strh    r1, [r0]
+    @ Deliberately NOT acknowledging IF here.  VBlankIntrWait (SWI 0x05) is
+    @ implemented in the BIOS as halt-and-poll-IF: it waits for the flag to be
+    @ set and clears it itself once it is.  A handler that acknowledges first
+    @ leaves IF clear, so the BIOS halts again and the wait never ends -- which
+    @ is exactly what this probe did on its first run, and it looked identical to
+    @ a dead SWI.
     ldr     r0, =0x03000000
     ldr     r1, [r0]
     add     r1, r1, #1

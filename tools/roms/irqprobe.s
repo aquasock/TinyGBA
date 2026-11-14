@@ -29,6 +29,11 @@
     .space  13
     .align  2
 
+@ SUPERSEDED by tools/roms/irq3.s.  This probe's handler pointer is wrong (see
+@ TCL-042) and its readback check compares against the value it just stored, so
+@ its interrupt squares are meaningless.  It is kept only because commits 61 and
+@ 56 reference it; do not read results from it.
+@
 @ Three independent checks, one 16x16 square each, green pass red fail:
 @   0  VBlank flag in DISPSTAT rises while polling (no interrupts involved)
 @   1  HALT wakes when a VBlank interrupt arrives
