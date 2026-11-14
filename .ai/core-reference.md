@@ -1398,3 +1398,50 @@ Field meanings:
     - "mGBA 0.10.5 on the same binary, green, `/tmp/mini5.png`"
     - "This repository, records BRD-054 and TCL-041"
   verification: "Measured 2026-11-14: the same image passed in mGBA and on the board, and the board's capture was confirmed against the operator's direct observation of the screen."
+
+- record_id: BRD-057
+  kind: BOARD
+  topic_id: BRD
+  title: "Real interrupt dispatch works on the board: the cartridge handler is entered, acknowledges IF, counts, and returns"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "`tools/roms/irq3.s`, built by `tools/make_probe_rom.py`, was required to report success under mGBA 0.10.5 with the retail BIOS before its board result was read, per TCL-041. Both agree exactly. The board capture reads: square 0 green (the VBlank flag in `DISPSTAT` rises while polling), square 1 green (the BIOS hands the cartridge `IE` and `IME` both clear), square 2 green (`[0x03007FFC]` holds the stored pointer), square 3 blue (the main flow survives `IME = 1` and reaches the next instruction), square 4 green (a dispatch completes), a white bar 8 pixels long (exactly one interrupt), and three white markers in the top right corner painted by the handler itself at entry, after the IF acknowledge, and after the count increment. The handler is therefore entered, acknowledges the source, increments its counter, and returns to the interrupted code. This is the first measurement of the cartridge interrupt path on this hardware; every earlier interrupt probe was a broken instrument."
+  consequence: "Interrupt dispatch is removed from the list of things that could explain a cartridge drawing one text row and stopping. The remaining untested execution features are the BIOS SWI calls a cartridge makes every frame -- principally `VBlankIntrWait` (SWI `0x05`) and `IntrWait` (SWI `0x04`) -- and the hardware the cartridges drive that the probes never touch. That matters because the observed behaviour, a cartridge that runs briefly and then stops, is the natural signature of a frame wait that never returns, and a probe that calls `VBlankIntrWait` directly is the cheapest way to separate a broken SWI from a broken interrupt. Three probe defects were found and recorded on the way here (TCL-042, TCL-043, TCL-044); each of them would have produced a confident finding about the machine that was false."
+  sources:
+    - "This repository, `tools/roms/irq3.s` and `build/test/irq3.gba`"
+    - "mGBA 0.10.5 with `/tmp/official_bios.bin`: squares 0/1/2 green, 3 blue, 4 green, bar 8 px, markers 236-238 white"
+    - "Board capture `/tmp/board_irq3.png`: squares 0/1/2 green, 3 blue, 4 green, bar 8 px, markers 236-238 white"
+    - "This repository, the retail BIOS disassembly at 0x128 in `/tmp/official_bios.bin`: `push {r0-r3,ip,lr}`, `mov r0,#0x04000000`, `add lr,pc,#0`, `ldr pc,[r0,#-4]`"
+- record_id: TCL-042
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "`adr` already yields the runtime address; adding the cartridge base on top of it jumps into unmapped memory"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "To install a cartridge interrupt handler, a probe must write the *runtime* address of its handler to `0x03007FFC`. An earlier probe used `ldr r1, =0x08000000 + _irq` and needed the base because `as` resolves `_irq` to an offset inside `.text` which `objcopy` re-bases to zero. The replacement used `adr r1, _irq` and kept the base addition, reasoning that the same correction still applied. It does not: `adr` is PC-relative, so at runtime `pc` already holds the executing address and the sum came out as `0x1000033C` -- `0x33C` plus the base twice -- which is unmapped. Every interrupt jumped into open bus and the machine spun there. A GDB session against mGBA's stub showed `pc = 0x1000031c` with `[0x03007ffc] = 0x1000031c`, which named the defect in one reading."
+  consequence: "An absolute `ldr =sym` needs the cartridge base added by hand; an `adr` never does. The two forms look interchangeable in source and are not, and the mistake is invisible in review because both spellings contain the symbol. The corresponding discipline is to read the pointer back from `0x03007FFC` at runtime rather than to reason about the expression, which is what BRD-057's square 2 does."
+  sources:
+    - "mGBA 0.10.5 gdb stub: `pc = 0x1000031c`, `[0x03007ffc] = 0x1000031c`"
+    - "This repository, commit history of `tools/roms/irq3.s`"
+- record_id: TCL-043
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "IF is at 0x04000202; acknowledging through IE leaves the source pending and starves the main flow"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "The interrupt acknowledge register `IF` is a halfword at `0x04000202`. `IE`, the enable mask, is the halfword at `0x04000200` directly below it. A hand-written probe acknowledged VBlank with a store to `0x04000200`, which sets the enable bit and leaves the source pending. Because the VBlank flag stayed asserted, the interrupt was re-taken before the interrupted instruction could retire: the handler ran continuously, the main flow made no progress at all, and the screen showed the handler's own progress markers while every square after the enable stayed black. This reads exactly like 'the handler never returns' and was mistaken for an `lr` convention problem first; a `sub lr, lr, #4` was added on that theory and made no difference, because the return path was never broken."
+  consequence: "A level-triggered interrupt that is not acknowledged produces a machine that looks hung after the handler has visibly run, which is indistinguishable on screen from a broken return. Two consequences follow. The disassembly of the shipped dispatcher settles the `lr` question without experiment: `0x128 push {r0-r3,ip,lr}`, `0x12c mov r0,#0x04000000`, `0x130 add lr,pc,#0`, `0x134 ldr pc,[r0,#-4]` gives the handler `lr = 0x138`, the address of the dispatcher's own `pop`, so a correct handler ends in a plain `bx lr` and must not subtract four. And a probe that waits for an interrupt must mark progress from *both* sides, handler and main flow, or an unacknowledged source is read as a return failure."
+  sources:
+    - "This repository, `tools/roms/irq3.s` and the intermediate builds described in `.ai/core-log.md` entry 62"
+    - "mGBA 0.10.5 captures showing three white handler markers with squares 3 and 4 black, before the address was corrected"
+- record_id: TCL-044
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "Breakpoint addresses taken from an earlier build silently test nothing"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "A GDB session was used to find where an interrupt probe stopped. The breakpoints were taken from `nm` output of the previous build, before a prologue was added; every symbol had moved by about 0x20. The breakpoint labelled 'handler entry' at `0x0800031c` therefore sat in dead code and never fired, and the one labelled 'loop exit' at `0x08000224` sat on the loop's first instruction and fired immediately. The session produced the confident conclusion that no interrupt was ever dispatched, which was false -- the handler was being entered normally. Re-reading `nm` from the current object gave `_irq = 0x33C`, `spin = 0x224`, `spin_done = 0x244`, and the corrected breakpoints showed the handler hit first, as expected."
+  consequence: "Any symbol address used to instrument a binary must be re-read from that binary after the last edit, not carried forward from an earlier build; a probe edit of a few instructions moves every address after it. A breakpoint that never fires is not evidence of absence unless the address is known to be in live code, so the address has to be confirmed against the current image -- here `objdump` of the flattened `.gba` would have shown it immediately."
+  sources:
+    - "This repository, `arm-none-eabi-nm -n` on `tools/roms/irq3.s` before and after the prologue was added"
+    - "mGBA 0.10.5 gdb stub sessions recorded in `.ai/core-log.md` entry 62"

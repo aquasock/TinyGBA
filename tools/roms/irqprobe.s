@@ -82,7 +82,12 @@ poll_done:
     mov     r1, #0
     str     r1, [r0]
     ldr     r0, =0x03007FFC
-    ldr     r1, =_irq
+    @ The handler pointer must be the RUNTIME address.  `as` resolves `_irq` to
+    @ its offset within .text and objcopy emits .text at zero, so without the
+    @ cartridge base the BIOS stub jumps into the BIOS region and the machine
+    @ dies on the first interrupt.  This is the same mistake that made an earlier
+    @ DMA probe read from 0x00000xxx; the mGBA control caught both.
+    ldr     r1, =0x08000000 + _irq
     str     r1, [r0]
     ldr     r0, =0x04000004
     mov     r1, #8
