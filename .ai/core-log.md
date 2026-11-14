@@ -1748,3 +1748,33 @@ None.
 - User Test: PASS
 
 ---
+
+## 55 COMMIT Unreleased 2026-11-13T19:46:19-07:00
+
+#### Coming From:
+
+Unreleased 3e2ed0a
+
+#### Purpose:
+
+Build a production image with no trace instrument and put the cartridge's own picture on the board, which both shows a real result and settles the behavioural-equivalence question entry 53 left open.
+
+#### Outcome:
+
+The cartridge draws its own picture, all eight of its checks pass, and the gate report needs no relaxation for the first time. A production netlist was synthesised with `-DTINYGBA_OVERLAY_OFF`, the official BIOS and `TINYGBA_SYNTH_EXTRA=-nowidelut`, giving 49,216 cells and 11,497 flip-flops against the wide-lut production build's 70,923 and 11,495, so the only structural difference from the last production image is the two synchroniser flops of BRD-050 and the primitive mapping of TCL-036. Six seeds were placed from that single netlist; `prod_s12` and `prod_s14` reached bitstreams with zero hold violations and `prod_s14` was deployed as `build/deploy_prod`, chosen for better timing at `clk16` 23.959, `clk50` 86.311, `clk67` 152.462 and `hclk` 95.905 MHz, with a timing gate reading `Meets the contract with no relaxation needed` -- the first image in this project's history to need no GBATang multicycle allowance. Both production placements carry `clk67` on `SPINE25/TOP1`, a measured-good spine, and a measured-good `hclk` pip. `tools/clock_plane_select.py` reported both as non-matches, and that is a defect in the tool rather than a finding: it compares pip sets for exact equality, so a placement using a strict subset of the reference's measured-good pips is rejected although it satisfies the rule BRD-048 records. That needs fixing before the tool is trusted as a selector. With `test_logo.gba` loaded the field is solid green with a white orientation square and no yellow or red anywhere: three captures agree, green 1,737,728 pixels, yellow 0, red 0, and the operator confirmed the field on screen. Green is the cartridge's own statement that its failure mask is zero, covering three cartridge word reads at `0x08000400`, `0x08000800` and `0x08000C00`, IWRAM and EWRAM word plus byte-lane checks, and a VRAM halfword check, so this is a behavioural confirmation of the whole read path rather than a probe reading, and it settles entry 53's open question because an image with wide muxes mapped to LUTs passes the cartridge's own self-test. Reach is `0x08000C00` against the `0x080002AC` blink loop earlier entries reached, so reach increased. Recorded as BRD-051. What is not claimed: nothing about retail cartridges, because BRD-045's DMA deadlock is untouched and `test_logo` does not use DMA; nothing about sound, timers or saves, none tested; and no claim of long-run stability, only that three captures across a few seconds agreed. Four further production seeds were still routing when the cycle closed. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 54 were not rewritten, confirmed BRD-051 carries a unique id and the canonical field order, and validated this entry as entry 55 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set, `None.` for Files Modified because no engineering file changed, and a count of fifty-five against the 100-entry limit.
+
+#### Next Steps:
+
+Fix `tools/clock_plane_select.py` so a placement whose pips are a subset of the reference's measured-good set counts as a match, since rejecting `prod_s12` and `prod_s14` was wrong and a selector that refuses valid placements is worse than no selector. Then take up BRD-045, the DMA `REQ1_START` deadlock that stops Super Mario Advance in the first second on some loads, which is now the only known fault between this tree and a retail title: it has been verified since entry 43 and untouched, and no read-path change addresses it. The instrument for it exists in principle -- the v6 control-flow records already showed the FSM wedged in `REQ1_WAIT` with `dma_on` and `dma_ena` high and `dma_addr=0x03001190` -- so the work starts from a measured wedge rather than a guess. Also worth doing while the build is cheap: make `-nowidelut` the default rather than a variable to remember, and wire `tools/memory_census.py`, `tools/bsram_addr_check.py` and a primitive-mix check into the build so the wide-mux regression cannot return silently. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment; all three are measured and closed, and BRD-050's synchroniser is the change that worked.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
