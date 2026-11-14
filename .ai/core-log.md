@@ -1933,3 +1933,36 @@ Fix the DMA probe until it passes under mGBA before running it on the board agai
 - User Test: NOT RUN
 
 ---
+
+## 61 COMMIT Unreleased 2026-11-14T00:18:25-07:00
+
+#### Coming From:
+
+Unreleased 10dc6c1
+
+#### Purpose:
+
+Fix the DMA probe until it passes under mGBA, then use validated probes to test the paths that could still explain a cartridge drawing one text row and stopping.
+
+#### Outcome:
+
+Four more subsystems are measured good on the board, and none of them is the fault. The invalid five-check DMA probe was abandoned rather than repaired and replaced with a minimal one, `tools/roms/minidma.s`, about a hundred lines: clear frame memory to `0x001F` with CPU stores, DMA3 64 words from cartridge ROM to `0x06000000` with control word `0x8400003F`, read the first destination halfword and paint the screen green for the expected `0x0000`, red for the clear value, blue for anything else. It is green in mGBA and green on the board, 1,730,160 green pixels with no other colour, and the operator confirmed the screen filled completely green while I was reading it. Then `tools/roms/byteprobe.s` tested eleven byte loads from ROM at consecutive offsets and four more from a deliberately unaligned base -- the access pattern a font decoder uses, which no earlier probe exercised and which BRD-034 once confined a read defect to -- and all fifteen squares are green in mGBA and green on the board. `tools/roms/irqprobe.s` polls the `DISPSTAT` VBlank flag and paints green if it ever rises; that square is green in both. Its two `HALT`-based checks are red in mGBA as well, so they are the probe's defect and no board result is read from them. That last point cost a cycle and is the reason the earlier interrupt probe had been deleted: the control has to pass before a board result means anything. The list of parts measured good on this hardware is now frame memory write, read-back and display; cartridge reads at every 64 KiB to 1 MiB; fifteen arithmetic operations; DMA3 ROM to frame memory; byte loads including unaligned; and the VBlank flag. Every individual operation the RetroRegen cartridge performs to copy a glyph and store it has been tested and works, and the machine still draws exactly one text row of that cartridge from the wrong glyph data (BRD-054) and then stops. Since each operation is good in isolation, the remaining explanations are about execution rather than about an operation. `tools/make_probe_rom.py` was added with the three sources under `tools/roms/`, because `core.md` requires a diagnostic the operator may run to be produced by a committed deterministic script rather than assembled by hand into `/tmp`; it rebuilds all three byte-identically to the images that were tested, and it refuses an image whose header byte `0xB2` has slipped, which is a mistake made twice in this session. Recorded as BRD-055 and BRD-056. Nothing was rebuilt for the board; the image under test is unchanged from BRD-051. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 60 were not rewritten, confirmed both new records carry unique ids and the canonical field order, and validated this entry as entry 61 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of sixty-one against the 100-entry limit.
+
+#### Next Steps:
+
+Test execution rather than operations, because every operation is now measured good and the failure must be in how the cartridge runs overall. The three specific things worth testing, in the order they are likely to matter: whether the CPU executes correctly from a large image, since every probe is 4 KiB and the failing cartridges are 284 KiB and 4 MiB -- a probe placed at a high ROM offset that must run a loop there would test the instruction-fetch path beyond the first few kilobytes, which nothing has done; whether `HALT` wakes and the handler is entered, using a probe whose control passes in mGBA this time; and whether the mode 0 tile path works, since every probe draws in mode 3 and the diagnostic cartridge's own menu is tile-based even though its text is software-rendered. If the cartridge turns out to need a feature this core lacks, mGBA answers that immediately by showing which part of the menu it reaches, so comparing the board against mGBA at the same instant is cheaper than another probe. Keep the discipline TCL-041 records for every one of these: mGBA first, board second, and a probe that fails in the emulator is a probe defect and nothing else.
+
+#### Files Modified:
+
+- tools/make_probe_rom.py
+- tools/roms/minidma.s
+- tools/roms/byteprobe.s
+- tools/roms/irqprobe.s
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

@@ -1368,3 +1368,33 @@ Field meanings:
     - "The board showing the same five red squares for the same binary"
     - "This repository, `tools/make_dma_probe_rom.py`, and records TCL-040 and BRD-054"
   verification: "Measured 2026-11-14: the same cartridge image run on the board and in mGBA, both reporting five failures, which is what established that the probe rather than the machine was at fault."
+
+- record_id: BRD-056
+  kind: BOARD
+  topic_id: BRD
+  title: "Byte loads, unaligned byte loads and the VBlank flag all work on the board, each validated in mGBA first"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "Two more probes, each run in mGBA before its board result was read, come back clean. `build/test/byteprobe.gba` performs eleven byte loads (`ldrb`) from cartridge ROM at consecutive offsets and four more from a base deliberately not word aligned, comparing each against the value the image holds, and paints one square per test. All fifteen squares are green in mGBA and all fifteen are green on the board. That matters because byte loads are how a font decoder reads glyph bitmaps, no earlier probe exercised them, and BRD-034 once confined a read defect to the byte path. `build/test/irqprobe.gba` polls `DISPSTAT`'s VBlank flag for up to 200,000 iterations and paints green if it ever rises. That square is green in mGBA and green on the board. Two of that probe's other checks, which use `HALT` to wait for the interrupt, are red in mGBA as well, so they are the probe's defect and are not read as results about the machine."
+  consequence: "The list of subsystems measured good on this board is now: frame memory write, read-back and display; cartridge reads at every 64 KiB checkpoint to 1 MiB; fifteen CPU arithmetic operations including multiply, shift and sign extension; DMA3 from cartridge ROM to frame memory with an incrementing source; byte loads including unaligned ones; and the VBlank flag in DISPSTAT rising. Everything the RetroRegen cartridge needs in order to copy a glyph and store it has been tested and works. The machine draws exactly one text row of that cartridge, at the correct position, size and colour, from the wrong glyph data (BRD-054), and then stops. Since every individual operation the cartridge performs is measured good, the remaining explanations are about execution rather than about any single operation: the cartridge may use a feature not implemented here, may execute from a region not covered by a 4 KiB probe, or may hang at a point whose cause is not in these paths. HALT itself is not among the measured-good items, because the probe that tests it is still wrong."
+  sources:
+    - "This repository, `build/test/byteprobe.gba` and `build/test/irqprobe.gba`, with their assembly sources preserved"
+    - "mGBA 0.10.5 results `/tmp/bp.png` (fifteen green) and `/tmp/irqm2.png` (square 0 green, squares 1 and 2 red)"
+    - "Board captures `/tmp/bpbd.png` (fifteen green) and `/tmp/irqbd.png` (square 0 green, `(18,255,0)`)"
+    - "This repository, records BRD-053, BRD-055 and TCL-041"
+  verification: "Measured 2026-11-14: each cartridge run in mGBA first and required to pass there, then loaded on the board over UART and read from a 1920x1080 capture, with the board's active area located and the sample coordinates derived from its scale rather than assumed."
+
+- record_id: BRD-055
+  kind: BOARD
+  topic_id: BRD
+  title: "DMA3 from cartridge ROM to frame memory works on the board, verified with a probe that passes in mGBA first"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "A minimal DMA cartridge (`build/test/minidma.gba`, built from an assembly source of about a hundred lines) clears frame memory to `0x001F` with CPU stores, starts a DMA3 transfer of 64 words from cartridge ROM at `0x080001C0` to `0x06000000` with the control word `0x8400003F` (enable, 32-bit, source increment, destination increment, 64 units), and then reads the first destination halfword back and paints the whole screen one of three ways: green when it reads `0x0000`, which is the low half of the first source word `0x12340000`; red when it still reads `0x001F`, the value the clear left; blue for anything else. Under mGBA 0.10.5 the screen is green. On the board the screen is also green: 1,730,160 pixels of `(18,255,0)` against 311,040 of the `(43,43,43)` pillarbox, with no red or blue anywhere, and the operator independently reported the screen filled completely green. The transfer therefore ran, used an incrementing source address in cartridge ROM, wrote frame memory, and the destination held the expected value afterwards."
+  consequence: "This closes the leading hypothesis for the RetroRegen cartridge's failure. BRD-054 established that the board draws that cartridge's text from the wrong glyph data, and that the cartridge renders text in software in mode 3 by copying glyph bitmaps from ROM, so the copy crosses the DMA path. DMA is now measured working on the board, using the same shape of transfer such a copy would use, so DMA is not the cause. Two further notes matter for what comes next. The probe was validated in mGBA before its board result was read, which is the discipline TCL-041 records, and the validation was not a formality: the earlier multi-check DMA probe reported five failures on both the board and the emulator, and only the emulator run revealed that the probe was wrong. And the capture path was checked against the operator's own eyes on the same frame, which is worth doing because this session has produced several wrong readings from instruments rather than from the machine. What remains untested on the board and still plausibly explains a cartridge that draws one text row and stops: byte loads (`ldrb`), which no probe has exercised and which is how font bitmaps are read; the mode 0 tile path, which every probe so far has avoided by drawing in mode 3; interrupts and HALT; timers; and execution of code spread across a large image rather than a 4 KiB one."
+  sources:
+    - "This repository, `build/test/minidma.gba`, and the assembly it was assembled from, which is reproduced in the cycle's log entry"
+    - "Board capture `/tmp/chk.png`: 1,730,160 pixels of `(18,255,0)`, 311,040 of `(43,43,43)`, 20 colours total, green at every sampled row"
+    - "mGBA 0.10.5 on the same binary, green, `/tmp/mini5.png`"
+    - "This repository, records BRD-054 and TCL-041"
+  verification: "Measured 2026-11-14: the same image passed in mGBA and on the board, and the board's capture was confirmed against the operator's direct observation of the screen."
