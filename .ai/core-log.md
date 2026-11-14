@@ -1809,3 +1809,35 @@ Settle the harness's display fidelity before using it again for a picture questi
 - User Test: NOT RUN
 
 ---
+
+## 57 COMMIT Unreleased 2026-11-13T22:21:16-07:00
+
+#### Coming From:
+
+Unreleased 0712bce
+
+#### Purpose:
+
+Find why the harness and the board disagree about the same cartridge's picture, after entry 56 left that disagreement blocking any further work on the garbled-text hang.
+
+#### Outcome:
+
+The disagreement is explained as far as the harness can explain it, and the explanation is a harness defect on the store data path rather than a rendering difference. The decisive instrument was a final framebuffer dump taken from the buffer the picture is built from, added to the harness because dumping frames on a schedule had already given two misleading readings: asked what `test_logo.gba` draws, the harness reports `FINALFRAME: nonzero=0 white=0 green=0 of 38400`, an entirely blank screen, against the board's solid green of BRD-051. The cause is a corrupted store. The cartridge's `ldr r0,=0x0403` at `0x0800025C` reads the literal at offset `0x2E0`, and the harness's own read trace reports that read returning `0x00000403`; the following `strh r0,[r11]` at `0x08000260` is then reported committing `0x00000008`, and that is the last write to `0x04000000` in the run, leaving DISPCNT at mode 0 with BG0 rather than mode 3 with BG2, which is exactly a black screen. Two earlier writes in the same trace carry `0x04000000` -- an address where data belongs -- which points at the store data path rather than at the cartridge. So within one harness run the load is right and the store is wrong, and the board completes both correctly. Recorded as BRD-052. Getting there required fixing three defects in my own instruments, each of which had produced a plausible wrong reading: a VRAM write trace sampled on `fclk` when the memory latches on `mclk`, which reported zero data for every write; the same trace capped at 400 lines, which filled entirely during the BIOS's VRAM clear and never reached the cartridge, making a zero-writing machine look like a real finding; and, most consequentially, the harness's `DISPCNTWRITE` trace was never gated on `cpu_en_r` although the read trace beside it was, so a store held on the bus was logged once per cycle and one `strh` appeared as four identical writes followed by a stray fifth. Correcting that last one changed the sequence completely and is recorded as TCL-038, with the note that the board-side readouts are unaffected because they come from the RTL recorder and not from this harness. No RTL was changed for the machine itself; the only source edits are instrumentation guarded by defines that no synthesised build sets, plus the harness dump and the trace gate. The Tang was not touched at any point in this cycle, per the operator's instruction. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 56 were not rewritten, confirmed BRD-052 and TCL-038 carry unique ids and the canonical field order, and validated this entry as entry 57 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-seven against the 100-entry limit.
+
+#### Next Steps:
+
+Trace `ram_wdata` against the instruction that issued it, in the harness, for the single store at `0x08000260`, because the load into the same register is already known good and the corruption is therefore between that register and the store bus. The specific question is whether `ram_wdata` carries `0x0008` at the moment `ram_cen`/`ram_wen` assert or whether it carries `0x0403` and is corrupted later; the first would put the fault in the CPU's register read for a store, and the second in the memory block's use of the bus. Do not trust the harness's previous `DISPCNTWRITE` sequences, and re-read any earlier conclusion that counted writes from it, noting that the board-side records BRD-050, BRD-051 and the entry 42 and 43 readouts come from the RTL recorder and are unaffected. Once the store path is explained, return to the actual goal: the RetroRegen cartridge's text is smeared on the board with correct position, height and palette and only the glyph bit patterns wrong, which points at tile or bitmap data rather than at layout, and `TINYGBA_VRAMDBG` and `TINYGBA_DMADBG` are in place for that. Two independent faults remain recorded and untouched: BRD-045's DMA `REQ1_START` deadlock, verified since entry 43, and the question of whether the diagnostic cartridge depends on a feature this core does not implement, which mGBA can settle quickly. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment.
+
+#### Files Modified:
+
+- tools/sim/sim_main.cpp
+- fpga/gba/src/gpu/gba_gpu_drawer.v
+- fpga/gba/src/common/sim_dpram_be.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

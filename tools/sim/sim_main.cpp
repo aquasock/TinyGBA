@@ -628,11 +628,18 @@ int main(int argc, char **argv, char **env)
 				// Every write to DISPCNT.  The board lingers on forced blank, so
 				// whether the cartridge's final 0x0403 store is ever issued is
 				// exactly the question this answers.
-				if (ram_cen_r && ram_wen_r && ram_addr_r == 0x04000000 &&
+				// Gated on cpu_en_r like the read trace above.  Without it a store
+				// held on the bus for several cycles is printed once per cycle, which
+				// made a single `strh` look like four separate writes followed by a
+				// bogus one (TCL-024 again -- an instrument that manufactures events).
+				if (cpu_en_r && ram_cen_r && ram_wen_r && ram_addr_r == 0x04000000 &&
 				    n_dispcnt_wr < 60) {
 					n_dispcnt_wr++;
-					printf("DISPCNTWRITE: data=%08x be=%x\n",
-					       gba->ram_wdata, ram_be_r);
+					// PC and halt state beside the store, because "the cart wrote it"
+					// and "something wrote it while the cart was running" are different
+					// faults and the data alone cannot tell them apart.
+					printf("DISPCNTWRITE: data=%08x be=%x pc=%08x halt=%d rom_en=%d\n",
+					       gba->ram_wdata, ram_be_r, gba->rom_addr, gba->halt, gba->rom_en);
 				}
 				if (gba->rom_en && ((gba->rom_addr >> 24) != 0))
 					n_cart_fetch_cycles++;
@@ -832,6 +839,29 @@ int main(int argc, char **argv, char **env)
 	double duration = ((double)(end_ticks - start_ticks)) / SDL_GetPerformanceFrequency();
 	double fps = (double)frame_count / duration;
 	printf("Frames per second: %.1f. Total frames=%d\n", fps, frame_count);
+
+	// The final framebuffer contents, so "what did the machine draw" is answered
+	// from the buffer the picture is built from rather than inferred from a dump.
+	// A picture question needs the picture, and dumping frames on a schedule has
+	// already produced two misleading readings in this project: a single-colour
+	// frame is indistinguishable from a dump that fired before the cart drew.
+	{
+		unsigned long nz = 0, white = 0, green = 0;
+		for (int i = 0; i < H_RES * V_RES; i++) {
+			unsigned r = screenbuffer[i].r, g = screenbuffer[i].g, b = screenbuffer[i].b;
+			if (r || g || b) nz++;
+			if (r > 200 && g > 200 && b > 200) white++;
+			if (g > 150 && r < 100 && b < 100) green++;
+		}
+		printf("FINALFRAME: nonzero=%lu white=%lu green=%lu of %d\n",
+		       nz, white, green, H_RES * V_RES);
+		for (int i = 0; i < 6; i++)
+			printf("  px[%d,%d]=(%d,%d,%d)\n", i * 40, 80,
+			       screenbuffer[80 * H_RES + i * 40].r,
+			       screenbuffer[80 * H_RES + i * 40].g,
+			       screenbuffer[80 * H_RES + i * 40].b);
+	}
+
 
 	// The CPU stall duty cycle: what fraction of clk16 cycles the CPU did not
 	// advance, and how much of that was a halt rather than memory wait.

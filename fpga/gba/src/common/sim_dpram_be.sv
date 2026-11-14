@@ -52,4 +52,25 @@ begin
     end
 end
 
+`ifdef TINYGBA_VRAMDBG
+// Final contents, so the question "what did the cartridge actually put in
+// memory" is answered from the memory rather than from a write-stream trace.
+// Two earlier traces were misread: one sampled on the wrong clock and reported
+// zeros, and one capped its log during the BIOS's VRAM clear and never reached
+// the cartridge (TCL-024).  A final dump has neither failure mode.
+final begin
+    integer nz, g, h;
+    nz = 0; g = 0; h = 0;
+    for (int i = 0; i < DEPTH; i++) begin
+        if (mem[i] != 0) nz++;
+        if (mem[i][15:0] == 16'h03E0 || mem[i][31:16] == 16'h03E0) g++;
+        if (mem[i][15:0] != 16'h0000 && mem[i][15:0] != 16'h03E0) h++;
+    end
+    $display("VRAMFINAL: depth=%0d nonzero=%0d greenwords=%0d otherlo=%0d",
+             DEPTH, nz, g, h);
+    for (int i = 0; i < 8; i++)
+        $display("VRAMWORD[%0d]=%08x", i, mem[i]);
+end
+`endif
+
 endmodule

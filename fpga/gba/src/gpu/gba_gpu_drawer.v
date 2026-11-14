@@ -880,16 +880,7 @@ end
         .addrb(VRAM_Drawer_addr_Lo), .dinb(32'b0), .doutb(VRAM_Drawer_data_Lo),
         .web(1'b0), .beb(4'b0) 
     );
-`ifdef TINYGBA_VRAMDBG
-    // CPU writes into the low half of VRAM, capped so the log stays readable.
-    integer vrdbg_n = 0;
-    always @(posedge fclk) begin
-        if (VRAM_Lo_we && vrdbg_n < 400) begin
-            vrdbg_n <= vrdbg_n + 1;
-            $display("VRAMLO: addr=%05x din=%08x be=%x", VRAM_Lo_addr[13:0],
-                     VRAM_Lo_datain, VRAM_Lo_be);
-        end
-    end
+`ifdef TINYGBA_VRAMDBG_UNUSED
 `endif
 
     sim_dpram_be #(32, 8*1024) ivram_hi (
