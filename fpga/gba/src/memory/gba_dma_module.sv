@@ -163,6 +163,18 @@ assign dma_eepromcount = fullcount;
 
 // assign dma_bus_ena = running && (state == READING || state == WRITING);
 
+`ifdef TINYGBA_DMADBG
+// Trace DMA writes, so a cart that blits through DMA can be told from one that
+// writes VRAM by CPU stores.  Capped so the log stays readable.
+integer dmadbg_n = 0;
+always @(posedge clk100) begin
+    if (dma_bus_ena && !dma_bus_rnw && dmadbg_n < 300) begin
+        dmadbg_n <= dmadbg_n + 1;
+        $display("DMAWR: adr=%07x dat=%08x acc=%b", dma_bus_adr, dma_bus_dout, dma_bus_acc);
+    end
+end
+`endif
+
 reg [31:0] dma_bus_dout_buf;
 reg [2:0] dmaout;
 localparam DMAOUT_DIN = 3'd0;

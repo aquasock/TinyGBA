@@ -1778,3 +1778,34 @@ None.
 - User Test: PASS
 
 ---
+
+## 56 COMMIT Unreleased 2026-11-13T21:01:26-07:00
+
+#### Coming From:
+
+Unreleased 2326e07
+
+#### Purpose:
+
+Find out why retail and diagnostic cartridges boot the BIOS and then stop on a garbled picture, while the purpose-built test cartridge draws correctly, by reproducing the fault in the Verilator model.
+
+#### Outcome:
+
+The investigation produced a clean reproduction and then invalidated the instrument that produced it, and no fault was fixed. The reproduction is real and useful: the controller harness running the RetroRegen diagnostic cartridge draws exactly what the board draws, a single orange text row at output rows 130 to 137 with the same smeared glyph shapes, the same descender fragments, and six consecutive frames byte-identical, so the machine is frozen rather than still drawing. Twelve independent checks on that frame support a specific reading: the row is at the right vertical position and exactly 8 pixels tall, which is one tile row, so layout, scaling and palette are all correct and only the glyph bit patterns are wrong. Three hypotheses were eliminated by measurement rather than argument. DMA is not involved: a `TINYGBA_DMADBG` trace of every DMA write in the run records zero, so the cartridge is not blitting through DMA and BRD-045 cannot be the cause of this cart's failure even though it remains real for Super Mario Advance. Cartridge reads are correct: the last reads the cartridge makes are `0x08003428` returning `0x04000054`, `0x0800342c` returning `0x00000403` and `0x08003430` returning `0x04000006`, which are BLDY, DISPCNT and DISPSTAT and which match the image. And the synchroniser did not cause the garble: the pre-synchroniser build run on the same cartridge shows a solid white field with no text at all, so the synchroniser changed a blank field into a garbled one rather than breaking a working picture. What then stopped the cycle is that the instrument cannot be trusted for this question. Asked what `test_logo.gba` draws, three configurations give three answers: the board paints solid green and passes all eight checks (BRD-051); the controller harness dumps pure black at frames 200 through 700; and the array-model harness dumps pure white but reports only 60 cartridge fetch cycles against millions on the controller build, so it is not executing the cartridge at all. The dump code itself is sound, writing the same `screenbuffer` the SDL texture is built from, so the disagreement is not a broken file writer. The harness therefore represents at least one board state faithfully, the diagnostic cartridge, and at least one badly, `test_logo`, and a harness-only result about a picture cannot be carried to the board until that is explained. Recorded as TCL-037 with the disagreement stated as a fact and the likely cause stated as an untested hypothesis, since `screenbuffer` is written only where `pixel_out_we` is high and is never cleared per frame. Two permanent instruments were added behind defines that no synthesised build sets, `TINYGBA_DMADBG` in `gba_dma_module.sv` and `TINYGBA_VRAMDBG` in `gba_gpu_drawer.v`, so the DMA and VRAM write paths can be traced again without rewriting them. Nothing was flashed after the operator's instruction not to touch the Tang, which stood for the whole cycle. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 55 were not rewritten, confirmed TCL-037 carries a unique id and the canonical field order, and validated this entry as entry 56 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-six against the 100-entry limit.
+
+#### Next Steps:
+
+Settle the harness's display fidelity before using it again for a picture question, because every conclusion in this cycle rests on it and one cartridge already contradicts the board. The concrete test is to clear `screenbuffer` at each frame boundary and check whether `test_logo` then dumps green in the controller harness; if it does, the disagreement was the never-cleared buffer and the harness becomes usable, and if it does not, the harness's display path differs from the board's in a way that needs its own investigation before any picture claim. Do not use the array-model harness for display questions at all, since it did not reach the cartridge. Once the harness is trusted, the fault to pursue is the garbled tile data: position, height and palette are correct and only the glyph patterns are wrong, which points at the tile or bitmap data the drawer reads rather than at the mode-3 drawing path that `test_logo` exercises successfully. `TINYGBA_VRAMDBG` and `TINYGBA_DMADBG` are in place for that. Separately, the two known faults that remain are unchanged and independent of this work: BRD-045's DMA `REQ1_START` deadlock, verified and untouched since entry 43, and the possibility that the diagnostic cartridge relies on a tile or affine feature this core does not implement, which mGBA can rule in or out and which the operator was asked to check. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment.
+
+#### Files Modified:
+
+- fpga/gba/src/gpu/gba_gpu_drawer.v
+- fpga/gba/src/memory/gba_dma_module.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
