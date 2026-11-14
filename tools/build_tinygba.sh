@@ -7,6 +7,15 @@
 #
 #   tools/build_tinygba.sh [out-dir]
 #
+#   TINYGBA_SYNTH_EXTRA  extra arguments for `synth_gowin`, for experiments.
+#                     The one that matters is `-nowidelut`: by default the flow
+#                     maps wide multiplexers onto the device's dedicated
+#                     MUX2_LUT5..8 primitives, and those sit at fixed tile
+#                     positions, so they pin the placer down.  Measured
+#                     2026-11-13: this design synthesises 14,077 such cells, of
+#                     which 9,419 are in the CPU block, against 6,097 for the
+#                     whole of the sibling SNES core, and placements of the
+#                     default build take 1.5 to 2 hours.  See TCL-036.
 #   TINYGBA_STAGE     synth | pnr | pack | all (default all)
 #   TINYGBA_BUILD_DIR output directory (default build/tinygba)
 #   TINYGBA_SEED      placement seed (default 1; not proven on hardware)
@@ -34,6 +43,7 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 src="$root/fpga/gba"
 out="${TINYGBA_BUILD_DIR:-$root/build/tinygba}"
 stage="${TINYGBA_STAGE:-all}"
+synth_extra="${TINYGBA_SYNTH_EXTRA:-}"
 case "$stage" in synth|pnr|pack|all) ;; *) echo "TINYGBA_STAGE must be synth, pnr, pack or all" >&2; exit 2 ;; esac
 
 suite="${OSS_CAD_SUITE:-$HOME/oss-cad-suite}"
@@ -230,7 +240,7 @@ yosys -Q -T -q -l "$out/synth.log" -p "
     read_verilog -lib $shim/cells_xtra_gw5a.v
     read_slang --std 1800-2017 --single-unit -U SYNTHESIS $defines --allow-use-before-declare --allow-lib-module-redef $bbflags -v $shim/cells_sim_nospecify.v -v $shim/cells_xtra_gw5a.v -I $src/src/common -I $src/src/gpu ${sources[*]} ${hdmi_slang[*]} $root/tools/cells_behavioral.v
     setundef -zero -init
-    synth_gowin -family gw5a -top gbatang_top
+    synth_gowin -family gw5a -top gbatang_top $synth_extra
     write_json $out/tinygba.json
 " 2>&1 | tee "$out/synth.err" | tail -30
 [[ -f "$out/tinygba.json" ]] || { echo "synthesis failed; see $out/synth.log" >&2; exit 1; }

@@ -1688,3 +1688,33 @@ Finish the board cycle that this one ran alongside, which is still the thing tha
 - User Test: NOT RUN
 
 ---
+
+## 53 COMMIT Unreleased 2026-11-13T18:49:09-07:00
+
+#### Coming From:
+
+Unreleased 754bec8
+
+#### Purpose:
+
+Answer the operator's finding that a GBA core which cannot boot should not take longer to build than the sibling SNES core with SuperFX, by finding where the build time actually goes.
+
+#### Outcome:
+
+The build time was the synthesiser's wide-multiplexer mapping, and removing it cuts the build roughly threefold while improving the achieved clocks. The operator's benchmark was the trigger: TinySNES with SuperFX and its helper chips places in about twenty minutes, this design was taking one and a half to two hours per seed, and it does so at only 38 percent LUT4 and 11 percent DFF utilisation. Two hypotheses were tested and discarded by measurement rather than argument. Threads are irrelevant, and the `--threads` experiment was abandoned at the operator's instruction before it produced a number. Clock-net routing was also not the cause: the `sync_s10` build logs 804 failed dedicated routes on `clk67` and I initially read that as the flood responsible, but the same 804 appear in the `ovb_s3`, `v6_s9`, `v7_s9` and `v7_s18` logs, all of which routed and some of which displayed, while `v7_s13`, `v7_s17` and `e49_s9` report zero and `v7_s13` displayed as well, so the count separates nothing. The actual cause was found by comparing netlists rather than logs: `synth_gowin` maps wide multiplexers onto the device's dedicated `MUX2_LUT5` to `MUX2_LUT8` primitives, which occupy fixed tile groups, so a `MUX2_LUT8` locks eight 4-LUT sites at one position. This design produced 13,295 of them on the instrumented build and 14,077 on the older `v7` netlist, 9,419 in the CPU block alone, about 22,677 LUT-site equivalents or 16 percent of the device position-locked. That is why utilisation was low and placement was slow. A `TINYGBA_SYNTH_EXTRA` variable was added to `tools/build_tinygba.sh` so extra `synth_gowin` arguments can be passed without editing the script, and `-nowidelut` was measured against the identical source and defines: cells 81,124 to 58,501, wide muxes 13,295 to zero, flip-flops 14,923 to 14,923 exactly, netlist 102 MB to 64 MB, routing arcs 253,232 to 197,525, synthesis 12.7 to 9 minutes, CPU block 19,895 to 10,595 cells and memory block 13,642 to 4,192. The first `-nowidelut` placement to converge did so in about 32 minutes and passed every gate with better clocks than `v7_s13`: `clk16` 22.871 against 18.688 MHz, `hclk` 104.723 against 86.972, zero hold violations, `clk67` on both measured-good spines. Total synthesis-to-bitstream is about 41 minutes against about 135. That bitstream was flashed and the operator reported the display working, showing the trace instrument's white cells, so the mapped design boots, draws and syncs. What could not be obtained is a decoded capture: during and after the operator's replug of the capture card, `tools/cap_tang.sh` returned the 255-colour near-black frame that BRD-012 records as its no-signal signature, on every timing tried, including after a reflash that forces a fresh HDMI handshake, while the same card decoded `v7_s13` at 2,461 colours earlier in the same session. The board is therefore demonstrably producing a picture and my capture path is not receiving it, and no claim is made from this cycle about the read lag, about DISPCNT, or about whether the `-nowidelut` mapping behaves identically to the wide-lut one. Six further seeds were left placing. Recorded as TCL-036. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 52 were not rewritten, confirmed TCL-036 carries a unique id and the canonical field order, and validated this entry as entry 53 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-three against the 100-entry limit.
+
+#### Next Steps:
+
+Carry `-nowidelut` in `tools/build_tinygba.sh` as the default rather than as an experiment, since it is smaller, faster, better-timed and flip-flop-identical, and only requires the one variable already added; record the primitive mix in a gate so a return to wide muxes is visible, in the same shape as `tools/memory_census.py` and `tools/bsram_addr_check.py`, both of which are still waiting to be wired in. Then close the two gaps this cycle leaves. First, restore the capture path and decode a frame: the card sees no signal while the board draws, so check the cable and splitter topology before suspecting the bitstream, and note that a reflash does not fix a cable and that `ffmpeg` writing a single PNG needs `-update 1` or the project script. Second, establish behavioural equivalence between the wide-lut and `-nowidelut` mappings, which is the one thing TCL-036 explicitly does not claim: the cheapest test is the same cartridge on both, scored through `tools/check_cartread.py` for accuracy and reach together per TCL-027, at two seeds and two loads per TCL-034. Once a capture is available, the synchroniser verification of BRD-050 is still outstanding and is the original question of this cycle: read page 3 for the pool word at `0x080002E0` and the drawer's DISPCNT. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment.
+
+#### Files Modified:
+
+- tools/build_tinygba.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
