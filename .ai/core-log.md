@@ -1718,3 +1718,33 @@ Carry `-nowidelut` in `tools/build_tinygba.sh` as the default rather than as an 
 - User Test: NOT RUN
 
 ---
+
+## 54 COMMIT Unreleased 2026-11-13T19:02:35-07:00
+
+#### Coming From:
+
+Unreleased e2e9d1e
+
+#### Purpose:
+
+Verify BRD-050's synchroniser on the board, which is the last step of the read-lag cycle and the property entries 42 and 43 measured as missing.
+
+#### Outcome:
+
+The one-word read lag is fixed on hardware and the white field is gone. With the capture path restored -- the operator had not had HDMI plugged into the capture card, which is why every capture in entry 53 read as BRD-012's no-signal signature while the board was plainly drawing -- `build/deploy_nwl11` was reloaded, `test_logo.gba` streamed, and page 3 decoded from three independent captures that agree field for field. The 32-bit read of `0x080002E0` returns `0x00000403`, the word the image holds there, where `build/deploy_v7s13` returned `0x0000FFE0` before the change; `0x080002E4` returns `0x00007FFF` correctly; the `0x0403` store is issued and is the last DISPCNT write with the sticky `0xFFE0` flag never setting, against `0xFFE0` twice and `0x0403` never before; and the drawer's own copy of DISPCNT settles at forced_blank=0 with BG2 on, where it previously sat at forced_blank=1 with BG0..BG3. The drawer reaching `0x0403` is exactly the property entries 42 and 43 measured as absent, so the white field is gone by measurement and not by inference. The tail ring shows the CPU past the store, at `0x08000260` (the `strh` to `0x04000000`) and `0x08000264`, with 7 of 8 tail-ring fetches exact and the single miss being `0x08000264` reading `0xE1CB00B0`, its predecessor, which is the same one-transaction offset BRD-044 records elsewhere and not a new fault. Both TCL-027 properties therefore hold together: the reads are correct and the machine executes past the store it previously never reached. The four remaining `-nowidelut` seeds from entry 53 all landed with exit 0 and zero hold violations, so five placements exist; `tools/clock_plane_select.py` reports `nwl_s11` as an exact match to the `v6_s9` reference on all four clocks and `nwl_s12`, `nwl_s14` and `nwl_s15` as matching on the required `clk67` spines plus a measured-good `hclk` pip. Per TCL-034's two-seed bar a second seed was flashed, `build/deploy_nwl12`, and page 3 decoded there independently reproduces every headline figure identically, so the result is not a property of one placement. BRD-050 is raised from MEASURED to VERIFIED with the board evidence, and its two predictions -- the pool read returning `0x00000403` and the drawer reaching `0x0403` with blank released -- both held. The decoder's canned verdict line reads `BRD-044 is REFUTED`, which is a wording artefact rather than a finding: BRD-044 was confirmed on `v7_s13` where the read did return `0x0000FFE0`, and it is correct now for the opposite reason, that the read returns its own word. The `0x080002DC` record reading zero in this capture is likewise an absent read rather than a zero word, since the instrument only latches an address it saw. What remains unmeasured is the reach that entry 53 listed as its gap: this capture shows execution past `0x08000260` and `0x08000264` but its tail ring is in the column-painter tail rather than the blink delay loop at `0x080002AC` that `v7_s13` and `stl_s5` both reached, so behavioural equivalence between the wide-lut and `-nowidelut` mappings is still not established by this cycle. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 53 were not rewritten, confirmed BRD-050 retains its canonical field order with a changed status and title, and validated this entry as entry 54 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set, `None.` for Files Modified because no engineering file changed, and a count of fifty-four against the 100-entry limit.
+
+#### Next Steps:
+
+Build a production image with no trace instrument and put the cartridge's own picture on the board, which is now the thing worth looking at: `-DTINYGBA_OVERLAY_OFF` with the official BIOS and `TINYGBA_SYNTH_EXTRA=-nowidelut`, selected with `tools/clock_plane_select.py`, and the operator asked what is on screen rather than what a capture decodes -- the cartridge paints green when all eight checks pass and red otherwise with one yellow column per failed bit, so the field names the failing check directly. That also settles the equivalence gap entry 53 left open, because the same image answers it. Then close the build-time work that TCL-036 opened: make `-nowidelut` the default in `tools/build_tinygba.sh` rather than a variable to remember, and wire `tools/memory_census.py`, `tools/bsram_addr_check.py` and a primitive-mix check into the build so the wide-mux regression cannot return silently. The next substantive fault is BRD-045, the DMA `REQ1_START` deadlock that stops Super Mario Advance in the first second on some loads; it has been verified and untouched since entry 43 and no read-path change addresses it, so a retail title needs it solved. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
