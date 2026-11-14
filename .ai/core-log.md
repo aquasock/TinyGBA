@@ -1966,3 +1966,35 @@ Test execution rather than operations, because every operation is now measured g
 - User Test: NOT RUN
 
 ---
+
+## 62 COMMIT Unreleased 2026-11-14T01:10:00-07:00
+
+#### Coming From:
+
+Unreleased bb4676d
+
+#### Purpose:
+
+Repair the interrupt probe until its mGBA control passes, then use it to measure cartridge interrupt dispatch on the board -- the last subsystem a cartridge relies on that no board reading had ever covered.
+
+#### Outcome:
+
+Real interrupt dispatch is measured good on the board, and getting there cost three instrument defects that each would have read as a machine fault. The first probe's handler pointer was computed with `ldr r1, =0x08000000 + _irq`, which cannot resolve because `as` gives `_irq` as a section offset and `objcopy` re-bases `.text` to zero; the replacement used `adr` and kept the base addition on the theory that the same correction still applied, producing `0x1000031C` -- unmapped -- so every interrupt jumped into open bus. An mGBA GDB session showed `pc = 0x1000031c` and `[0x03007ffc] = 0x1000031c` and named it in one reading; recorded as TCL-042. The second defect was that the handler acknowledged VBlank by storing to `0x04000200`, which is `IE`, while `IF` is the halfword at `0x04000202`. The source stayed pending, the interrupt was re-taken before the interrupted instruction could retire, the handler ran continuously and the main flow made no progress. On screen that is a machine whose handler visibly runs and which never resumes -- the exact signature the earlier probe had been misread as `lr` trouble, and a `sub lr, lr, #4` added on that theory changed nothing. Disassembling the shipped BIOS settled the `lr` question without experiment: `0x128 push {r0-r3,ip,lr}`, `0x12c mov r0,#0x04000000`, `0x130 add lr,pc,#0`, `0x134 ldr pc,[r0,#-4]` hands the handler `lr = 0x138`, the dispatcher's own `pop`, so a plain `bx lr` is correct and subtracting four re-dispatches forever; recorded as TCL-043. The third defect was mine in the tooling: breakpoint addresses taken from `nm` on a build that predated a prologue edit sat 0x20 low, so the "handler entry" breakpoint never fired and the "loop exit" one fired immediately, which produced the confident and false conclusion that no interrupt was ever dispatched; re-reading `nm` from the current object put `_irq` at `0x33c` and the handler then hit first, as it should. Recorded as TCL-044. `tools/roms/irq3.s` is the probe that resulted, built by `tools/make_probe_rom.py`, and it passes in mGBA 0.10.5 with the retail BIOS before its board result was read, per TCL-041. Board and mGBA agree exactly: square 0 green for the VBlank flag rising, square 1 green because the BIOS hands the cartridge `IE` and `IME` both clear, square 2 green for the pointer readback, square 3 blue painted immediately after `IME = 1` proving the main flow survives the first interrupt, square 4 green for a completed dispatch, a white bar 8 pixels long meaning exactly one interrupt, and three white markers in the top right corner that the handler paints at entry, after its IF acknowledge and after its count increment. Recorded as BRD-057; `tools/roms/irq2.s` was deleted rather than kept, because it was a broken instrument and nothing references it. A second probe, `tools/roms/swiprobe.s`, was then written to test the BIOS SWI path a cartridge uses every frame: SWI `0x06` Div, one SWI `0x05` VBlankIntrWait, sixty consecutive VBlankIntrWait calls, and the handler's wake count, with a blue marker drawn before the first SWI so a dead SWI can be told from a dead cartridge. It does not pass in mGBA. The screen is black, the emulator reports 60 fps, `DISPCNT` is written correctly, and an audit of every literal reference in the image confirms each one lands on the right constant, so the fault is in the probe and not yet found. Following TCL-041, no board result is read from it and no conclusion about SWI dispatch is drawn. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 61 were not rewritten, the four new records carry unique ids and the canonical field order, and this is entry 62 with the five canonical sections plus Status, a one-sentence Purpose and a count of sixty-two against the 100-entry limit.
+
+#### Next Steps:
+
+Find the `swiprobe` defect before reading anything from it. The remaining suspects, cheapest first: that the blue marker is not reached because of something in the clear loop's handoff rather than in the SWI, which a marker painted before the clear loop would settle; and that the SWI test's own register use clobbers `r9` or `r10` and takes the square routine with it. Once it passes in mGBA, run it on the board, because SWI `0x05` is the single most likely thing a retail cartridge waits on and the observed failure -- a cartridge that runs briefly and then stops, having drawn part of one frame -- is exactly what a frame wait that never returns looks like. If SWI dispatch is good, the next candidate is the DMA `REQ1_START` deadlock already recorded as BRD-045, which was verified before the display worked and has not been revisited since.
+
+#### Files Modified:
+
+- tools/roms/irq3.s
+- tools/roms/swiprobe.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
