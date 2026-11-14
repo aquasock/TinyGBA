@@ -1765,3 +1765,31 @@ This is a lead and not a finding, and it must not be reported as a save-path fai
     - "Simulation of the cast with iverilog: `signed'(4'd15)` = -1, `$signed({1'b0, 4'd15})` = 15"
     - "This repository, `gba_sound_ch1.v` lines 184-192 (prescaler), 275-282 (cast), 206/229/255 (clock comments); `gba_sound.v` line 338 (the correct master-volume cast) and 395 (x32 output scale); `gbatang_top.sv` line 1199 `.clk(clk16)`"
     - "Records BRD-067, BRD-071 and TCL-052"
+
+- record_id: BRD-073
+  kind: BOARD
+  topic_id: BRD
+  title: "Both audio fixes verified against the real module in a unit testbench: pitch 1407 to 439.8 Hz and volume 1 to 15"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "Both BRD-072 fixes were verified before any bitstream was built, by driving the real `gba_sound_ch1` over its own register bus in a Verilator unit testbench and measuring `sound_out`. The testbench sets the frequency register to 1750, so that `2048 - X = 298`, and the initial volume to 15, then measures the period of the output. Against the module as it was: period 11920 clk16 cycles, which at a 16.777 MHz clock is 1407.47 Hz, and output amplitude 1. Against the module as fixed: period 38144 clk16 cycles, 439.83 Hz, and amplitude 15. The expected period is `128 x 298 = 38144` cycles because the one-in-four enable composes with the channel's own divide-by-four prescaler to give 16 clocks per `freq_cnt` step and a tone is eight duty steps, and the expected frequency is `131072 / 298 = 439.84 Hz`, the hardware relation. The measured 38144 cycles and 439.83 Hz match both. The unfixed 1407.47 Hz agrees with the 1404.4 Hz measured on the board from the previous bitstream to within 0.2 percent, which ties the RTL, the bitstream and the acoustic measurement together into one chain. The same testbench also confirms the level defect and its fix in one number: amplitude 1 with `signed'(volume)` and 15 with `$signed({1'b0, volume})`, for a register value of 15."
+  consequence: "The two fixes are correct as logic before spending a build on them, and the 0.2 percent agreement between the simulated unfixed module and the board's measured tone means the unit testbench is a faithful proxy for the hardware on this path -- so future audio changes can be checked in minutes rather than in 40-minute builds and a cable. It also means the two defects are now attributable individually: the pitch number belongs to the timebase change and the amplitude number to the cast change, and a board result that moves one without the other says exactly which change failed. What this record does not cover: channel 3, whose wavetable register protocol needs a more careful testbench than was written in the cycle and which is therefore verified on the board instead, against the 1173.9 Hz baseline BRD-072 recorded for it; and the timbre claim, that the cast's polarity inversion at envelope volumes 7 and 8 causes the scratchiness in BRD-067, which is plausible and unmeasured. Neither fix had been run on hardware when this record was written; the board result is a separate record."
+  sources:
+    - "Verilator unit testbench at `/tmp/sndtb/tb.sv` driving `gba_sound_ch1` over `gb_bus_*`, X=1750, volume 15"
+    - "Fixed module: `RESULT edges=17 period=38144 clk f=439.83 Hz`, `LEVEL sound_out amplitude = 15`"
+    - "Unfixed module from `git show HEAD:fpga/gba/src/sound/gba_sound_ch1.v`: `period=11920 clk f=1407.47 Hz`, amplitude 1"
+    - "Expected values: 128*298 = 38144 clk, 131072/298 = 439.84 Hz"
+    - "Board measurement 1404.4 Hz from BRD-071 and BRD-072"
+    - "Records BRD-071, BRD-072 and TCL-052"
+- record_id: TCL-053
+  kind: TOOLCHAIN
+  topic_id: TCL
+  title: "A unit testbench on the real module predicts the board better than a rebuild does"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "A Verilator testbench that instantiates the production `gba_sound_ch1.v` and writes its registers over `gb_bus_din/adr/rnw/ena/be` reproduced the board's measured tone to 0.2 percent (1407.47 Hz simulated against 1404.4 Hz measured) and predicted the fixed value exactly (38144 cycles against an expected 38144). It took about three minutes per run against roughly forty for a synthesis, place and route and pack, and it needs no cable, no board and no operator. Four things had to be got right for it to be faithful, each of which is a trap worth recording: the register map is `regmap_type` structs from `preg_gba_sound.sv` and must be supplied as named parameters or every register aliases to address zero; a halfword store is replicated on both halves of `gb_bus_din` as the ARM7TDMI does, so writing only the low half lands nowhere because the map's fields sit at bits 31:16; the byte enables gate the write per byte, so `4'b0011` on a register whose fields are above bit 16 writes nothing; and measurement bookkeeping must use blocking assignments in the same block as the edge detection, because non-blocking updates race `$finish` and report a period of zero."
+  consequence: "For any signal that a testbench can drive directly, the unit testbench is the better instrument: it is faster, it isolates the module from the rest of the machine, and it can be run against the pre-change module from git to produce a matched before/after with the same instrument, which is what makes the attribution in BRD-073 safe. The discipline is to compare the simulated *unfixed* module against a measured *unfixed* board, as was done here -- that comparison is what licenses trusting the simulated *fixed* prediction. A unit testbench that has not been anchored to a real measurement is only a statement about the testbench."
+  sources:
+    - "`/tmp/sndtb/tb.sv` against the fixed module and against `git show HEAD:` of the unfixed one"
+    - "1407.47 Hz simulated versus 1404.4 Hz measured on the board, 0.2 percent apart"
+    - "Record BRD-073"
