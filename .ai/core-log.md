@@ -2094,3 +2094,47 @@ Build the instrument, not the patch, because the fault cannot be reproduced in s
 - User Test: NOT RUN
 
 ---
+
+## 66 COMMIT Unreleased 2026-11-14T14:05:00-07:00
+
+#### Coming From:
+
+Unreleased 3474ffa
+
+#### Purpose:
+
+Act on a second agent's analysis that the board netlist was mis-synthesised, and repair the two independent defects it exposed.
+
+#### Outcome:
+
+The root cause of the retail-cartridge failures is found, and it is not in the design's logic. Three helper functions in `gba_memory.sv` -- `issingle`, `isreadonly` and `tosdram` -- were declared without `automatic`. In SystemVerilog a static function has one shared module-level variable per argument, so every call site drives the same variable; these three are called from two `always @*` blocks, the clocked FSM and two more combinational blocks. Yosys reported 72 `multiple conflicting drivers` warnings against `mem.tosdram.addr` (56), `mem.issingle.region` (8) and `mem.isreadonly.region` (8), those being the only multi-driven signals in the whole design and exactly the memory and DMA arbitration. The warning had been present in every synthesis of this tree including the deployed bitstream and had been overlooked. A minimal reproduction with the same front end showed the consequence is silicon-visible: the static form emits four input buffers all driving one net that is also tied to GND plus a combinational output tied to VCC, while the `automatic` form emits a correct bus and real LUTs. Declaring every static function in the tree `automatic` took the count from 72 to 0. A second defect lay underneath it and was found by following the flagged undriven nets: `dma_bus_unread` was connected to nothing at the top level, with its declaration commented out, and it sits in the single condition deciding whether a DMA transmits the word it just read or a stale buffer. In simulation an undriven wire is 0 so the first arm is taken and real data moves; `synth_gowin` treats it as `x`, `opt` folds the condition to constant false, and the bitstream always took the second arm and transmitted `last_dma_in`, which is zero on a first transfer. That is exactly the measurement BRD-062 and BRD-063 recorded. Driving the wire to 0, and adding `setundef -undriven -zero` so the remaining 417 undriven nets receive the zero that both Verilator and the Gowin vendor flow already give them, removed the second defect. On the rebuilt bitstream DMA is measured working on the board for the first time: `dmastep` reports its own preconditions and the DMA copy green, `dmawrote` reports changed, pattern and not-zero, matching mGBA check for check, and a new probe `dmavram` confirms a 32-bit DMA into VRAM delivers both halves of every word. Two further probes closed paths nothing had covered: `iexec` copies a position-independent routine into IWRAM and again into EWRAM and branches into it, which is what a retail `crt0` does and had never been tested, and `swilz` calls SWI 0x11 on a hand-built LZ77 stream, which is how every title decompresses its fonts. Both pass on the board. The cartridges moved: the diag cart's purple striped background is gone and is now correctly black with the text row still garbled, Dr. Mario went from white forced-blank to black, and Super Mario Advance still boot-loops. A second agent produced the static-function analysis which this entry verified independently rather than accepting; the undriven wire was found here. Three defects in my own instruments were caught by mGBA controls before any board result was read: a reader sampling the wrong rows, a fabricated register name, and a DMA count off by one because the count field is a literal unit count and `0x0F` transfers 15 units. Recorded as BRD-064, BRD-065, TCL-049 and TCL-050, with BRD-055 withdrawn and BRD-062 and BRD-063 marked superseded. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 65 were not rewritten, all 115 records carry unique ids and the canonical field order, and this is entry 66 against the 100-entry limit.
+
+#### Next Steps:
+
+The remaining fault is narrow and the diag cart now describes it precisely: its tilemap, text position, text colour and text size are all correct while the glyph pixels are wrong and the logo image is absent entirely, which is a defect in tile pixel data rather than in indexing. With DMA, internal-RAM execution and BIOS LZ77 all now measured good, the next instruments should test what produces tile pixels: a mode 0 tile whose bitmap is copied into VRAM and then displayed, so the datapath from stored tile data through the drawer to the screen is measured end to end rather than only its write half; and the palette path, since a wrong palette index mapping would corrupt every tile's colours while leaving positions correct. Super Mario Advance's boot loop should be re-examined after those, because it no longer shares a cause with the other two cartridges and may be a separate fault. The timing regression also needs settling before the next image is trusted: this build passed the gate only because of the documented GBATang multicycle path, with `clk67` at 36.28 MHz against a 67 MHz constraint and a worst path from `cpu_mem_rdata_DFFRE_Q_15` to `sdram.f_mode_DFFRE_Q`, where the previously deployed image reached 202.59 MHz. The netlist grew by only 92 cells so this is unlikely to be logic depth, but two seeds are placing to decide whether it is seed sensitivity or a real cost of the change.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/sound/gba_sound.v
+- fpga/gba/src/ddr3_framebuffer.v
+- fpga/gba/src/iosys/uart_fixed.v
+- tools/build_tinygba.sh
+- tools/roms/dmaside.s
+- tools/roms/dmastep.s
+- tools/roms/dmawrote.s
+- tools/roms/dmavram.s
+- tools/roms/iexec.s
+- tools/roms/swilz.s
+- tools/roms/minidma.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
