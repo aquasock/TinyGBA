@@ -2235,3 +2235,37 @@ Decide whether the loader should configure a backup type, because that is now a 
 - User Test: PASS
 
 ---
+
+## 70 COMMIT Unreleased 2026-11-14T21:30:00-07:00
+
+#### Coming From:
+
+Unreleased 588d133
+
+#### Purpose:
+
+Fix the two audio defects BRD-072 located and confirmed, verify them on the board, and then test the machine with the largest retail cartridge available.
+
+#### Outcome:
+
+Audio is closed and the machine runs a retail title continuously. Two changes were made, each small and each verified against the real module in a Verilator unit testbench before any bitstream was built. In `gba_sound.v` the Game Boy's 4.194304 MHz timebase was restored as a one-in-four enable from `clk16`, gated onto the `soundcycles_*` increments alone so the thresholds and decrements stayed ungated -- which is deliberate, because that gating also removes a second defect for free: the increment and the decrement are non-blocking assignments to the same register in the same block, so the increment was lost on every fourth cycle and the prescaler divided by five rather than four. In `gba_sound_ch1.v` and `gba_sound_ch4.v` the volume is now zero-extended before being made signed, because `signed'(volume)` on a `reg [3:0]` reinterprets four bits as two's complement and a volume of 15 consequently played at magnitude 1, 32 dB down, with a polarity inversion every time an envelope crossed between 7 and 8. The unit testbench drove the real channel over its register bus and measured, for identical registers, the unfixed module at 11920 cycles per tone (1407.47 Hz) with amplitude 1 and the fixed module at 38144 cycles (439.83 Hz) with amplitude 15, against an expected 38144 cycles and 439.84 Hz. The unfixed simulation agreed with the 1404.4 Hz measured on the board to 0.2 percent, which is what licensed trusting the fixed prediction before building. On hardware the result is: CH1 SQUARE 1404.4 Hz at 219 RMS became 439.4 Hz at 3331.7 RMS; CH3 WAVE TRIANGLE 1173.9 Hz became 440.1 Hz; and PCM SINE, which neither fix should touch and which therefore serves as the control, stayed at 437-438 Hz and 9025 RMS throughout. One prediction failed: BRD-073 expected CH3 near 783 Hz on a 2/3 residue argument and it measured 440.1 Hz, so the channel 3 arithmetic is not as BRD-072 modelled it and that is recorded rather than explained away. Then the suite was exercised entry by entry with the capture card recording alongside: all four PSG channels play at correct pitch and level, CH3's spectrum is a textbook triangle with the second harmonic 114.9 dB down and odd harmonics at 1/n^2, and the PCM sweep 100-8000 Hz measures 40 to 7960 Hz rising in a clean staircase. The operator listened to every entry and marked audio a pass. Finally Castlevania Aria of Sorrow, at 8 MiB the largest cartridge this board has run and double the previous largest, booted to its title screen, played its intro, and produced 75 unique frames out of 75 across 75 seconds while crossing from the intro into gameplay; the operator reported it looks and sounds perfect with a correct frame rate. Recorded as BRD-073 through BRD-076 and TCL-053. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 69 were not rewritten, all 129 records carry unique ids and the canonical field order, and this is entry 70 against the 100-entry limit.
+
+#### Next Steps:
+
+Update `README.md`, which is now well behind the tree: it still says no cartridge has run, that `pixel_out_we` never asserts and that the `REQ2_START` deadlock stands, and all three are closed. Then take a second load of the same Aria of Sorrow image, because BRD-014 and BRD-045 recorded the machine as bimodal across loads of one bitstream and a single good run must not be generalised; that is the cheapest test of whether the earlier bimodality is gone or merely not sampled. After that, the subsystems that remain wholly unexercised are the save path, which the loader still does not configure a backup type for (BRD-070), the link port, and the RTC and solar sensor, none of which any cartridge here uses. The `clk67` timing margin also deserves a seed sweep when convenient: this image needed the documented multicycle relaxation where `build/rev_prod` needed none, and since the netlist is cached a sweep costs minutes not hours.
+
+#### Files Modified:
+
+- fpga/gba/src/sound/gba_sound.v
+- fpga/gba/src/sound/gba_sound_ch1.v
+- fpga/gba/src/sound/gba_sound_ch3.v
+- fpga/gba/src/sound/gba_sound_ch4.v
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
