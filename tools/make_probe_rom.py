@@ -65,11 +65,17 @@ def build(name, as_bin, oc_bin, out_dir):
     with open(binf, "rb") as f:
         img = bytearray(f.read())
 
-    if len(img) > IMAGE_SIZE:
-        raise SystemExit(f"{name}: image is {len(img)} bytes, over the {IMAGE_SIZE}"
-                         " budget; raise IMAGE_SIZE deliberately rather than letting"
-                         " the header fields shift")
-    img.extend(b"\0" * (IMAGE_SIZE - len(img)))
+    # Cartridge images are sized in powers of two and the header fields sit at
+    # fixed offsets from zero, so padding never moves them.  A single fixed cap
+    # was wrong: `hioffset.s` deliberately places code at 0x08070000 to test
+    # instruction fetch far into a large cartridge, so it needs a 512 KiB image,
+    # while every other probe needs 4 KiB.  Pad up to the next power of two at
+    # least IMAGE_SIZE instead, which leaves the small probes byte-identical and
+    # lets a probe that is meant to be large be large.
+    size = IMAGE_SIZE
+    while size < len(img):
+        size *= 2
+    img.extend(b"\0" * (size - len(img)))
 
     # The header fields have to sit at fixed offsets, so check them rather than
     # trusting the source layout: a one-byte slip in a title string moves every
