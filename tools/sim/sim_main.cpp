@@ -359,6 +359,7 @@ void memlog(const char *hdr, uint32_t addr, uint32_t wdata, uint8_t be, bool wr)
 void memlog_acc(const char *hdr, uint32_t addr, uint32_t wdata, uint8_t be, bool wr);
 const char * register_name(uint32_t addr);
 uint8_t cpu_en_r, ram_be_r, ram_cen_r, ram_wen_r;
+int n_store_dbg = 0;   // STOREDBG lines emitted
 uint32_t ram_addr_r;
 int bgn = 0;			// BG number to show in tilemap window
 
@@ -632,6 +633,25 @@ int main(int argc, char **argv, char **env)
 				// held on the bus for several cycles is printed once per cycle, which
 				// made a single `strh` look like four separate writes followed by a
 				// bogus one (TCL-024 again -- an instrument that manufactures events).
+				// Store-path trace: every CPU write to the display register, with the
+				// data the bus actually carries and the CPU's own read of the same
+				// register file.  BRD-052 records that in this harness the cartridge's
+				// `ldr r0,=0x0403` reads 0x0403 correctly and the following `strh`
+				// commits 0x0008, so the question is whether the value is already wrong
+				// in `ram_wdata` when the write asserts, or right there and corrupted
+				// later.  `rom_data` beside it is the CPU's instruction stream, so a run
+				// where rom_data is garbage at the same moment means the CPU is lost
+				// rather than the store being wrong.
+				//
+				// Gated on cpu_en_r, the same enable the consumer uses, because a trace
+				// that fires on level rather than commit manufactures events (TCL-038).
+				if (cpu_en_r && ram_cen_r && ram_wen_r &&
+				    ram_addr_r == 0x04000000 && n_store_dbg < 40) {
+					n_store_dbg++;
+					printf("STOREDBG: addr=%08x wdata=%08x be=%x pc_rom=%08x rom_data=%08x halt=%d\n",
+					       ram_addr_r, gba->ram_wdata, ram_be_r, gba->rom_addr,
+					       gba->rom_data, gba->halt);
+				}
 				if (cpu_en_r && ram_cen_r && ram_wen_r && ram_addr_r == 0x04000000 &&
 				    n_dispcnt_wr < 60) {
 					n_dispcnt_wr++;

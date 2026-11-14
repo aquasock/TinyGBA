@@ -1841,3 +1841,33 @@ Trace `ram_wdata` against the instruction that issued it, in the harness, for th
 - User Test: NOT RUN
 
 ---
+
+## 58 COMMIT Unreleased 2026-11-13T22:46:44-07:00
+
+#### Coming From:
+
+Unreleased 6adf959
+
+#### Purpose:
+
+Trace the store data path that entry 57 identified as the cause of the harness and board disagreeing about the same cartridge's picture.
+
+#### Outcome:
+
+The store-path trace disproved the finding it was built to confirm, and BRD-052 is withdrawn. A `STOREDBG` trace was added to the harness reporting the address, data, byte enables and PC of every write to DISPCNT, gated on `cpu_en_r` as TCL-038 requires, and calibrated on the RetroRegen cartridge first because that run produces a correct DISPCNT write: `wdata=0x00000403` at `pc=0x0800334C`, which is that cartridge's real store. On `test_logo` the same trace reports DISPCNT writes at `pc_rom` values `0x08000068`, `0x080000D4` and `0x0800026C`. A scan of the cartridge image for the ARM store encodings gives real store sites at `0x06C`, `0x070`, `0x0C8`, `0x114`, `0x144`, `0x174`, `0x1A4`, `0x1D4` and `0x260`, and none of the three reported PCs is among them: `0x068` holds `F130956F`, `0x26C` holds `E59F5070` (`ldr r5,=0x7FFF`) while the store is one instruction earlier at `0x260`. The harness is therefore attributing stores to instructions that are not stores, roughly three instructions late. That makes the `0x00000008` of BRD-052 whatever the datapath held three instructions after the real store rather than what the cartridge's `strh` carried, and the `0x0403 >> 7 = 0x0008` agreement I noticed is a coincidence of that later state and not evidence of a shifter fault. BRD-052 is rewritten in place to record the withdrawal rather than deleted, because a plausible mechanism was published for a few hours and the correction is the useful part. What survives from BRD-052 is only the observation it was built to explain: the harness's final framebuffer is empty for `test_logo` while the board's is solid green, and that is still unexplained. TCL-039 records the attribution defect and the check that would have caught it on the first run, which is to compare a trace's reported PC against a precomputed list of real store sites. Eleven instrument defects have now been found in this project's harness work across entries 53 to 58, each of which produced a plausible wrong reading, and that count is itself the finding: the harness needs its own verification before any conclusion about the machine rests on it. Nothing was changed in the RTL of the machine, nothing was built for the board, and the Tang was not touched at any point in this cycle. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 57 were not rewritten, confirmed TCL-039 carries a unique id and the canonical field order and that BRD-052's withdrawal preserves its field order, and validated this entry as entry 58 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of fifty-eight against the 100-entry limit.
+
+#### Next Steps:
+
+Stop treating the harness as an authority on the machine's picture until its own output is verified against something the board already knows, because eleven instrument defects across six entries have each produced a believable wrong answer and the pattern is now the dominant risk in the work. The cheapest verification is the one TCL-039 names: give the harness a self-check that compares every traced bus event against a precomputed list of real instruction sites for the loaded cartridge, and fail loudly when a trace reports activity at an address that does not decode to that kind of instruction. That single check would have caught the store mis-attribution, and a register-file dump compared against a real emulator's would catch the next class. Only then is the empty framebuffer for `test_logo` worth debugging, and it should be debugged as a harness question rather than a machine question, because the board draws that cartridge correctly. Separately, the machine faults that are actually established and independent of the harness remain: the RetroRegen cartridge's text draws with correct position, height and palette and wrong glyph patterns, which points at tile or bitmap data; BRD-045's DMA `REQ1_START` deadlock, verified since entry 43 and untouched; and whether that cartridge depends on a feature this core does not implement, which mGBA can settle in a minute and which has been asked for twice without an answer. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment.
+
+#### Files Modified:
+
+- tools/sim/sim_main.cpp
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
