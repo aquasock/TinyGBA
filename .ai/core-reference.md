@@ -1837,3 +1837,18 @@ This is a lead and not a finding, and it must not be reported as a save-path fai
     - "Board captures `/tmp/aud_menu.png`, `/tmp/tri_sel.png`, `/tmp/sweep_sel.png`"
     - "Operator report, 2026-11-14: audio sounds good now, pass"
     - "Records BRD-067, BRD-071, BRD-072 and BRD-074"
+
+- record_id: BRD-077
+  kind: BOARD
+  topic_id: BRD
+  title: "Six consecutive loads of an 8 MiB cartridge all boot correctly: the bimodality of BRD-014 and BRD-045 does not reproduce"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "The same image, `build/test/cv_aos.gba` (Castlevania Aria of Sorrow, 8,388,608 bytes), was loaded over UART six times in succession on one `build/snd_prod` bitstream with no power cycle, reset or rebuild between loads, and captured 14 seconds after each load. All six booted to the title sequence and all six were captured mid-animation on the eclipse logo screen, with the moon ring, the starburst and the castle visible in every frame. The six captures carry four distinct hashes, with three of them byte-identical: the title screen animates, so identical hashes mean the animation was caught at the same phase, which shows the boot timing is repeatable and not merely that six attempts happened to succeed. The test exists because BRD-014 recorded this machine as bimodal across loads of one fixed bitstream -- one load halting in the first second and another running for twenty -- and BRD-045 recorded the same cartridge, Super Mario Advance, freezing in `REQ1_WAIT` on one load and running on another. Both records concluded that any future reproduction had to take several loads and say which behaviour was seen, because a single capture was a coin flip."
+  consequence: "This is the first time the project has taken six loads of one image and got the same answer every time, and it is evidence that the bimodality was a symptom of the defects since fixed rather than a permanent property of the machine. The chain is consistent: the bimodality was recorded on bitstreams that carried the entry-14 `REQ2_START` early exit, which made a double request's completion depend on where the SDRAM controller's acknowledgement slot fell relative to the `clk16` edge, and that in turn depended on the phase between two PLLs which could lock differently per load; with the lines returned to upstream the completion no longer depends on that phase, so there is nothing left to vary. That explanation is an inference and not a measurement -- the phase relationship was never instrumented -- so what is established here is only that six loads agreed, which is a much stronger statement than one load and still not a proof of determinism. Six is also a small sample for a fault that was previously described as a coin flip: if the true failure probability were one in ten, six clean loads would happen about half the time. A larger sample would be needed to claim the fault is gone rather than merely rare, and no claim beyond six is made."
+  sources:
+    - "Six loads of `build/test/cv_aos.gba`, each `sent 8388608 image bytes in 42.7s`, captured at `/tmp/sixloads/L1.png` through `L6.png`"
+    - "Hashes of the active area: `7616212870`, `890fe0480a`, `de6a567073`, `890fe0480a`, `890fe0480a`, `88e4f93c4f` -- four distinct, three identical"
+    - "Bitstream `build/snd_prod/tinygba.fs` from commit `8543346`, unchanged across all six loads"
+    - "Operator report, 2026-11-14: worked perfect on my end"
+    - "Records BRD-014, BRD-045, BRD-059, BRD-066 and BRD-075"
