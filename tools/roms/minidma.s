@@ -29,6 +29,12 @@
     .space  9
     .space  4
 
+@ UNSOUND COMPARISON -- see TCL-047.  This probe paints green when the
+@ destination reads 0x0000, and 0x0000 is exactly what a DMA that writes zeroes
+@ leaves behind, so a green here is not evidence that the transfer works.  On the
+@ board, `tools/roms/dmawrote.s` shows why: the destination is left changed and
+@ exactly zero, while mGBA transfers the real data.  Kept because commits 56 and
+@ 61 reference it; do not read a pass from it.
 _start:
     ldr     r11, =0x04000000
     mov     r0, #0
