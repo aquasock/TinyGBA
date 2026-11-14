@@ -239,6 +239,7 @@ bbflags=$(echo "$bb" | sed 's/^/--blackboxed-module /' | paste -sd' ')
 yosys -Q -T -q -l "$out/synth.log" -p "
     read_verilog -lib $shim/cells_xtra_gw5a.v
     read_slang --std 1800-2017 --single-unit -U SYNTHESIS $defines --allow-use-before-declare --allow-lib-module-redef $bbflags -v $shim/cells_sim_nospecify.v -v $shim/cells_xtra_gw5a.v -I $src/src/common -I $src/src/gpu ${sources[*]} ${hdmi_slang[*]} $root/tools/cells_behavioral.v
+    setundef -undriven -zero
     setundef -zero -init
     synth_gowin -family gw5a -top gbatang_top $synth_extra
     write_json $out/tinygba.json
@@ -250,6 +251,18 @@ echo "=== 1. synthesis (cached) ==="
 fi
 
 [[ "$stage" == synth ]] && { echo "stopping after synthesis"; exit 0; }
+
+# ------------------------------------------- 0c. undriven-net semantics
+# `setundef -undriven -zero` above is not tidiness.  An undriven wire is `0` in
+# Verilator and `0` on the Gowin vendor flow, but plain yosys treats it as `x`
+# and lets `opt` choose -- and `opt` folds `x && cond` away entirely, which turns
+# a condition into a constant and silently deletes logic.  That is how
+# `dma_bus_unread` came to make every DMA transfer stale data (BRD-065): the
+# simulation took one arm of an if and the bitstream took the other.  Tying
+# undriven nets to zero restores the semantics every other tool in the chain
+# already uses.  The 417 undriven nets this catches are still latent defects and
+# should be driven properly, but making the flow agree with the simulation is the
+# difference between a model that describes the hardware and one that does not.
 
 # ------------------------------------------- 1a. synthesis-conflict gate
 # `synth_gowin` warns `multiple conflicting drivers` when one signal is driven

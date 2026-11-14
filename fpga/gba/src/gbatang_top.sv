@@ -230,7 +230,32 @@ wire halt;          // HALTCNT write halts CPU until interrupts
 wire [27:0] dma_addr;
 wire [31:0] dma_wdata, dma_rdata;
 wire dma_rnw;
-wire dma_on, dma_bus_ena; //dma_bus_unread;
+wire dma_on, dma_bus_ena;
+
+// TinyGBA (BRD-065): `dma_bus_unread` is "the address just read is not readable".
+// Upstream leaves it unconnected, and it went unnoticed because it is only read
+// inside one condition in `gba_dma_module`:
+//
+//     if (addr_source >= 'h200_0000 && !dma_bus_unread)
+//         dmaout <= DMAOUT_DIN;      // transmit the word just read
+//     else begin
+//         dmaout <= DMAOUT_BUF;      // transmit the stale buffer instead
+//         dma_bus_dout_buf <= last_dma_in;
+//     end
+//
+// In the simulator an undriven wire is 0, so it takes the first arm
+// and transfers real data.  `synth_gowin` treats it as `x`, `opt` folds
+// `x && ...` away, and the whole condition becomes constant false -- so the
+// bitstream always takes the second arm and transmits `last_dma_in`, which is
+// zero on a first transfer.  That is exactly the measured symptom recorded in
+// BRD-062 and BRD-063: the destination changes, is not the source data, and is
+// exactly zero, for every source and destination, while the same binary is
+// correct in simulation.  A minimal reproduction of this condition synthesises
+// to GND with the wire undriven and to a real ALU comparison with it tied low.
+//
+// Nothing in this port marks an address unreadable, so the honest value is 0,
+// which is also what the simulation has been assuming all along.
+wire dma_bus_unread = 1'b0;
 wire dma_bus_done;
 wire [1:0] dma_bus_acc;
 
@@ -1389,7 +1414,7 @@ gba_dma dma (
     .dma_init_cycles(), .dma_cycles_adrup(), .dma_eepromcount(dma_eepromcount), 
     .dma_bus_Adr(dma_addr), .dma_bus_rnw(dma_rnw), .dma_bus_ena(dma_bus_ena), 
     .dma_bus_acc(dma_bus_acc), .dma_bus_dout(dma_wdata), .dma_bus_din(dma_rdata), 
-    .dma_bus_done(dma_bus_done), .dma_bus_unread(),
+    .dma_bus_done(dma_bus_done), .dma_bus_unread(dma_bus_unread),
 `ifdef TINYGBA_STALLTRACE
     .debug_dma(stl_debug_dma)
 `else
