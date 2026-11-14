@@ -1690,3 +1690,34 @@ The SDRAM read path is cleared and the fault is localised to the DMA write data 
   sources:
     - "This repository, `tools/load_gba_rom.py` `FRAME_MAGIC = 0xAA`, against the first version of `tools/gba_input.py` which used `0xA5`"
     - "Board captures before the fix (`/tmp/k1.png`..`/tmp/k3.png`, all `RRRRRRRRRR` with the white `0x3FF` bar while every bit was set) and after (`/tmp/m0.png`..`/tmp/m2.png`, each button lighting its own square)"
+
+- record_id: BRD-069
+  kind: BOARD
+  topic_id: BRD
+  title: "The third-party diagnostic suite reports RESULT: ALL REGIONS PASS on the board: IWRAM, EWRAM, VRAM, PRAM and OAM all pass"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "Driven from the host over `tools/gba_input.py` -- START to open the menu, DOWN to MEMORY TEST, A to run it -- the RetroRegen diagnostic cartridge ran its full RAM check on the board and drew `RESULT: ALL REGIONS PASS`. The page reports, per region, both a cell test and a decoder test: IWRAM 32K cells PASS with decoder `LIVE*`, EWRAM 256K PASS/PASS, VRAM 96K PASS/PASS, PRAM 1K PASS/PASS, OAM 1K PASS/PASS, in 1377 ms, with `CART SRAM: NOT DETECTED`. The cartridge explains its own two annotations on the same page: `*IWRAM HOLDS THE LIVE STACK: DECODER SKIPPED`, which is why the only `LIVE*` in the decoder column is IWRAM's, and `TABLE = CONSOLE-INTERNAL RAM. CART SRAM IS ON THE CARTRIDGE.` This is the same suite whose Verilator result is already recorded as BRD-051's companion observation, so the five regions now have a board result to set beside the model result rather than a probe written in this repository reporting on itself."
+  consequence: "Every internal memory region the machine has is verified by a third-party suite on real silicon, at full size rather than at sampled addresses: 32 KiB, 256 KiB, 96 KiB, 1 KiB and 1 KiB, with the decoder exercised per region except IWRAM where the suite skips it because the test runs on the IWRAM stack. That closes the memory side of the machine and it also corroborates the reads and writes that earlier probes reported individually -- the probes each tested one access shape, and this tests the regions end to end. It does not cover cartridge RAM, which the suite reports as `NOT DETECTED`; that needs reading before it is treated as a fault, because either the core reports no backup type for this image or the SRAM window is not where the cartridge's probe looks, and BRD-070 records that as the open question. The suite's own bus-timing figures on the board read `IWRAM 1496`, `EWRAM 2264` and `ROM 2264` cycles per 256 reads against the model's `1190`, `1702` and `1702`, all `OK`; the board is slower in every region, which is expected because the model substitutes a behavioural SDRAM array for the real controller and the cycle counts are the cartridge's measurement of the real one."
+  sources:
+    - "Board capture `/tmp/memrun1.png`, the MEMORY TEST page drawn by the cartridge on `build/rev_prod`"
+    - "Board captures `/tmp/mt_before.png` and `/tmp/mt_sel.png` showing the menu selection and its hover description"
+    - "The system status page `/tmp/sysinfo.png`, which reports bus timing IWRAM 1496, EWRAM 2264, ROM 2264"
+    - "The model result recorded in the BRD associated with the Verilator diagnostic run, which reported IWRAM 1190, EWRAM 1702, ROM 1702 and the same five PASS lines"
+    - "Records BRD-066, BRD-068 and BRD-070"
+- record_id: BRD-070
+  kind: BOARD
+  topic_id: BRD
+  title: "SUPERSEDED in part: CART SAVE NOT DETECTED is explained -- the loader never sets a backup type, so the save window is read-only"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "Two pages of the diagnostic cartridge report no cartridge save hardware behind the bus: SYSTEM STATUS draws `CART SAVE (SRAM PROBE): NOT DETECTED` and MEMORY TEST draws `CART SRAM: NOT DETECTED`, on an image whose ROM carries a header the cartridge itself accepted and whose battery-backed RAM window the suite probes on its own initiative. The cartridge also prints `CART SRAM IS ON THE CARTRIDGE` as a clarification that its table covers console RAM only, so the probe is deliberate rather than an omission. Nothing distinguishes, so far, between the core reporting no backup type for this cartridge, the SRAM window not being where the cartridge looks, and the cartridge image genuinely declaring no save. `build/rev_prod` was built without a `config_backup_type` override, so whatever `gba_memory.sv` derives from the header is what the core believes."
+  consequence: "RESOLVED 2026-11-14, same day. The loader never sets a backup type: `tools/load_gba_rom.py` sends only command `0x06` (loading state), `0x07` (image bytes) and `0x08` (overlay), and the core's `config_backup_type` is assigned from the loader stream in `gba_memory.sv` at line 730 but only while `loading == 2'd3` and `loader_addr[2:0] == 0`, a fourth loading stage this loader never enters. On loading start the same module sets `config_backup_type <= BACKUP_NONE`, so it stays zero. `isreadonly` then returns 1 for regions `4'hE` and `4'hF` whenever the type is not flash or SRAM, so every write the cartridge makes to its save window is discarded and its read-back finds nothing. The cartridge is reporting the truth about what the core presents to it; the defect is that the loader configures no save hardware, not that the save path is broken. This is a loader limitation and it is worth recording because it means no cartridge with a battery-backed save has ever had one on this board, in any load, and the EEPROM and flash paths remain completely unexercised.
+
+Original text follows.
+
+This is a lead and not a finding, and it must not be reported as a save-path failure until one of the three possibilities is excluded. The cheapest discriminator needs no cartridge change: read what `config_backup_type` resolves to for this image and where `tosdram` maps the `0x0E000000` window, which is a static read of the RTL and of the build's defines. The next is a cartridge whose header genuinely declares SRAM, since the diagnostic image may simply not carry one. Only then is a save-path defect a candidate, and the path is worth measuring because `gba_eeprom.sv`, `gba_flash_sram.sv` and the backup-type selection have never been exercised by any game on this board."
+  sources:
+    - "Board capture `/tmp/sysinfo.png` (SYSTEM STATUS) and `/tmp/memrun1.png` (MEMORY TEST)"
+    - "This repository, `fpga/gba/src/memory/gba_memory.sv`, `config_backup_type` and the `4'b111x` branch of `tosdram`"
+    - "Record BRD-069"

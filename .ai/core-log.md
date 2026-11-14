@@ -2205,3 +2205,33 @@ Use the input path to let the cartridge verify the machine instead of building p
 - User Test: PASS
 
 ---
+
+## 69 COMMIT Unreleased 2026-11-14T18:05:00-07:00
+
+#### Coming From:
+
+Unreleased fb4b214
+
+#### Purpose:
+
+Run the diagnostic cartridge's full memory test on the board, which the new input path makes reachable, and read its result against the model's.
+
+#### Outcome:
+
+`RESULT: ALL REGIONS PASS` on real hardware, from a third-party suite rather than a probe written here. Driven from the host -- START to open the menu, one DOWN to MEMORY TEST, A to run -- the cartridge tested every internal memory region at full size and drew: IWRAM 32K cells PASS with decoder `LIVE*`, EWRAM 256K PASS/PASS, VRAM 96K PASS/PASS, PRAM 1K PASS/PASS, OAM 1K PASS/PASS, in 1377 ms. The page explains its own annotations: `*IWRAM HOLDS THE LIVE STACK: DECODER SKIPPED`, which is why IWRAM is the only `LIVE*` in the decoder column, and `TABLE = CONSOLE-INTERNAL RAM. CART SRAM IS ON THE CARTRIDGE.` The same suite's board bus timing reads `IWRAM 1496`, `EWRAM 2264`, `ROM 2264` cycles per 256 reads against the model's `1190`, `1702` and `1702`, all `OK`; the board is slower in every region as expected, since the model substitutes a behavioural SDRAM array for the real controller. The five regions now have a board result to set beside the model result, and the memory side of the machine is closed at full size rather than at sampled addresses. The one open line on both pages, `CART SAVE: NOT DETECTED`, was resolved the same session by reading the RTL rather than measuring: `tools/load_gba_rom.py` sends only commands `0x06`, `0x07` and `0x08`, and `config_backup_type` is assigned from the loader stream only while `loading == 3` and `loader_addr[2:0] == 0`, a fourth loading stage this loader never enters, so the value stays `BACKUP_NONE`. `isreadonly` then treats regions `4'hE` and `4'hF` as read-only, every save write is discarded, and the cartridge's read-back finds nothing. The cartridge is reporting the truth about what the core presents; the defect is that the loader configures no save hardware. Recorded as BRD-069 and BRD-070, the latter resolved rather than left open. The core-syntax audit confirmed `.ai/core.md` was not modified, entries 1 to 68 were not rewritten, all 121 records carry unique ids and the canonical field order, and this is entry 69 against the 100-entry limit.
+
+#### Next Steps:
+
+Decide whether the loader should configure a backup type, because that is now a known and specific gap rather than an unknown: `load_gba_rom.py` could enter loading stage 3 with a type derived from the cartridge header, or a `--save` flag could set it, and either would make a battery-backed save exercisable for the first time on this board. That is the only thing standing between the current state and a test of `gba_eeprom.sv`, `gba_flash_sram.sv` and the backup-type selection, none of which has ever run against a cartridge. Separately, run the remaining menu entries now that input works and each is a keypress away: SCREEN TEST, GPU STRESS TEST, BUTTON TEST and AUDIO TEST, in that order, because each is answered by a third-party screen or by the operator's eyes rather than by another probe, and the BUTTON TEST in particular would exercise the input path through the cartridge's own expectations rather than through `keylive`. Audio remains the largest unmeasured subsystem (BRD-067) and AUDIO TEST is the first instrument for it that costs nothing to run.
+
+#### Files Modified:
+
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
