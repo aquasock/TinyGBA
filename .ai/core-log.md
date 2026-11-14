@@ -1903,3 +1903,33 @@ Build the interrupt probe properly, with a control, because interrupts and HALT 
 - User Test: NOT RUN
 
 ---
+
+## 60 COMMIT Unreleased 2026-11-14T00:08:06-07:00
+
+#### Coming From:
+
+Unreleased 0bafdf7
+
+#### Purpose:
+
+Run the RetroRegen diagnostic cartridge under mGBA to learn whether the cartridge itself is sound, since three board probes had narrowed the Retail-cartridge failure without locating it.
+
+#### Outcome:
+
+The cartridge is sound and the board is at fault, and the comparison changes the diagnosis from corruption to addressing. mGBA 0.10.5 renders the RetroRegen cartridge completely: a title screen reading `RETRO REGEN HANDHELD HARDWARE TEST SUITE v1.5` over an illustration, and behind Start a menu listing `QUICK TEST`, `SYSTEM STATUS`, `MEMORY TEST`, `SCREEN TEST`, `GPU STRESS TEST`, `BUTTON TEST`, `AUDIO TEST`, `BURN-IN TEST` and `ABOUT / HELP` above a dashed rule, `MODEL: GBA FAMILY (AGB BIOS)` in orange, and `GUIDED FULL CHECKOUT WITH A PASS/FAIL SUMMARY`. Compared against the board at native 240x160, the board draws exactly one text row, at rows 128 to 147 including descenders, in orange -- the same vertical region and the same colour as mGBA's model line. But the two agree on only 55.3 percent of pixels, which is the agreement of two unrelated patterns rather than of one image with bit errors, while their ink density is close, 607 lit pixels against 537. So the board is not drawing that line with corrupted bits, it is drawing different glyph data: the fault is in what selects a glyph, not in what carries its bits. Recorded as BRD-054. That reframes the remaining candidates because the cartridge sets DISPCNT to `0x0403`, mode 3, so it renders text in software and copies glyph bitmaps into frame memory itself. Cartridge reads are correct to 1 MiB and frame-memory write, read and display are correct, both measured on the board by BRD-053, so a software copy should work; what lies between a ROM read and a frame-memory store and has never been measured on hardware is DMA. A DMA probe was written for it and reported five failures out of five on the board, which would have meant DMA is entirely dead. It was then run under mGBA as a control and reported the same five failures there, so the probe was wrong and the board was innocent. Two probe defects were found and fixed, 32-bit reads from VRAM which does not support 32-bit access, and a DMA source address loaded with `=DMASRC` where the assembler resolves the symbol to a link-time offset so the transfer read from the BIOS region rather than the cartridge; the control still failed after both fixes, so a third fault remains and the probe is recorded as invalid rather than as a result. No claim is made about the machine's DMA. Recorded as TCL-041, which also states the operational rule this cycle produced: run every probe under mGBA and require it to pass there before reading its board result. The Tang was used only to load cartridges over UART and read captures; no bitstream was rebuilt. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 59 were not rewritten, confirmed BRD-054 and TCL-041 carry unique ids and the canonical field order, and validated this entry as entry 60 with six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status set and a count of sixty against the 100-entry limit.
+
+#### Next Steps:
+
+Fix the DMA probe until it passes under mGBA before running it on the board again, because that is the only way its red squares can be believed; the third fault is in the probe and not in the machine, since the machine and the emulator agree. The most likely remaining defect is in the DMA control word rather than in the addresses, since both addressing mistakes are fixed: the transfer count, the start-timing field, or writing `CNT_L` and `CNT_H` as one 32-bit store to `0x040000DC` when the hardware may require them written separately. Once the control passes, the board result becomes meaningful, and DMA is the leading candidate for the RetroRegen failure because it is the only path between the two measured-good ends of that cartridge's text copy. Keep using mGBA as the control for every probe from now on, and use it to answer what the board cannot: whether a cartridge depends on a feature this core lacks. Separately, the objective has been drifting for many entries and should be restated before more of this work: `test_logo` passes all eight checks green on the board (BRD-051), three subsystems are measured good (BRD-053), and the failure that remains is a diagnostic cartridge and retail titles. Do not re-test VRAM access, cartridge reads below 1 MiB, or CPU arithmetic. Do not re-apply the control-path deferral of entry 46, the pipelined pair of entry 47, or entry 33's clock-lane experiment.
+
+#### Files Modified:
+
+- tools/make_dma_probe_rom.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
