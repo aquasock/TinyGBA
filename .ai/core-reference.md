@@ -1867,3 +1867,20 @@ This is a lead and not a finding, and it must not be reported as a save-path fai
     - "Same `.fs` both ways: SHA-256 `2a356060084bad434a19...`, byte-identical to the TinyTang v0.2.1 archive entry for `tinynes.bin` at `5cd4ab004f7af3c9...`"
     - "This repository's vendored TinyTang reference and `ports/bl616/phosphor/pmod_sockets.cpp` `tang_ini_core_loaded()`"
     - "TinyNES `.ai/core-reference.md` BRD-006, on which firmware the BL616 runs under which power input"
+
+- record_id: BRD-078
+  kind: BOARD
+  topic_id: BRD
+  title: "TinyGBA ships as a tinygba.bin/tinygba.fs.gz pair on the TinyTang card and runs in two-wire mode, but receives no controller input"
+  status: VERIFIED
+  verified_date: 2026-11-14
+  statement: "TinyGBA now exists as a first-class core on the TinyTang card, alongside tiny89, tinygbc, tinygba, tinynes, tinysnes, tinyphosphor and tinytang. The pair was produced from `build/snd_prod` -- the image that runs Castlevania Aria of Sorrow -- by copying the `.bin` the build already emits and gzipping the `.fs`, giving `tinygba.bin` 5,000,172 bytes (sha256 `f047a77ea0f1d854...`) and `tinygba.fs.gz` 1,404,785 bytes (sha256 `acb4185eecf69bb4...`), matching the sizes and forms of the shipped cores: TinyNES ships 4,777,964 and 795,315 for the same pair. Both were written to `/root/cores/console138k/` over the USB CDC console with `tools/tinytang_put.py` in 6.9 and 4.1 seconds and confirmed with `ls -l` from the board's own shell. `tangload /root/cores/console138k/tinygba.bin` programmed the FPGA and reported `tangload: core loaded`; the RetroRegen diagnostic cartridge was then streamed through `fpgapipe` and drew its title screen, 503,407 lit pixels, the same figure as the one-wire run. So the core loads, boots and runs under two-wire. Input does not: with `tools/roms/keylive.s` running, `KEYINPUT` reads `0x3FF` with nothing held and still `0x3FF` while a button on the qualified Classic Controller is held down, which is the correct and expected result because TinyGBA has no Wii-extension I2C logic at all -- `wii_pads.sv` exists only in TinyNES, and TinyGBA's keypad is fed only from `controller_ds2` and two `usb_hid_host` instances whose `USB1` and `USB2` defines are commented out in `console138k.v`, leaving `joy_usb1` and `joy_usb2` tied to zero."
+  consequence: "Two-wire deployment is now established for this project and is the only path on which a controller can ever work, per TCL-054. That makes the controller a well-scoped next project rather than an unknown: the port needs `wii_pads.sv` plus its I2C pin constraints, a register block to expose the pad state, and -- the part that is easy to miss -- the core must be loaded through TinyTang and accept the socket declaration for the pad fabric to be configured at all. Until that exists, every GBA result in this project is a result about the machine with a host-supplied controller, not with the board's own. Nothing else regressed: the same bitstream that runs a retail title under one-wire runs identically under two-wire, and the pairing on the card is the same image that produced BRD-075."
+  sources:
+    - "`build/ship/tinygba.bin` 5,000,172 bytes sha256 `f047a77ea0f1d854...`, `build/ship/tinygba.fs.gz` 1,404,785 bytes sha256 `acb4185eecf69bb4...`"
+    - "`tools/tinytang_put.py --port /dev/ttyACM1` transferring both to `/root/cores/console138k/`"
+    - "TinyTang shell at `/dev/ttyACM1`: `ls -l /root/cores/console138k/` lists tinygba.bin and tinygba.fs.gz with the other cores"
+    - "`tangload /root/cores/console138k/tinygba.bin` -> `tangload: core loaded`"
+    - "Board capture `/tmp/gba2w_rom.png`: diag cart title screen, 503,407 lit pixels"
+    - "Board capture `/tmp/kl_held.png`: keylive all red, bar white, `KEYINPUT` 0x3FF while a Classic Controller button was held"
+    - "Records BRD-075, TCL-054, and TinyNES's `wii_pads.sv`"
