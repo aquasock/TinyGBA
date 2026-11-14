@@ -553,14 +553,7 @@ always @(posedge clk) begin
 
         REQ2_BRAM:  state <= MAIN;
 
-        REQ2_START:
-            // TinyGBA: same defect, same cause.  Upstream always hops to
-            // `REQ2_WAIT`, which is one clk16 after the edge that can see the
-            // acknowledgement, so a RAM access whose second request is a halfword
-            // or byte hangs here forever.  A 32-bit second request acknowledges one
-            // clk16 later instead and is caught by `REQ2_WAIT` below, so both arms
-            // are needed.  `cpu_en`'s concurrent rom+ram term is widened to match.
-            state <= sdram_ready ? MAIN : REQ2_WAIT;
+        REQ2_START: state <= REQ2_WAIT;
         
         REQ2_WAIT: 
             if (sdram_ready) 
@@ -589,11 +582,7 @@ always @* begin
             else
                 cpu_en = sdram_ready; 
         default:                // both rom and ram
-            // TinyGBA: upstream tests only `REQ2_WAIT` here, so with the fix above
-            // a concurrent rom+ram access would leave `cpu_en` low through the
-            // `REQ2_START` acknowledgement and stall the CPU instead.
-            cpu_en = state == REQ2_BRAM |
-                     (state == REQ2_START | state == REQ2_WAIT) & sdram_ready;
+            cpu_en = state == REQ2_BRAM | state == REQ2_WAIT & sdram_ready;
     endcase
 
     dma_done = 0;
