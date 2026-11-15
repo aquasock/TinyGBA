@@ -552,16 +552,16 @@
       "gpu.drawer.paletteram_oam.dpb1": {
         "DPB": 1
       },
-      "mem.eeprom.m_eeprom.dpb_inst_0": {
+      "mem.eeprom.m_eeprom.bank[0].u_bank": {
         "DPB": 1
       },
-      "mem.eeprom.m_eeprom.dpb_inst_1": {
+      "mem.eeprom.m_eeprom.bank[1].u_bank": {
         "DPB": 1
       },
-      "mem.eeprom.m_eeprom.dpb_inst_2": {
+      "mem.eeprom.m_eeprom.bank[2].u_bank": {
         "DPB": 1
       },
-      "mem.eeprom.m_eeprom.dpb_inst_3": {
+      "mem.eeprom.m_eeprom.bank[3].u_bank": {
         "DPB": 1
       },
       "mem.iwram.sp_inst_0": {
