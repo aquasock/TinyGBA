@@ -2996,3 +2996,38 @@ Settle the hypothesis before anything else, because everything about battery sav
 - User Test: NOT RUN
 
 ---
+## 93 COMMIT Unreleased 2026-11-15T15:27:16-07:00
+
+#### Coming From:
+
+Unreleased 6c1f5d8
+
+#### Purpose:
+
+Settle the two causes entry 92 left open -- whether the CPU's store to the cartridge SRAM window is dropped or merely read back stale, and whether `gba_memory.sv`'s `isreadonly()` gate is the reason -- so that the fix targets the right module.
+
+#### Outcome:
+
+Both questions are answered, and the answer is not the one entry 92 leaned toward. The store never lands at all, and the gate is not the cause.
+
+The first question was settled by reading the window through the *host* instead of the CPU, since the RISC-V port does not share the CPU's read timing and so cannot inherit a stale-read artefact. With the save planted as 32768 zero bytes -- a pattern the probe never writes -- the probe ran, and `gbasave` returned 32768 bytes identical to the planted file, differing from the canonical pattern in 32640 places. The window is therefore byte-for-byte unchanged: the store is absent from SDRAM, not merely hidden from the CPU by a buffer. That measurement invalidated an earlier attempt at the same test in this session, which planted the *old* save containing the canonical pattern and then reported that the dump matched it; `gbaload`'s own "restoring 32768 bytes of SRAM" line is what exposed the confound, because the host restored the pattern the dump was being compared against, and the run proved nothing. The zeros substitution is what makes the comparison mean something (BRD-102).
+
+The second question was settled by a diagnostic build. A new `TINYGBA_SRAM_WR_DIAG` define makes `isreadonly()` return 0 for regions `0x0E` and `0x0F` and changes nothing else; it is an `ifdef` with no default so no existing image is touched, and the build script's configuration key gives it its own gate baselines. On that image, with the capture card working and the production image reproducing the failure first as a control (both squares red with zeros planted, sq0 `(226,0,0)`, sq1 `(226,0,0)`), the diagnostic build gives square 0 GREEN `(18,255,0)` and square 1 RED `(226,0,0)` when the *canonical* pattern is planted. Square 0 green is the load-bearing part: it proves the CPU's read of the window returns the host-restored data on this image, so the probe ran, the read path works, and a red square 1 is specifically a failed write rather than a machine that never executed. With the gate forced open and reads demonstrably working, the write is still lost -- and a host dump taken 20 seconds after load, long past the fill, is still all zeros. `isreadonly()` is therefore exonerated: the fault is below it, in the SDRAM controller's CPU write path (BRD-103).
+
+Two corrections belong in this entry rather than being quietly dropped. The commit message for 6c1f5d8 states that the diagnostic image's HDMI is dark and attributes that to the clock-plane gate placing `clk16` and `clk50` on unmeasured pips; that attribution was wrong. The capture card itself had stopped producing frames -- it was showing its own "GUERMOOK No Video" slate, which is a card-side message and not a core output -- and the same dark screen appeared for the production image that had worked forty minutes earlier, which is what made the clock-plane reading untenable. Once the card was back, the production image reproduced the failure and the diagnostic image ran normally, so no clock-plane conclusion was ever warranted and none is drawn. The other is a timing observation recorded as an observation only: on the diagnostic build the probe's 32768-byte fill took longer than three seconds and was complete within eight, where on the production image the same fill completed inside three; with the gate open each byte is a real store rather than a discarded one, so this is consistent with the gate having been shut in production, but it is a wall-clock difference on two separately placed images and nothing is concluded from it. Two limits are recorded: the timing question above is open, and the probe halts after its fill, so nothing in this cycle distinguishes "the store was never issued" from "the store was issued and discarded below the gate" -- both are below `isreadonly()` and both live in `sdram_gba`.
+
+#### Next Steps:
+
+The place to look is now narrow and named. `sdram_gba`'s CPU write path decides a store with `hi = !cpu_be[1:0]`, issues `SDRAM_DQM <= ~ds_latch[p][3:2]` or `~ds_latch[p][1:0]` depending on that bit, and selects the byte lanes from `ds_latch`, while `cpu_ready <= cpu_be[3:2] == 0 | cpu_be[1:0] == 0` decides when the CPU may proceed; and `gba_memory` forces a single byte lane for the whole `0x0E` window with `sdram_be = 4'b1 << ram_addr[1:0]` whenever `ram_addr[27:25] == 3'b111`, which is correct for a `strb` and wrong for a halfword or word store to SRAM -- that is a real defect, but not this one, because the probe writes bytes and for a byte the CPU's own `ram_be` is already that same one-hot value. The cheapest discriminating experiment is an extension of the probe rather than another place-and-route run: have it write a byte and a word at known offsets, read each back immediately, and paint one square per case, so that "nothing written" and "written to the wrong lane or wrong offset" separate on screen in one load. A word write that lands while byte writes do not would point at the lane logic; neither landing would point at the request never reaching the controller. Doing that in the ROM costs an assembly and an `objcopy`, not a twenty-minute build, and it should be run on the production image first so the failing configuration is the one being measured. Only after a store lands does the full chain entry 92 named become testable -- probe writes, `gbasave`, power cycle, `gbaload`, pattern returns -- with the genuine negative control that SRAM in SDRAM finally allows. The board was left running the diagnostic image with a zero-filled save planted, so the production image should be restored before any operator use.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
