@@ -24,11 +24,18 @@ verified fact.
 
 ### The machine: runs retail titles
 
-- **Picture.** Three retail titles render correctly: the RetroRegen diagnostic
-  cartridge draws its full title screen and menu, Dr. Mario draws its title
-  screen, and Super Mario Advance reaches character select. Castlevania Aria of
-  Sorrow (8 MiB) runs from title through intro into gameplay. See
-  `core-reference.md` BRD-066 and BRD-075.
+- **Picture.** A twelve-title sweep found eleven running correctly. Metroid Fusion,
+  The Minish Cap, Golden Sun, Metroid Zero Mission, Advance Wars, Fire Emblem,
+  Final Fantasy Tactics Advance, Castlevania: Aria of Sorrow, Mario Kart: Super
+  Circuit, Doom II and Asterix & Obelix XXL all pass on audio and video, the last
+  two being software-rendered 3D titles chosen to push the machine hardest. One
+  cartridge fails: Pokemon Emerald stops at the BIOS handover's white screen. See
+  BRD-080 through BRD-087.
+- **Speed.** The core runs at 99.8378% of a real GBA's frame rate — 59.6306 Hz
+  against 59.7275 — because the PLL cannot reach 16.777216 MHz from a 27 MHz
+  reference. That deficit is a clock-plan compromise, not a speed limit: Doom II
+  drops frames in the same places, by the same magnitude, as mGBA. See TCL-058
+  and BRD-086.
 - **Audio.** Stereo separation is correct on HDMI and both pitch and level are
   now correct. Measured through the capture card's own audio input: CH1 SQUARE
   plays 439.4 Hz at 3331 RMS for a stated 440 Hz, CH3 WAVE plays 440.1 Hz with a
@@ -302,7 +309,50 @@ a frame magic one byte off the working loader's (TCL-051).
 
 ---
 
-## Deploy (one-wire)
+## Deploy (two-wire, from the SD card)
+
+This is the normal way to run a game, and the same way every other core on the
+card works: the FPGA core lives on the SD, the cartridge lives on the SD, and the
+board loads both itself. Nothing is transferred from a PC.
+
+```
+# put the core pair on the card (tools/ship_core.py builds it from a build dir)
+python3 tools/ship_core.py build/snd_prod
+python3 ../TinyTang/tools/tinytang_put.py --port /dev/ttyACM1 \
+    build/snd_prod/ship/tinygba.bin /root/cores/console138k/tinygba.bin
+
+# put a cartridge under /root/media/gba/
+python3 ../TinyTang/tools/tinytang_put.py --port /dev/ttyACM1 \
+    "game.gba" "/root/media/gba/game.gba"
+
+# on the board's shell (tangload programs the FPGA; gbaload streams the cart)
+tangload /root/cores/console138k/tinygba.bin
+gbaload "/root/media/gba/game.gba"
+```
+
+`gbaload` is `nesload`'s counterpart for this core and lives in TinyTang's
+firmware, not here: the frame protocol is nand2mario's and identical between the
+cores, so it sends `0x06` to hold the core in reset, `0x07` for cartridge bytes in
+1024-byte chunks with a `taskYIELD` between them, then clears the OSD and sends
+`0x06` again to start the game. It refuses a file that is not a cartridge (no
+`0x96` at `0xB2`) or one larger than the 32 MiB a GBA cartridge can be.
+
+**A controller only works on this path.** An image flashed over JTAG runs the core
+but configures no socket fabric, so nothing on the pad responds (TCL-054).
+Two-wire is mandatory for play; one-wire is for bench work only.
+
+Operational facts that cost time when forgotten:
+
+- **A power cycle erases the FPGA.** After rebooting the board, `tangload` the
+  core again before `gbaload` means anything.
+- Reloading a cartridge restarts it from the beginning; there is no resume.
+- The console and the machine are independent. The BL616's USB console has
+  wedged mid-transfer while the game kept running perfectly on screen; a reboot
+  clears it and the core was never at fault.
+- `tools/board_mode.py` reports which mode the board is in by asking it, rather
+  than inferring it from `lsusb` — the two have disagreed.
+
+### Deploy (one-wire, bench only)
 
 One-wire puts the bitstream in the FPGA over the FT2232 and streams the cartridge
 straight at the core's UART. Use the oss-cad-suite copy of `openFPGALoader`; the
@@ -313,6 +363,11 @@ system copy at v0.13.1 has no `tangconsole` board.
 tools/load_gba_rom.py game.gba                 # /dev/ttyUSB1, 2 Mbaud
 tools/load_gba_rom.py game.gba --dry-run       # header check only, sends nothing
 ```
+
+`fpgapipe` cannot carry a large cartridge: it aborts when UART1's FIFO stays full
+for 100 ms, which a sustained 192 KB/s stream against a 200 KB/s core will do on
+any hiccup. An 8 MB image failed at about 5.7 MB every time this way, and each
+failure took the BL616 down with it. Use the card path above instead.
 
 Operational facts that cost time when forgotten:
 
