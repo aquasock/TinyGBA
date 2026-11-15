@@ -2756,3 +2756,41 @@ Four memory wrappers remain and each is now a bounded job: `mem_iwram` at 16 `SP
 - User Test: NOT RUN
 
 ---
+## 86 COMMIT Unreleased 2026-11-15T11:57:05-07:00
+
+#### Coming From:
+
+Unreleased 8c3e540
+
+#### Purpose:
+
+Replace the IWRAM memory wrapper with this project's own RTL, prove the substitution by simulation with injected defects, and confirm it on the board against the diagnostic suite that exists to test that region.
+
+#### Outcome:
+
+The third of six memory wrappers is converted and verified both in simulation and on hardware. `fpga/gba/src/memory/mem_iwram.v` is gone, replaced by `fpga/gba/src/memory/iwram_ram.v`, with the `.ipc` and `.mod` descriptors removed with it; thirteen Gowin-headed files remain in the tree of which six are built. The structure is worth recording because it is not what the instance count suggests and it retires a concern raised before the work started: sixteen `SP` blocks are not sixteen banks but eight banks of two halfword slices, since IWRAM is 32 bits wide and a block holds 16 at its widest, so instances 0 to 7 carry the low half of the word and 8 to 15 the high, which is why two instances always share a `BLK_SEL` value. TCL-069 had flagged this as a case where the simulation model's enable-by-match could not be right; it is right, and the reading that doubted it was wrong. The address splits three ways -- bits [12:10] are the bank and are what `BLKSEL` carries, bits [9:4] are the word address inside a block, and bits [1:0] are the byte write strobes which the vendor passes straight through as `byte_en[1:0]` and `byte_en[3:2]` -- and the bank select is registered on the launching edge gated by `ce & ~wre`, the same discipline `eeprom_ram` uses (TCL-072). Simulation compared both wrappers side by side over 20000 random cycles with freely chosen strobes plus a directed pass writing every bank at one offset and another sweeping all sixteen strobe combinations at one address: 20050 samples, no mismatch, and three injected defects each rejected -- bank register gated on `ce` alone gives 2874 mismatches, transposed halfwords 6100, and the high half's strobe driven from `byte_en[1:0]` 4949, none of which a cell census could see. `tools/sim/run_mem_equiv_tb.sh` was generalised to take a memory name or `all` and now carries both memories' defect lists. It also had to learn something: a converted wrapper's original is deleted from the tree, so the EEPROM comparison can no longer be re-run, and the script now says so rather than failing on a missing file -- and that claim was checked by extracting `mem_eeprom.v` from git history and running the same testbench against it, which still passes at 24018 samples. On the board, `build/iw3` was placed at seed 3, checked deployable by `tools/sweep_build_seeds.py`, and packaged; its routed netlist carried 66 `DPB`, 16 `SP`, 43 `DPX9B`, 125 block RAM and 66 distributed RAM, identical to the image with the Gowin wrapper, and the memory-placement gate reported only the intended rename of sixteen `sp_inst_N` cells to `bank_i[N].u_lo` and `.u_hi`. The RetroRegen GBA Test Suite v1.5 then reported `RESULT: ALL REGIONS PASS` with IWRAM 32K cells PASS, EWRAM 256K, VRAM 96K, PRAM 1K and OAM 1K all passing in 1377 ms -- the same verdict BRD-069 records for the pre-conversion core -- and Super Mario Advance 2 ran on the same image at 97455 distinct colours (BRD-098). Driving the suite's menu needed a correction: `tools/gba_input.py` opens `/dev/ttyUSB1` and is therefore a one-wire tool, unusable here, so the joystick frames were sent over `fpgapipe`; and the first attempt moved nothing because `BUTTONS` in that tool is a table of bit positions rather than masks, so `DOWN` is 5 and `A` is 8, and reconstructing the frame from a guessed layout produced a cursor that did not respond -- which reads exactly like a dead input path. Two smaller corrections were made before commit rather than after. TCL-072 had said the replacement was not verified on hardware, written before the board test, and it now records the test it received. And the earlier EEPROM comparison was re-established from git history so that the record of that conversion rests on something re-runnable rather than on a claim that it once passed. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 86 was validated as the eighty-sixth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 86 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 170 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Three wrappers remain: `fb.v` at 38 `DPX9B`, `vram_hi` at 16 `DPB` and `vram_lo` at 32 `DPB`. Take `fb.v` next. It is the one with no behavioural counterpart in the tree and it is 18 bits wide with no byte strobes, so it does not fit the pattern the other three followed and its testbench needs a stimulus that crosses its bank structure rather than one borrowed from the 32-bit memories; `tools/sim/gowin_bram_sim.v` already models `DPX9B` but that model has never been exercised, so validating it against `fb.v`'s own wiring is part of the job. The two VRAMs go last because they are the pair with a generic behavioural counterpart already in the tree and because they account for 48 of the remaining `DPB` on the GPU path, which is the most expensive place to be wrong. Each conversion should follow the shape now established: restate the vendor structure after reading its `DI`, `DO` and address wiring rather than counting instances, prove it in simulation against the original with at least two injected defects that must fail, confirm the primitive census is unchanged, then check on hardware -- for the VRAMs that means a retail cartridge and the screen test, not only the memory suite. Before the remaining work, the two gate gaps in TCL-070 should close, since both would hide exactly this kind of change: the memory-placement baseline covers no `iosys` paths and the register-parity baseline is 946 flops stale. Nothing about the persistence question has changed and BRD-094 still stands -- the store decays rather than clears, so persistence remains unmeasurable on this board -- and reading Gowin's EULA would still settle whether any of the conversion is required for distribution rather than desirable.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/memory/iwram_ram.v
+- fpga/gba/src/memory/mem_iwram.ipc
+- fpga/gba/src/memory/mem_iwram.mod
+- fpga/gba/src/memory/mem_iwram.v
+- tools/build_tinygba.sh
+- tools/memory_baseline.json
+- tools/sim/run_mem_equiv_tb.sh
+- tools/sim/tb_iwram_equiv.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

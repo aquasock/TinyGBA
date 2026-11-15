@@ -564,52 +564,52 @@
       "mem.eeprom.m_eeprom.bank[3].u_bank": {
         "DPB": 1
       },
-      "mem.iwram.sp_inst_0": {
+      "mem.iwram.bank_i[0].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_1": {
+      "mem.iwram.bank_i[0].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_10": {
+      "mem.iwram.bank_i[1].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_11": {
+      "mem.iwram.bank_i[1].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_12": {
+      "mem.iwram.bank_i[2].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_13": {
+      "mem.iwram.bank_i[2].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_14": {
+      "mem.iwram.bank_i[3].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_15": {
+      "mem.iwram.bank_i[3].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_2": {
+      "mem.iwram.bank_i[4].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_3": {
+      "mem.iwram.bank_i[4].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_4": {
+      "mem.iwram.bank_i[5].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_5": {
+      "mem.iwram.bank_i[5].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_6": {
+      "mem.iwram.bank_i[6].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_7": {
+      "mem.iwram.bank_i[6].u_lo": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_8": {
+      "mem.iwram.bank_i[7].u_hi": {
         "SP": 1
       },
-      "mem.iwram.sp_inst_9": {
+      "mem.iwram.bank_i[7].u_lo": {
         "SP": 1
       },
       "mem.loader_buf": {

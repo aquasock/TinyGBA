@@ -138,7 +138,7 @@ sources=(
     "$d/memory/gba_flash_sram.sv"
     "$d/memory/gba_memory.sv"
     "$d/memory/eeprom_ram.v"
-    "$d/memory/mem_iwram.v"
+    "$d/memory/iwram_ram.v"
     "$d/memory/rv_sdram_adapter.v"
     "$d/memory/gba_save.v"
     "$d/memory/sdram_gba.v"

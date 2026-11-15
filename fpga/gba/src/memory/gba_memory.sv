@@ -834,7 +834,7 @@ always @(posedge clk)
 // IWRAM:       3:000000 - 3:007FFF (32KB)
 wire [31:0]     rdata_iwram0;
 `ifndef VERILATOR
-mem_iwram iwram (
+iwram_ram iwram (
     .clk(clk), .reset(1'b0), .oce(1'b1), .ce(ce), 
     .ad(bram_addr[14:2]), .dout(rdata_iwram), .wre(bram_wr & sel_iwram), 
     .din(bram_wdata), .byte_en(bram_be)
