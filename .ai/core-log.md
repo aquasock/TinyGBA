@@ -2626,3 +2626,36 @@ The wrapper conversion is the next cycle and it has an agreed shape, recorded in
 - User Test: N/A
 
 ---
+## 82 COMMIT Unreleased 2026-11-15T09:19:20-07:00
+
+#### Coming From:
+
+Unreleased cb3c0e2
+
+#### Purpose:
+
+Begin replacing the Gowin memory wrappers with this project's own RTL, starting with the OSD text page, and establish whether the remaining four can be converted by the same method.
+
+#### Outcome:
+
+One wrapper is converted and verified; the second was attempted four times and abandoned, and the reason is worth more than the conversion. `fpga/gba/src/iosys/gowin_dpb_menu.v` is gone, replaced by `fpga/gba/src/iosys/menu_ram.v`, with `textdisp.v` and the build file list pointed at it and a new `tools/gen_mem_wrappers.py` that extracts primitives' parameter blocks and initial contents so they are copied mechanically rather than retyped. That last part matters more than it sounds: the block is not only the 32x28 character buffer, it holds a 14x9 logo and the 8x8 font in 28 non-zero `INIT_RAM_*` words, and a wrapper emitted without them builds cleanly and then draws a blank text page. Equivalence was established by a side-by-side module containing both the old and new wrappers, which synthesises to 2 `DPB` and nothing else, and by the full build's census being unchanged at 66 `DPB`, 16 `SP`, 43 `DPX9B`, 125 block RAM and 66 distributed RAM, with both carrying the same 28 non-zero initial words at `BIT_WIDTH_0=8` (TCL-067). Two toolchain facts were paid for along the way. A parameter list of roughly seventy entries must be applied with `defparam` rather than `DPB #(...)`: the `#()` form works on a three-parameter toy and fails on this instance, after which slang parses `DPB` as a user-defined primitive and emits twenty errors, which is why nand2mario's one-parameter `dpram_block.v` can use it and Gowin's generated wrappers cannot. And `mem_eeprom`, the second wrapper, defeated the method. It is four `DPB` blocks with 27 `MUX2` and 4 `DFFRE` around them, banking on the top address bits and registering the output select by one cycle to match block RAM latency. Three restatements were built against it -- static banks with `BLKSELA` tied to the instance index, then the same with the original's `~wrea` gating, then the vendor's actual structure with dynamic `BLKSELA` and per-instance `BLK_SEL_n` -- giving 52,379, 52,262 and 52,350 cells against the 52,540 of the tree without it, with the last moving two flip-flops from `DFFRE` to `DFF` rather than matching in kind. None of that is evidence: the same tree varies by several hundred LUTs between builds with no source change, because ABC picks a different optimisation boundary, which is the effect TCL-056 recorded when the identical netlist-class moved between 48 and 181 MHz. Against that noise floor a 190-cell discrepancy cannot separate a real structural error from arithmetic, and a match would have been luck. The intended check, simulation, is unavailable: `tools/sim/gowin_cells_sim.v` declares `DPB`, `SP` and `DPX9B` with empty bodies and oss-cad-suite's own `cells_sim.v` has no `DPB` module at all, so nothing in this toolchain can simulate a memory. The attempt was reverted rather than shipped, and the other four wrappers were not started (TCL-068). Two things came out of reading the remaining wrappers that shape what comes next. Every one of them puts its generated logic in the same shape -- a look-up table decoding upper address bits per bank, as `vram_lo`'s `LUT4` with `INIT=16'h0001` on `ada[10..13]` does, a registered select, and a multiplexer tree -- so a single parameterised template could cover them if the correctness question were answerable. And Gowin drives `BLKSEL` dynamically as a bank select while yosys's own techmap always ties it to zero, so the vendor's intent is to treat that input as an enable and the inference path treats it as static configuration; that difference is the substance of the missing model rather than a detail. `THIRD_PARTY.md` was updated to fifteen Gowin files with eight in the build, the menu having left that set. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged, the complete `.ai/` diff was inspected, entry 82 was validated as the eighty-second entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 82 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 163 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+The next cycle is the simulation model, not another wrapper, because until it exists the remaining four cannot be converted on evidence. `tools/sim/gowin_cells_sim.v` needs `DPB`, `SP` and `DPX9B` implemented rather than declared: the `BIT_WIDTH`, `READ_MODE`, `WRITE_MODE` and `RESET_MODE` settings the wrappers use, one-cycle read latency, synchronous and asynchronous reset, the `INIT_RAM_*` initial contents, and `BLKSEL` as the dynamic bank select Gowin uses it as. That model is this project's own approximation of a vendor primitive and must say so, and its fidelity should be checked first against a memory whose behaviour is already known on hardware -- the OSD text page is the obvious candidate, since `menu_ram` is this tree's own and the font either appears or does not. With it, each remaining wrapper becomes a cycle-by-cycle comparison of old against new under random stimulus, which catches an off-by-one latency, a wrong enable or a transposed port, none of which a census can see. The order to attempt is `mem_eeprom` first, because it is four blocks and has save testbenches already, then `mem_iwram`, then `fb.v`, and the two VRAMs last, since they carry 48 of the 53 remaining `DPB` on the GPU path every cartridge draws through. Before any of that, the OSD change itself is unverified on hardware: `menu_ram` has never drawn a text page, so a build and a `tangload` with a cartridge that prints to the OSD would confirm the one conversion that has been made. Separately and independent of this work, the `defparam` finding means any future hand-written wrapper here should use that form; and reading Gowin's EULA, which nobody here has done, would still settle whether any of this conversion is required for distribution rather than merely desirable.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- fpga/gba/src/iosys/menu_ram.v
+- fpga/gba/src/iosys/textdisp.v
+- tools/build_tinygba.sh
+- tools/gen_mem_wrappers.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

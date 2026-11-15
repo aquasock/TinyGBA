@@ -103,7 +103,7 @@ sources=(
     "$d/iosys/iosys_bl616.v"
     "$d/iosys/uart_fixed.v"
     "$d/iosys/textdisp.v"
-    "$d/iosys/gowin_dpb_menu.v"
+    "$d/iosys/menu_ram.v"
 
     "$d/common/dpram32_block.v"
     "$d/common/dpram_block.v"
