@@ -7,15 +7,18 @@
 #
 #   tools/build_tinygba.sh [out-dir]
 #
-#   TINYGBA_SYNTH_EXTRA  extra arguments for `synth_gowin`, for experiments.
-#                     The one that matters is `-nowidelut`: by default the flow
-#                     maps wide multiplexers onto the device's dedicated
-#                     MUX2_LUT5..8 primitives, and those sit at fixed tile
-#                     positions, so they pin the placer down.  Measured
-#                     2026-11-13: this design synthesises 14,077 such cells, of
-#                     which 9,419 are in the CPU block, against 6,097 for the
-#                     whole of the sibling SNES core, and placements of the
-#                     default build take 1.5 to 2 hours.  See TCL-036.
+#   `synth_gowin -nowidelut` is now the default; see TINYGBA_WIDELUT below.
+#   TINYGBA_SYNTH_EXTRA  extra arguments for `synth_gowin`, appended after the
+#                     default.  For experiments only.
+#   TINYGBA_WIDELUT   1 turns off the `-nowidelut` default, mapping wide
+#                     multiplexers onto the device's dedicated MUX2_LUT5..8
+#                     primitives.  Those sit at fixed tile positions and so pin
+#                     the placer down: measured 2026-11-13, this design then
+#                     synthesises 14,077 such cells, 9,419 of them in the CPU
+#                     block, and a placement takes 1.5 to 2 hours against about
+#                     32 minutes.  Nothing that ships uses this path.  See
+#                     TCL-036, and note that a build with it set is expected to
+#                     differ from the recorded memory census (step 1d).
 #   TINYGBA_STAGE     synth | pnr | pack | all (default all)
 #   TINYGBA_BUILD_DIR output directory (default build/tinygba)
 #   TINYGBA_SEED      placement seed (default 1; not proven on hardware)
@@ -43,7 +46,16 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 src="$root/fpga/gba"
 out="${TINYGBA_BUILD_DIR:-$root/build/tinygba}"
 stage="${TINYGBA_STAGE:-all}"
-synth_extra="${TINYGBA_SYNTH_EXTRA:-}"
+# `-nowidelut` is the default rather than an option because it is smaller,
+# faster to place, better timed and structurally identical in flip-flop count:
+# on 2026-11-13 the same source and defines gave 14,923 flip-flops either way,
+# while cells fell 81,124 to 58,501, wide muxes 13,295 to zero, and placement
+# 1.5-2 hours to about 32 minutes.  Every bitstream this project has deployed
+# since `build/nwl_s11` was built with it, so the default now matches what has
+# actually been measured on hardware (TCL-036, BRD-051).
+synth_extra=""
+[[ "${TINYGBA_WIDELUT:-0}" == 1 ]] || synth_extra="-nowidelut"
+synth_extra="${synth_extra} ${TINYGBA_SYNTH_EXTRA:-}"
 case "$stage" in synth|pnr|pack|all) ;; *) echo "TINYGBA_STAGE must be synth, pnr, pack or all" >&2; exit 2 ;; esac
 
 suite="${OSS_CAD_SUITE:-$HOME/oss-cad-suite}"
@@ -359,6 +371,68 @@ if [[ $edge -ne 0 ]]; then
     exit 1
 fi
 
+# --------------------------------------------------- 1d. memory-placement gate
+# `synth_gowin` chooses a small array's resource itself, and the choice is
+# invisible in the RTL: it appears only as a `mapping memory ... via
+# $__GOWIN_LUTRAM_` line in the synthesis log and as `RAM16SDP4` cells in the
+# netlist.  On this design it already disagrees with the source -- the one 4-bit
+# line buffer asks for block RAM in comment syntax `read_slang` does not parse
+# and lands in LUT RAM (TCL-033) -- and the sibling TinySOC project records
+# distributed RAM built by these open tools misbehaving on hardware while
+# passing Verilator.  This gate does not force a mapping, because `-nolutram`
+# wholesale would also move four sound arrays and the loader buffer; it records
+# the census and fails when an array appears, disappears or changes resource
+# relative to a baseline for the same configuration.  A deliberate change is
+# then a baseline update, which is a visible act with a diff.
+#
+# Keyed on $cfg like the register-parity gate, so a diagnostic configuration
+# does not have to match the production mapping.  A configuration with no
+# baseline is reported and skipped rather than silently passing.
+echo "=== 1d. memory-placement gate (config: $cfg) ==="
+census=0
+"$suite/py3bin/python3" "$root/tools/memory_census.py" "$out/tinygba.json" \
+    --check --key "$cfg" >"$out/memory-census.log" 2>&1 || census=$?
+sed 's/^/  /' "$out/memory-census.log"
+if [[ $census -eq 2 ]]; then
+    echo "memory-placement gate could not read the netlist; see $out/memory-census.log" >&2
+    exit 1
+elif [[ $census -ne 0 ]]; then
+    echo "memory placement changed for $cfg; if that was intended, record it:" >&2
+    echo "  tools/memory_census.py $out/tinygba.json --key $cfg --update-baseline" >&2
+    exit 1
+fi
+
+# ------------------------------------------------------- 1e. BSRAM address gate
+# nextpnr's Gowin model does not time the setup path into a true dual-port
+# BSRAM's B-port address (`ADB`), because `gowin_arch_gen.py` registers that pin
+# under a different cell class.  A path can therefore meet timing in the report
+# and still fail on the board, and whether it does depends on the placement --
+# which is this project's recurring failure mode (BRD-047, BRD-048).  On this
+# netlist 96 of those bits belong to `mem.mem_bios`, the BIOS block RAM, driven
+# through a cone that reaches 44 logic levels from `cpu.cmd` by way of the ALU
+# carry chain (TCL-035); that array is recorded as known and does not fail the
+# build, so the gate catches a NEW deep cone rather than failing every build on
+# the one already on record.
+#
+# The bound is 8 levels, one above the deepest cone this design has outside that
+# known array today (7), so a change that drives a new address port through real
+# logic is visible instead of silent.  Depth is a proxy for delay and not a
+# timing number: it is the count of LUT and mux levels between the port and the
+# nearest register, because the routed delay is the very quantity nextpnr omits.
+echo "=== 1e. BSRAM address-port gate ==="
+bsram=0
+"$suite/py3bin/python3" "$root/tools/bsram_addr_check.py" "$out/tinygba.json" \
+    --max-depth 8 >"$out/bsram-addr.log" 2>&1 || bsram=$?
+sed 's/^/  /' "$out/bsram-addr.log"
+if [[ $bsram -eq 2 ]]; then
+    echo "BSRAM address-port gate could not read the netlist; see $out/bsram-addr.log" >&2
+    exit 1
+elif [[ $bsram -ne 0 ]]; then
+    echo "an ADB cone is deeper than the bound and is not in TCL-035's known list;" >&2
+    echo "nextpnr does not time that port, so no other gate in this build covers it." >&2
+    echo "See $out/bsram-addr.log" >&2
+    exit 1
+fi
 
 # --------------------------------------------------------------- 2. place and route
 # `pack` means "pack the routed netlist that is already here", not "place and
@@ -385,6 +459,13 @@ if [[ "$stage" == pack ]]; then
     echo "    $out/tinygba-routed.json"
     echo "    gates that passed on THIS placement:"
     sed 's/^/      /' "$out/timing-gate.log" | grep -E 'pass|ALLOWED|hold  :|Meets' || true
+    # The netlist gates ran at synthesis time, so they still describe this image
+    # even though the placement is being reused; re-print the two that report a
+    # census rather than a pass/fail, because their content is the evidence.
+    for f in memory-census.log bsram-addr.log; do
+        [[ -f "$out/$f" ]] || continue
+        sed 's/^/      /' "$out/$f" | grep -E 'distributed RAM cells|block RAM cells|census matches|no NEW|no ADB cone' || true
+    done
 else
 echo "=== 2. placement and routing ==="
 "$nextpnr" \

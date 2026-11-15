@@ -1,4 +1,8 @@
 {
+  "TINYGBA_OVERLAY_OFF": {
+    "bram": 156,
+    "flops": 11471
+  },
   "TINYGBA_STATUS_TEST": {
     "bram": 132,
     "flops": 9100

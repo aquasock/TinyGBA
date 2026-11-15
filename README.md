@@ -119,12 +119,15 @@ current best image — a retail title runs on it; see Status):
 ```
 TINYGBA_BUILD_DIR=build/snd_prod TINYGBA_SEED=14 \
 TINYGBA_DEFINES='-DTINYGBA_OVERLAY_OFF -DTINYGBA_BIOS_HEX="/abs/path/official_bios.hex"' \
-TINYGBA_SYNTH_EXTRA=-nowidelut tools/build_tinygba.sh
+tools/build_tinygba.sh
 ```
 
-`-nowidelut` is not the default and matters: without it wide muxes map to LUTs,
-cell count rises from 58,501 to 81,124 and builds take roughly three times
-as long. See TCL-036.
+`-nowidelut` is passed to `synth_gowin` by default, because it is smaller,
+faster to place, better timed and identical in flip-flop count: without it wide
+muxes map to fixed-position `MUX2_LUT5..8` primitives, cell count rises from
+58,501 to 81,124, and placement takes roughly three times as long. `TINYGBA_WIDELUT=1`
+restores the old mapping for comparison; every image this project has deployed
+since 2026-11-13 was built with the default. See TCL-036.
 
 | variable | meaning |
 |---|---|
@@ -132,7 +135,8 @@ as long. See TCL-036.
 | `TINYGBA_BUILD_DIR` | output directory |
 | `TINYGBA_SEED` | placement seed; the router is seed-sensitive and will fail to converge on some |
 | `TINYGBA_DEFINES` | preprocessor defines, including `-DTINYGBA_BIOS_HEX="/abs/path.hex"` to substitute a BIOS |
-| `TINYGBA_SYNTH_EXTRA` | extra arguments for `synth_gowin`, e.g. `-nowidelut` |
+| `TINYGBA_WIDELUT` | `1` disables the default `-nowidelut`, mapping wide muxes onto `MUX2_LUT` primitives |
+| `TINYGBA_SYNTH_EXTRA` | extra arguments for `synth_gowin`, appended after the default; for experiments |
 | `TINYGBA_FORCE_SYNTH` | `1` re-synthesises even when a cached netlist exists |
 | `TINYGBA_ALLOW_HOLD` | `1` lets an unclean placement through; the Fmax gate still runs |
 | `TINYGBA_CLOCK_PLANE_STRICT` | `1` makes the clock-plane gate refuse a clock on a pip this board has never measured |
@@ -167,6 +171,22 @@ timing report nor any simulation could see it.
   `synth_gowin` legalises negedge flops into posedge `DFFRE` behind a LUT1
   inverter, so the two halves clock a few ns apart with no hold check between
   them. That deadlocked the SuperFX in the sibling TinySNES project.
+- **1d. Memory placement** (`tools/memory_census.py`) — records which arrays the
+  synthesiser put in distributed (LUT) RAM and fails when one appears,
+  disappears or changes resource against a baseline for the configuration. The
+  choice is invisible in the RTL: `synth_gowin` decides it, and on this design it
+  already disagrees with the source — the one 4-bit line buffer asks for block
+  RAM in comment syntax `read_slang` does not parse and lands in LUT RAM. The
+  gate does not force a mapping, because `-nolutram` wholesale would also move
+  four sound arrays and the loader buffer; it makes a deliberate change visible
+  as a baseline diff. Record one with `--update-baseline`. See TCL-033.
+- **1e. BSRAM address port** (`tools/bsram_addr_check.py`) — fails when a
+  dual-port BSRAM `ADB` address bit is driven through more than 8 logic levels
+  and the array is not one already on record. nextpnr's Gowin model does not time
+  that port at all, so no other gate in this build covers it, and whether such a
+  path fails depends on the placement — this project's recurring failure mode.
+  `mem.mem_bios` is recorded as known at 44 levels; the gate catches a *new* deep
+  cone. See TCL-035.
 - **3. Clock plane** (`tools/clock_plane_report.py`) — reports which clock-plane
   bridge pip each clock takes, and fails on a pip measured as clocking nothing or
   on no pip at all (general routing). `TINYGBA_CLOCK_PLANE_STRICT=1` additionally

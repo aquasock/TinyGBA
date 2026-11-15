@@ -2330,3 +2330,36 @@ Port the controller, which is now a scoped job rather than an unknown. It needs 
 - User Test: PASS
 
 ---
+
+## 73 COMMIT Unreleased 2026-11-14T17:32:48-07:00
+
+#### Coming From:
+
+Unreleased 51204f2
+
+#### Purpose:
+
+Close the build-hygiene debt the project has been carrying since entries 51 and 52 -- make `-nowidelut` the default, wire the two finished-but-unwired gates into the build, and settle the `clk67` timing margin with a seed sweep.
+
+#### Outcome:
+
+Three build-hygiene changes are landed and proven by a full build, and the seed sweep that was meant to recover `clk67` margin instead refuted the record that predicted it would. `tools/build_tinygba.sh` now passes `-nowidelut` to `synth_gowin` by default, with `TINYGBA_WIDELUT=1` restoring the old mapping, because TCL-036 measured it as smaller, faster to place and better timed at an identical flip-flop count, and every image deployed since `build/nwl_s11` was already built that way -- the default now describes what has actually been measured rather than what someone remembered to type. `tools/memory_census.py` and `tools/bsram_addr_check.py` are wired in as gates 1d and 1e beside the register-parity and clock-edge gates, keyed on the same `$cfg` as the parity gate so a diagnostic configuration does not have to match production, and both cost under a second on a 57 MB netlist. Baselines for both were recorded from `build/snd_prod` -- the image that runs Castlevania and survived six loads -- rather than from a fresh unproven build, per the rule entry 11 set; the parity baseline is 11,471 flip-flops and 156 block RAM, reproducing BRD-074's recorded counts exactly. `build/hyg_s1` then ran the whole flow to a packed bitstream (`.fs` SHA-256 `d211e99747ec9ae5...`) with all nine gates passing, including zero conflicting drivers, 0 wide-mux cells, `census matches the baseline for 'TINYGBA_OVERLAY_OFF'`, and `no NEW ADB cone deeper than 8 levels`. The census earned its place on its first run by flagging `sdram.din_latch`, an array the pre-existing baseline lacked; checking `rev_prod`, `fix_s7` and `fix_s21` showed it is LUT RAM in every recent netlist including the retail-proven one, so it is a baseline gap rather than a regression. The timing half of the cycle went the other way. BRD-074 had recorded the `clk67` drop from `rev_prod`'s 181 MHz to `snd_prod`'s 53.6 MHz as placement variance that a seed sweep would recover; ten placements of the current netlist instead give 48.6 to 57.2 MHz with a mean of 53.75 and not one clean seed, while the `rev_prod` netlist placed at two of the same seeds gives 184.1 and 190.0 MHz with no relaxation. The cause was isolated rather than inferred: the current tree was synthesised with only the four sound files returned to their `f38cebe` state, which reproduced `rev_prod`'s netlist exactly at 49,562 cells and 8,534 `DFFRE`, and that netlist placed at seed 10 gave 184.060 MHz -- the control figure to the digit -- where the same tree carrying the audio fix gives 54.301. So a change worth two flip-flops costs a factor of 3.4 on `clk67` by moving ABC's optimisation boundary and rerouting the cone into `sdram.f_mode`, and no seed recovers it; recorded as TCL-056, with BRD-074's attribution named as superseded rather than rewritten. The build is not broken -- the relaxation it now needs is the one upstream `gbatang.sdc` exists to express -- but any image carrying the audio fix must state that it needs it. Two operational notes: twenty concurrent placements exhausted available memory and stalled the sweep, so six were killed by exact pid, and the one leftover was cleaned up before the control could finish; the causal build ran with a trap that restores `fpga/gba/src/sound/` on every exit path, and the tree was confirmed byte-identical to `HEAD` in those four files afterwards. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed, confirmed entries 1 to 72 were not rewritten and that BRD-074's text is preserved with its refutation recorded in TCL-056 instead, and validated this entry as entry 73 with the six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, and a count of seventy-three against the 100-entry limit. The audit also found that 36 historical records from BRD-057 onward carry eight fields and no `verification:` line; they are settled history, the syntax document forbids reformatting them, and they are noted here rather than corrected, while TCL-056 carries all nine canonical fields in order.
+
+#### Next Steps:
+
+Shorten the `sdram.f_mode` cone rather than sweeping for a seed, because the margin is a property of the netlist and TCL-056 has closed the sweep question as a negative: the shape is to register the address that feeds `mem_bios` -- or the flash-mode decode itself -- one level before the port, which is the remedy TCL-035 already names for that array, and the change must be judged on both properties together per TCL-027, the relaxation gone and reach undiminished, at two seeds per TCL-034. That is an RTL change to the address datapath and needs its own approval before it is built. Until then, treat the documented relaxation as a permanent property of this tree and quote it whenever a timing figure from a post-audio image is stated, rather than reporting `clk67` achieved against 67 MHz without the note. Two smaller items stand: the four diagnostic configurations with no census or parity baseline will report and skip rather than gate, which is correct but worth recording baselines for when each is next proven, and `build/ship/tinygba.fs.gz` on disk is still the hand-gzipped 1,404,785-byte file rather than the deterministic output of `tools/ship_core.py` that TCL-055 requires, so re-running that tool would put the shipped hash on a reproducible footing. Do not re-run a seed sweep expecting to recover `clk67`; do not re-apply the control-path deferral of entry 46 or the pipelined pair of entry 47.
+
+#### Files Modified:
+
+- tools/build_tinygba.sh
+- tools/memory_baseline.json
+- tools/synth_baseline.json
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---
