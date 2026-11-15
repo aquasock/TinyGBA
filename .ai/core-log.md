@@ -2938,3 +2938,32 @@ Whoever can obtain the EULA -- meaning whoever holds or can create a Gowin accou
 - User Test: N/A
 
 ---
+## 91 COMMIT Unreleased 2026-11-15T14:06:54-07:00
+
+#### Coming From:
+
+Unreleased a25da1c
+
+#### Purpose:
+
+Record the answer to the licensing question that entries 80 to 90 carried open, after another agent obtained Gowin's End User Licence Agreement and the clauses were checked directly against its text.
+
+#### Outcome:
+
+The redistribution question is answered, and the answer is that the thirteen Gowin-headed files may be kept and redistributed with their headers intact. Entry 90 had concluded that the terms were behind a registration wall and could not be read from this workspace; that was true of the routes tried there and false in general, and the document was obtained by another agent through a path not reproduced here. The clauses were then verified against the extracted text by hand rather than accepted on the other agent's summary, and their reading holds. The agreement's operative word is `Software`, defined in §1(1) as "the computer program(s) furnished to you by Gowin"; a file the tools emit is not one of those programs, so it is not `Software` and §3's prohibitions do not reach it -- and all seven of them bind the Software explicitly, including the two that matter here, not reverse engineering *the Software* and not publishing benchmarks *of the Software*. §4 vests ownership of "the Software and all copies thereof" in Gowin and claims nothing about designs or generated files. §5(4) goes the other way and treats output as the user's: after termination "you are not required to destroy output data which you obtained using the Software ... and may continue to use it". §2 limits the Software to designing "only for Gowin Devices", which this project satisfies with its GW5AST target. A search of Gowin's own clauses for `distribut`, `transfer` and `sublicens` returns four hits, every one about the Software and none about output, so the agreement neither permits nor forbids redistributing generated files -- it simply does not address them (TCL-078). Two further points came out of the reading that the earlier cycles had wrong or missed. §4 requires that Gowin's "trademark, copyright notice and logo" not be deleted or modified, which means the headers must stay exactly as generated and confirms that the twelve replaced files could not have been relabelled into compliance -- replacing rather than relicensing was the only sound treatment, which TCL-065 had concluded for a different reason. And the two grey areas named during the reading are narrower than they look but not empty: §3(1)'s ban on reverse engineering applies to the Software, while reading PLL settings out of a bitstream examines output that §5(4) expressly permits continued use of, so the `gowin_unpack` readback TCL-002 relied on is not that prohibition; but §3(3) forbids publishing benchmarking results of the Software *or using such results for any other software development activities*, which is broad enough that a vendor-versus-open-flow performance comparison would be uncomfortable to publish, and the tree was checked and publishes no such comparison, so the risk is prospective rather than present. Three limits are recorded with the finding: it is a reading and not legal advice; it is the 2026.03 text while the files in this tree were generated in 2024 under an earlier version that was not available, so the 2024 terms are assumed rather than read; and the extracted text's authenticity rests on its content and its Arm licence appendices rather than on a verified download, which is stated in the record rather than glossed. `THIRD_PARTY.md` now carries the substance in place of the sentence saying the EULA had not been established, and TCL-077 is annotated as superseded rather than rewritten. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 91 was validated as the ninety-first entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 91 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 178 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Nothing in the code follows from this, which is the useful part: the conversion work was done for provenance and clarity rather than because the licence required it, and that is now on the record instead of being assumed. The three PLL wrappers may stay, with their headers intact, and the six duplicate files in the unused `plla/` directory may be deleted at any time as ordinary tidying. Two things remain worth doing and neither is urgent. If the 2024 version of the agreement can be obtained, it should be read against the 2026.03 one, because that is the version that governed the generation of the files in this tree and this record assumes rather than reads it; and the extracted text should be retained or cited more durably than a scratch directory if the project intends to rely on it, since a record that depends on a temporary path is one cleanup away from being unverifiable. On the machine itself the work stands where entry 89 left it: all six memory wrappers are this project's own RTL, the diagnostic suite passes every region on the board, and the persistence question remains answered negatively by BRD-094, whose finding that the save store decays rather than clears has not changed.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---

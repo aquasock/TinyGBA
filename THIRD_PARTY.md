@@ -47,6 +47,27 @@ is in this tree, and no external checkout is involved in a build.
   to fail, and each was then confirmed on hardware (TCL-068, TCL-069, TCL-072,
   TCL-073, TCL-075, TCL-076 and the BRD records they cite).
 
+  **What Gowin's terms say about these files.** Gowin's End User Licence
+  Agreement (version 2026.03) restricts *the Software* — "the computer program(s)
+  furnished to you by Gowin" (§1(1)) — and says nothing that restricts the files
+  those programs emit. Every prohibition in §3 binds "the Software": no
+  modifying it, reverse engineering it, copying it, distributing it, or
+  publishing benchmarks of it. §4 vests ownership of "the Software and all
+  copies thereof" in Gowin and claims nothing about output. §5(4) goes the other
+  way and treats output as the user's: after termination you "are not required
+  to destroy output data which you obtained using the Software ... and may
+  continue to use it". The grant in §2 limits the Software to designing "only
+  for Gowin Devices", which this project satisfies — the target is a GW5AST.
+  Nothing in the agreement forbids open-sourcing a design or redistributing
+  generated files. This is a reading of the text, not legal advice, and one
+  limit applies: it is the 2026.03 version, while these files were generated in
+  2024 under an earlier version whose text is not available here. See TCL-078.
+
+  §4 does require that Gowin's "trademark, copyright notice and logo" not be
+  deleted or modified, so these files keep their original headers: the header is
+  why the provenance is legible. That is also why replacing rather than
+  relabelling was the right treatment for the twelve already gone.
+
 - **GBATang's Verilator harness** — `tools/sim/sim_main.cpp` is upstream's
   `verilator/sim_main.cpp` at the same commit, GPL-3.0, carried unmodified. It
   gives the core an SDL window, an FST trace and a WAV-quality audio capture,
