@@ -2659,3 +2659,32 @@ The next cycle is the simulation model, not another wrapper, because until it ex
 - User Test: NOT RUN
 
 ---
+## 83 COMMIT Unreleased 2026-11-15T09:20:27-07:00
+
+#### Coming From:
+
+Unreleased 8167f52
+
+#### Purpose:
+
+Correct two counting errors in entry 82's cycle and finish the file removal that entry described, so that the tree and `THIRD_PARTY.md` agree on how many Gowin files remain.
+
+#### Outcome:
+
+Three corrections, all mechanical, all in the cycle committed as `8167f52`. First, `fpga/gba/src/iosys/gowin_dpb_menu.v` was left in the tree by that commit and is now deleted: the replacement `menu_ram.v` is in the build and nothing references the old file, but leaving it meant the tree still carried sixteen Gowin-headed files while `THIRD_PARTY.md` had been edited to say fifteen, so the file count and the document disagreed. Deleting it makes both true at fifteen files, of which eight are in the shipped build -- the five remaining memory wrappers and the three PLL wrappers -- and seven are not, being six duplicates in the unused `plla/` directory and `pll/pll_74.v`. Git history retains the superseded file, which is the point of removing it from the working tree rather than keeping it for diffing as `pll_74.v` was kept: the licensing question this work exists to answer is settled by the file being gone, not by it being unbuilding. Second, TCL-068 said "the remaining four memory wrappers" and then named five, which is an error of arithmetic inside a record that exists to be quoted. Third, the same sentence said those wrappers carry "53 of the 66 `DPB`", a figure arrived at by including the menu's single `DPB`, which is no longer one of them; the correct count is 52, being four in `mem_eeprom`, sixteen in `vram_hi` and thirty-two in `vram_lo`, and the record now says so with the split shown. Nothing else changed: no RTL, no build script, no other record, and the fourteen files left as they were. The core-syntax audit was re-run over the whole `.ai/` diff because this commit edits a settled entry: `.ai/core.md` and `.ai/core-syntax.md` were re-read and `.ai/core.md` confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, entry 83 was validated as the eighty-third entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 83 entries against the 100-entry limit with no gaps in its numbering, the reference store was confirmed at 163 records with no duplicate ids and every status inside the three-value vocabulary, and the corrected TCL-068 was re-read in full after editing.
+
+#### Next Steps:
+
+Unchanged from entry 82 and unaffected by these corrections: the next cycle writes behavioural models for `DPB`, `SP` and `DPX9B` into `tools/sim/gowin_cells_sim.v`, since without them the remaining five wrappers cannot be converted on evidence, and the OSD text page `menu_ram` replaced has still never been drawn on hardware, so a build and a cartridge that prints to the OSD remains the cheap confirmation of the one conversion already made. The lesson worth carrying from this cycle is small and specific: a document that states a count and a tree that contains one are two facts that drift the moment either changes, and the only reliable way to catch it is to recount from the tree after the edit rather than trusting the edit. That is what found this, and it was found only because the deletion had been left undone.
+
+#### Files Modified:
+
+- fpga/gba/src/iosys/gowin_dpb_menu.v
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
