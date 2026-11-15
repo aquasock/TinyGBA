@@ -24,13 +24,15 @@ verified fact.
 
 ### The machine: runs retail titles
 
-- **Picture.** A twelve-title sweep found eleven running correctly. Metroid Fusion,
-  The Minish Cap, Golden Sun, Metroid Zero Mission, Advance Wars, Fire Emblem,
-  Final Fantasy Tactics Advance, Castlevania: Aria of Sorrow, Mario Kart: Super
-  Circuit, Doom II and Asterix & Obelix XXL all pass on audio and video, the last
-  two being software-rendered 3D titles chosen to push the machine hardest. One
-  cartridge fails: Pokemon Emerald stops at the BIOS handover's white screen. See
-  BRD-080 through BRD-087.
+- **Picture.** A twelve-title sweep found all twelve running correctly. Metroid
+  Fusion, The Minish Cap, Golden Sun, Metroid Zero Mission, Advance Wars, Fire
+  Emblem, Final Fantasy Tactics Advance, Castlevania: Aria of Sorrow, Mario Kart:
+  Super Circuit, Doom II, Asterix & Obelix XXL and Pokemon Emerald all pass on
+  audio and video, the last three being the hardest cases chosen deliberately:
+  Doom II and Asterix are software-rendered 3D titles, and Emerald is a 16 MiB
+  image with flash1M save hardware. Emerald was the last of the twelve to pass,
+  and the fault was in the loader rather than in the machine. See BRD-080 through
+  BRD-089.
 - **Speed.** The core runs at 99.8378% of a real GBA's frame rate — 59.6306 Hz
   against 59.7275 — because the PLL cannot reach 16.777216 MHz from a 27 MHz
   reference. That deficit is a clock-plan compromise, not a speed limit: Doom II
@@ -53,7 +55,16 @@ verified fact.
   GBA **B**, and every other button mapping one-to-one — see BRD-079.
 - **Multi-load behaviour.** The bimodality recorded in BRD-014 and BRD-045 — one
   load halting, another running — did not reproduce across six consecutive loads
-  of one 8 MiB image on one bitstream. See BRD-077.
+  of one 8 MiB image on one bitstream. See BRD-077. Loading two cartridges
+  back to back can still catch the second in the BIOS sequence and look like a
+  freeze; it boots normally when loaded again. See BRD-090.
+- **Saves move on and off the card.** `gbasave` dumps a cartridge's save window to
+  a `.sav` beside the ROM and `gbaload` restores it before releasing the core, for
+  all four save types the core supports. The round trip is byte-exact for SRAM,
+  flash512K and EEPROM, and 131,070 of 131,072 bytes for flash1M — the two
+  outliers are flash command opcodes that this core's flash model lets into the
+  array, not a save-path fault. See BRD-092. What is *not* established is that a
+  save survives the board losing power; see Known gaps.
 
 ### The two defects that blocked it, both now fixed
 
@@ -99,21 +110,41 @@ CPU, the GPU or a cartridge.
   A hardware reading from this tree is still attributable to the design only with
   that caveat.
 - **Timing margin is a property of the netlist, not of the seed.** Some images
-  need the documented GBATang multicycle relaxation for `clk67` and some do not:
-  `build/rev_prod` reached 181 MHz with none while every build carrying the
-  audio fix lands at 48–57 MHz and needs the allowance. A 24-seed sweep with a
-  matched control shows no seed recovers it, and a build with only the four
-  sound files reverted reproduces the fast netlist and 184 MHz exactly, so the
-  cost is the audio change moving the synthesiser's optimisation boundary rather
-  than the placement. See TCL-056. The relaxation is the one upstream
-  `gbatang.sdc` exists to express, so these images are correct, not marginal —
-  but any timing figure from one must say it needed the allowance.
-- **The save path has never worked.** `tools/load_gba_rom.py` sends only commands
-  `0x06`, `0x07` and `0x08`, and `config_backup_type` is assigned from the loader
-  stream only in a fourth loading stage this loader never enters, so it stays
-  `BACKUP_NONE`, regions `0x0E000000` and `0x0F000000` are treated as read-only,
-  and every save write is discarded. No cartridge with a battery-backed save has
-  ever had one on this board. See BRD-070.
+  need the documented GBATang multicycle relaxation for `clk67` and some do not,
+  and the difference is not recoverable by placing again: a 24-seed sweep with a
+  matched control showed no seed recovers a slow netlist. See TCL-056. Two
+  netlists were isolated with confidence — `build/rev_prod` reached 181.061 MHz
+  and `build/snd_prod` 53.622 MHz, and a build with only the four sound files
+  reverted reproduced the fast one exactly, which is why the audio change was
+  named as the cause. **That attribution no longer holds as a rule.** The
+  current image, `build/save_s14`, carries the audio fix and the save path and
+  reaches 173.641 MHz with no relaxation needed, while `build/hyg_s1` at 51.967
+  MHz did need it, so a slow `clk67` is not a dependable consequence of the audio
+  code and the cause of the difference between these netlists is unidentified.
+  See TCL-056 and TCL-063.
+  What remains true is the part that matters operationally: the relaxation is the
+  one upstream `gbatang.sdc` exists to express, so an image that needs it is
+  correct rather than marginal, and any timing figure must say whether it needed
+  the allowance.
+- **Save persistence is unproven.** The transport works in both directions
+  (BRD-092), but the negative control that would make it a persistence claim
+  failed: after a cold boot with the `.sav` renamed so no restore could run, the
+  EEPROM was neither blank nor the pattern last written to it — 8121 of 8192
+  bytes non-blank and 2775 differing from the pattern — so the reading cannot be
+  interpreted either way. The experiment that separates "the game rewrote it"
+  from "the memory never cleared" has not been run. See BRD-092 and BRD-093.
+- **Occasional single-frame tearing** is visible across cartridges, roughly once
+  every few minutes, possibly during busy areas. It is the first cosmetic defect
+  here that is not tied to one title, so it is a property of the display path
+  rather than of a cartridge. No capture has been taken of a tear yet, so the
+  mechanism is entirely open — a fixed horizontal discontinuity would implicate
+  the line-buffer handover, a varying vertical one the timing generator. See
+  BRD-091.
+- **The host-side loader is obsolete for saves.** `tools/load_gba_rom.py` sends
+  only commands `0x06`, `0x07` and `0x08` and never enters the loading stage that
+  sets `config_backup_type`, so regions `0x0E000000` and `0x0F000000` stay
+  read-only and every save write is discarded. It is a bench loader for ROMs
+  only; use `gbaload` for anything with save hardware. See BRD-070.
 - **The Classic Controller's analogue inputs are unused.** The sticks and the
   two analogue triggers are read by the pad master and thrown away; only the
   fifteen buttons reach the keypad, because the GBA has no analogue input. The
@@ -133,14 +164,21 @@ TINYGBA_BUILD_DIR=build/diag \
   TINYGBA_DEFINES=-DTINYGBA_VIDEO_TEST tools/build_tinygba.sh
 ```
 
-The production image, as built and tested (this produced `build/snd_prod`, the
-current best image — a retail title runs on it; see Status):
+The production image, as built and tested (this produced `build/save_s14`, the
+current image — a retail title runs on it, and it is the first one carrying the
+save path; see Status):
 
 ```
-TINYGBA_BUILD_DIR=build/snd_prod TINYGBA_SEED=14 \
+TINYGBA_BUILD_DIR=build/save_s14 TINYGBA_SEED=14 \
 TINYGBA_DEFINES='-DTINYGBA_OVERLAY_OFF -DTINYGBA_BIOS_HEX="/abs/path/official_bios.hex"' \
 tools/build_tinygba.sh
 ```
+
+That image passed every build gate and reported `clk67: 67.002 MHz constraint,
+achieved 173.641 MHz` with `Meets the contract with no relaxation needed`, so it
+needs no multicycle allowance; its `.bin` is
+`338f35faf7ef6c0ddedd16ea6e32fed1d76ba4f836cda063622b61733d473694`. Earlier
+images including `build/snd_prod` predate the save path.
 
 `-nowidelut` is passed to `synth_gowin` by default, because it is smaller,
 faster to place, better timed and identical in flip-flop count: without it wide
@@ -279,6 +317,19 @@ against the pre-change module from git to give a matched before/after. That is
 how the two audio fixes were verified before any bitstream was built — see
 BRD-073 and TCL-053.
 
+`tools/save/` holds the same kind of bench for the save path, and it earned its
+keep. `tb_save.sv` drives the adapter and engine against a controller model and
+takes a clock argument: it had certified a broken build because its model
+presented read data in the same cycle as the acknowledgement, so it now models
+the real one-cycle gap and runs a must-fail regression with the adapter on
+`clk67`. `tb_iosys.sv` covers the loader-side framing of a save read; its write
+case is absent rather than failing, because the harness cannot drive 135 bytes at
+2 Mbaud without the core's receiver stalling, and the reason is written in the
+file. `tools/save/sav_pattern.py` makes and checks a `.sav` whose every byte
+depends on its offset, so a dropped byte, a swapped lane or a 64 KB alias shows
+up as a named offset; `tb_save.sv` uses the same pattern, so the RTL bench and a
+board dump fail on the same byte for the same reason. See TCL-060 and BRD-092.
+
 ### Test cartridges
 
 `tools/make_probe_rom.py` assembles every probe in `tools/roms/` into a loadable
@@ -317,9 +368,9 @@ board loads both itself. Nothing is transferred from a PC.
 
 ```
 # put the core pair on the card (tools/ship_core.py builds it from a build dir)
-python3 tools/ship_core.py build/snd_prod
+python3 tools/ship_core.py build/save_s14
 python3 ../TinyTang/tools/tinytang_put.py --port /dev/ttyACM1 \
-    build/snd_prod/ship/tinygba.bin /root/cores/console138k/tinygba.bin
+    build/save_s14/ship/tinygba.bin /root/cores/console138k/tinygba.bin
 
 # put a cartridge under /root/media/gba/
 python3 ../TinyTang/tools/tinytang_put.py --port /dev/ttyACM1 \
@@ -328,14 +379,34 @@ python3 ../TinyTang/tools/tinytang_put.py --port /dev/ttyACM1 \
 # on the board's shell (tangload programs the FPGA; gbaload streams the cart)
 tangload /root/cores/console138k/tinygba.bin
 gbaload "/root/media/gba/game.gba"
+
+gbasave "/root/media/gba/game.gba"        # after playing; writes game.gba.sav
 ```
 
 `gbaload` is `nesload`'s counterpart for this core and lives in TinyTang's
 firmware, not here: the frame protocol is nand2mario's and identical between the
-cores, so it sends `0x06` to hold the core in reset, `0x07` for cartridge bytes in
-1024-byte chunks with a `taskYIELD` between them, then clears the OSD and sends
-`0x06` again to start the game. It refuses a file that is not a cartridge (no
-`0x96` at `0xB2`) or one larger than the 32 MiB a GBA cartridge can be.
+cores. It refuses a file that is not a cartridge (no `0x96` at `0xB2`) or one
+larger than the 32 MiB a GBA cartridge can be. While it streams the image it
+searches each chunk for a save-type marker and configures the core's save
+hardware before releasing it — `save hardware = flash1M` and so on — so a
+cartridge that needs a save window gets one without being told. Before it
+releases the core it looks for `<rom-path>.sav` and restores it. See BRD-089
+and BRD-092.
+
+`gbasave` is the other direction: it dumps whatever is in the cartridge's save
+window to `<rom-path>.sav`, so a save can leave the board. The round trip is
+byte-exact for SRAM, flash512K and EEPROM, and 131,070 of 131,072 for flash1M —
+the two differing bytes are flash command opcodes that the flash model admits
+into the array rather than a save-path fault. See BRD-092.
+
+**This is transport, not persistence.** Both save stores live in resources the
+loader never writes, so a save survives `tangload` and a reload whether or not
+the save path exists — a reload cannot distinguish "the save persisted" from
+"the save was never lost". Only a power cycle tests the card, and that test has
+not yet produced a readable result. See BRD-093 and Known gaps.
+
+A save written by the game reaches the card only when `gbasave` runs; there is no
+save-on-exit.
 
 **A controller only works on this path.** An image flashed over JTAG runs the core
 but configures no socket fabric, so nothing on the pad responds (TCL-054).
@@ -359,7 +430,7 @@ straight at the core's UART. Use the oss-cad-suite copy of `openFPGALoader`; the
 system copy at v0.13.1 has no `tangconsole` board.
 
 ```
-~/oss-cad-suite/bin/openFPGALoader -b tangconsole build/snd_prod/tinygba.fs
+~/oss-cad-suite/bin/openFPGALoader -b tangconsole build/save_s14/tinygba.fs
 tools/load_gba_rom.py game.gba                 # /dev/ttyUSB1, 2 Mbaud
 tools/load_gba_rom.py game.gba --dry-run       # header check only, sends nothing
 ```
@@ -442,6 +513,7 @@ fpga/gba/diag/     diagnostic probes, the pin-level SDRAM model and its testbenc
 fpga/gba/*.cst     pin and clock placement for the Console 138K
 tools/             build, ROM loading, probes, gates, simulation, input
 tools/roms/        probe cartridge sources, one discriminator each
+tools/save/        save-path testbenches and the pattern `.sav` generator
 .ai/               core.md, core-log.md, core-reference.md, core-syntax.md
 ```
 
@@ -474,8 +546,9 @@ that killed it.
 
 ## Known gaps
 
-- **Save hardware is not configured by the loader.** See Status above; no
-  cartridge with a battery-backed save has run here.
+- **Save persistence across power loss is unmeasured.** Both save stores survive
+  a `tangload` and a reload untouched, so a reload cannot test persistence and
+  only a power cycle can — and that test has never completed. See BRD-093.
 - **`clk67` timing margins are seed-dependent.** Some placements need the
   documented multicycle allowance, some do not.
 - **The clock-plane question is open.** Four paths are measured-good; `clk16`'s
