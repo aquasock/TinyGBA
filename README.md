@@ -126,13 +126,20 @@ CPU, the GPU or a cartridge.
   one upstream `gbatang.sdc` exists to express, so an image that needs it is
   correct rather than marginal, and any timing figure must say whether it needed
   the allowance.
-- **Save persistence is unproven.** The transport works in both directions
-  (BRD-092), but the negative control that would make it a persistence claim
-  failed: after a cold boot with the `.sav` renamed so no restore could run, the
-  EEPROM was neither blank nor the pattern last written to it — 8121 of 8192
-  bytes non-blank and 2775 differing from the pattern — so the reading cannot be
-  interpreted either way. The experiment that separates "the game rewrote it"
-  from "the memory never cleared" has not been run. See BRD-092 and BRD-093.
+- **Save persistence is not testable on this board.** The transport works in both
+  directions (BRD-092), but the store cannot be made to lose its contents: after
+  two verified power cycles — the FPGA answering its default core 84 before
+  `tangload` each time — the EEPROM read back `65047658…`, identical to what it
+  held before, which is the pattern last written to it with 360 of 8192 bytes
+  decayed. `mem_eeprom` is Gowin block RAM with no `INIT_` parameters, so
+  nothing in the design restores it; it does not clear, it partially decays. That
+  is also the mechanism behind the failed negative control entry 77 recorded.
+  Since the only available destruction event does not destroy the store, nothing
+  here can distinguish "the save persisted" from "the memory was never lost" —
+  and a 4.4% corruption rate per cycle means the store is not trustworthy for a
+  save either. The demonstrated value is moving a save on and off the card. See
+  BRD-094 and BRD-093. The running cartridge is not what disturbs a reading: two
+  dumps fifteen seconds apart during play were identical. See BRD-095.
 - **Occasional single-frame tearing** is visible across cartridges, roughly once
   every few minutes, possibly during busy areas. It is the first cosmetic defect
   here that is not tied to one title, so it is a property of the display path
@@ -546,9 +553,15 @@ that killed it.
 
 ## Known gaps
 
-- **Save persistence across power loss is unmeasured.** Both save stores survive
-  a `tangload` and a reload untouched, so a reload cannot test persistence and
-  only a power cycle can — and that test has never completed. See BRD-093.
+- **Save persistence across power loss is unmeasured**, and cannot be measured
+  here: the store retains its contents across a power cycle rather than clearing,
+  so neither a reload nor a power cycle can test it. See BRD-094.
+- **The console dies on large SD transfers.** Three times in one session a
+  `gbasave` or `tangput` left the BL616 console silent with the device still
+  enumerated, recoverable only by removing power. `tangload` and `gbaload` never
+  failed. The save window can be read and written without the console's file
+  commands over `fpgapipe`, which bypasses both the SD and the frame decoder. See
+  TCL-064.
 - **`clk67` timing margins are seed-dependent.** Some placements need the
   documented multicycle allowance, some do not.
 - **The clock-plane question is open.** Four paths are measured-good; `clk16`'s
