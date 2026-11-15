@@ -97,7 +97,7 @@ sources=(
     "$d/pll/pll_16.v"
     "$d/pll/gowin_pll_hdmi.v"
     "$d/usb_hid_host.v"
-    "$d/fb.v"
+    "$d/fb_ram.v"
     "$d/gba2hdmi.sv"
 
     "$d/iosys/iosys_bl616.v"
@@ -215,8 +215,12 @@ echo "=== 1. synthesis ==="
 #   * `specify` blocks are removed, which cells_sim.v needs before it parses;
 #   * `MUX2` is removed from cells_sim.v;
 #   * `LUT5` is removed from cells_xtra_gw5a.v, where it is declared with no body.
-# tools/cells_behavioral.v then supplies both, so yosys infers LUT4s instead of
-# leaving 2345 unplaceable cells for nextpnr.
+# tools/cells_behavioral.v then supplies MUX2, so yosys infers LUT4s instead of
+# leaving 2345 unplaceable cells for nextpnr.  LUT5 is no longer supplied there:
+# its only user was fb.v, which fb_ram replaced, and with both the strip and the
+# behavioural definition in place the real library copy was being pulled in and
+# collided with it.  If a LUT5 instantiation ever returns, the definition has to
+# return with it.
 shim="$out/shim"
 mkdir -p "$shim"
 datdir=$(yosys-config --datdir 2>/dev/null || true)

@@ -100,7 +100,7 @@ reg mem_portA_we;
 wire [FB_AWIDTH-1:0] mem_portB_addr;
 reg [COLOR_WIDTH-1:0] mem_portB_rdata;
 
-fb u_fb(
+fb_ram u_fb(
     .clka(clk), .clkb(clk_pixel), .reseta('b0), .resetb(1'b0), .cea('b1), .ceb('b1), 
     // port A write
     .ada(mem_portA_addr), .douta(), .ocea(1'b0), .wrea(mem_portA_we), .dina(mem_portA_wdata),

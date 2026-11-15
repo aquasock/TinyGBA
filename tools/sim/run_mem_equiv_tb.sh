@@ -4,7 +4,7 @@
 # Do this project's restatements of the Gowin memory wrappers compute the same
 # thing as the wrappers they replace, cycle for cycle?
 #
-#   tools/sim/run_mem_equiv_tb.sh [eeprom|iwram|all]
+#   tools/sim/run_mem_equiv_tb.sh [eeprom|iwram|fb|all]
 #
 # Exits 0 only when the shipped pair agrees AND every deliberately broken
 # variant is rejected.  Needs iverilog; simulation only, never touches the Tang.
@@ -102,6 +102,15 @@ if [[ "$which" == iwram || "$which" == all ]]; then
         "bank-select-not-gated-on-write:s/if (ce \& ~wre) bank <= blksel;/if (ce) bank <= blksel;/" \
         "halfwords-transposed:s/assign dout = {do_hi\[bank\]\[15:0\], do_lo\[bank\]\[15:0\]};/assign dout = {do_lo[bank][15:0], do_hi[bank][15:0]};/" \
         "high-half-strobe-wrong-bits:s/2.b00, byte_en\[3:2\]/2'b00, byte_en[1:0]/"
+    echo
+fi
+
+if [[ "$which" == fb || "$which" == all ]]; then
+    needs_original fb fpga/gba/src/fb.v fpga/gba/src/fb_ram.v \
+        tools/sim/tb_fb_equiv.sv tb_fb_equiv \
+        "bank-select-not-gated-on-write:s/if (cea \& ~wrea) bank_a_q <= bank_a;/if (cea) bank_a_q <= bank_a;/" \
+        "halves-transposed:s/assign douta = {doa_hi\[bank_a_q\]\[8:0\], doa_lo\[bank_a_q\]\[8:0\]};/assign douta = {doa_lo[bank_a_q][8:0], doa_hi[bank_a_q][8:0]};/" \
+        "only-eight-banks-distinguishable:s/wire \[4:0\] bank_a = ada\[15:11\];/wire [4:0] bank_a = {2\x27b00, ada[13:11]};/"
     echo
 fi
 

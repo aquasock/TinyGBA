@@ -63,6 +63,25 @@ module MUX2 (O, I0, I1, S0);
     assign O = S0 ? I1 : I0;
 endmodule
 
+// Look-up tables, used by the generated wrappers to decode bank selects.  The
+// INIT parameter is a truth table indexed by the concatenated inputs, with I0
+// as the least significant address bit.
+// The output port is named `F`, matching the open cell library.
+module LUT4 (output F, input I0, I1, I2, I3);
+    parameter [15:0] INIT = 16'h0000;
+    assign F = INIT[{I3, I2, I1, I0}];
+endmodule
+
+module LUT5 (output F, input I0, I1, I2, I3, I4);
+    parameter [31:0] INIT = 32'h0000_0000;
+    assign F = INIT[{I4, I3, I2, I1, I0}];
+endmodule
+
+module LUT6 (output F, input I0, I1, I2, I3, I4, I5);
+    parameter [63:0] INIT = 64'h0;
+    assign F = INIT[{I5, I4, I3, I2, I1, I0}];
+endmodule
+
 module DFFRE (output reg Q, input D, CLK, CE, RESET);
     parameter [0:0] INIT = 1'b0;
     initial Q = INIT;
@@ -340,7 +359,7 @@ module SPX9(DO, DI, BLKSEL, AD, WRE, CLK, CE, OCE, RESET);
     // that a misuse is visible rather than silently plausible.
     reg [15:0] mem [0:1023];
     integer i;
-    initial for (i = 0; i < 1024; i = i + 1) mem[i] = 16'b0;
+    initial for (i = 0; i < 2048; i = i + 1) mem[i] = 18'b0;
 
     wire sel = (BLKSEL == BLK_SEL);
     always @(posedge CLK)
@@ -389,12 +408,13 @@ module DPX9B(CLKA, CEA, CLKB, CEB, OCEA, OCEB, RESETA, RESETB, WREA, WREB,
 
     input  wire        CLKA, CEA, OCEA, RESETA, WREA;
     input  wire        CLKB, CEB, OCEB, RESETB, WREB;
-    input  wire [12:0] ADA, ADB;
+    input  wire [13:0] ADA, ADB;
     input  wire [2:0]  BLKSELA, BLKSELB;
     input  wire [17:0] DIA, DIB;
     output reg  [17:0] DOA, DOB;
 
-    reg [17:0] mem [0:1023];
+    // 2048 words of 18 bits: a 16 Kbit block at 9 bits per sub-word.
+    reg [17:0] mem [0:2047];
 
     integer i;
     reg [255:0] init [0:63];
@@ -431,7 +451,7 @@ module DPX9B(CLKA, CEA, CLKB, CEB, OCEA, OCEB, RESETA, RESETB, WREA, WREB,
         init[6'h3A] = INIT_RAM_3A; init[6'h3B] = INIT_RAM_3B;
         init[6'h3C] = INIT_RAM_3C; init[6'h3D] = INIT_RAM_3D;
         init[6'h3E] = INIT_RAM_3E; init[6'h3F] = INIT_RAM_3F;
-        for (i = 0; i < 1024; i = i + 1)
+        for (i = 0; i < 2048; i = i + 1)
             mem[i] = init[i*18/256][(i*18)%256 +: 18];
     end
 
@@ -441,16 +461,16 @@ module DPX9B(CLKA, CEA, CLKB, CEB, OCEA, OCEB, RESETA, RESETB, WREA, WREB,
     always @(posedge CLKA) begin
         if (RESETA && RESET_MODE != "ASYNC") DOA <= 18'b0;
         else if (CEA && sel_a) begin
-            if (WREA) mem[ADA[12:3]] <= DIA;
-            if (OCEA) DOA <= mem[ADA[12:3]];
+            if (WREA) mem[ADA[13:3]] <= DIA;
+            if (OCEA) DOA <= mem[ADA[13:3]];
         end
     end
 
     always @(posedge CLKB) begin
         if (RESETB && RESET_MODE != "ASYNC") DOB <= 18'b0;
         else if (CEB && sel_b) begin
-            if (WREB) mem[ADB[12:3]] <= DIB;
-            if (OCEB) DOB <= mem[ADB[12:3]];
+            if (WREB) mem[ADB[13:3]] <= DIB;
+            if (OCEB) DOB <= mem[ADB[13:3]];
         end
     end
 

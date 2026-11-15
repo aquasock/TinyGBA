@@ -2794,3 +2794,43 @@ Three wrappers remain: `fb.v` at 38 `DPX9B`, `vram_hi` at 16 `DPB` and `vram_lo`
 - User Test: NOT RUN
 
 ---
+## 87 COMMIT Unreleased 2026-11-15T12:37:32-07:00
+
+#### Coming From:
+
+Unreleased 8b6a4ff
+
+#### Purpose:
+
+Replace the framebuffer wrapper, which is structurally unlike the three already converted, and remove the toolchain shim that existed only to serve it.
+
+#### Outcome:
+
+The fourth of six memory wrappers is converted and verified in simulation and on hardware. `fpga/gba/src/fb.v` -- 6327 lines, 38 `DPX9B`, 648 `MUX2`, 38 `LUT5` -- is gone, replaced by `fb_ram.v`, with its descriptors removed. Two structural facts made it unlike the others. Eighteen bits of data is two nine-bit slices, so each bank is a pair of blocks and 38400 words over 19 banks at 2048 words per block gives the 38. And `BLK_SEL_n` is only three bits wide, so it cannot name nineteen banks at all; the vendor therefore does not name them, and instead gives every instance the same `BLK_SEL = 3'b001` and its own one-hot decode of the bank field on `BLKSEL` bit 0, so a block acts when the two agree and exactly one bank acts at a time. That one-hot decode is what the 38 `LUT5` cells were for (TCL-073). Simulation compared both wrappers over 20000 random cycles on two independent clocks plus a directed pass over all nineteen banks, 24078 samples with no mismatch, and three injected defects were rejected: bank register gated on `ce` alone gives 5871 mismatches, transposed halves 2552, and a bank field cut to three bits so only eight banks are distinguishable 4485. That last one is the defect this memory is most exposed to and the one a census could never show. The simulation also caught a real fault in my first draft, which fed a single 27-bit concatenation into the 18-bit data port and so gave both slices the low nine bits: it built cleanly and would have drawn wrong colours. Removing `fb.v` then broke the build in a way worth recording, because it retired the last `LUT5` instantiation in the tree: `tools/build_tinygba.sh` strips `LUT5` from its cell-library shim and `tools/cells_behavioral.v` supplied a behavioural definition, and with nothing instantiating the cell so that both the strip and the definition still applied, yosys pulled in the real library copy and failed with `Re-definition of module 'LUT5'`. The fix is that both went, each with a comment saying the definition must return if a `LUT5` instantiation ever does; a shim kept for a consumer that no longer exists is not free, and the file's prose was corrected too since it still described supplying both primitives. On hardware both candidate seeds were deployable and the image was taken at seed 3: the routed netlist held 66 `DPB`, 16 `SP`, 43 `DPX9B`, 125 block RAM and 66 distributed RAM, identical to before the change, with the memory-placement gate reporting 38 `dpx9b_inst_N` cells becoming 38 `bank_i[N].u_lo`/`.u_hi` and the count unchanged, and once loaded Super Mario Advance 2 drew its world map correctly at 101838 distinct colours (BRD-099). Four of six wrappers are now verified on hardware: the OSD font for `menu_ram`, the save round trip for `eeprom_ram`, the diagnostic suite for `iwram_ram`, and a correct full-colour frame for `fb_ram`, which is the strongest of the four because a framebuffer fault is immediately visible rather than a wrong value. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 87 was validated as the eighty-seventh entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 87 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 172 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Two wrappers remain and they are the pair to do together: `vram_lo` at 16384 by 32 in 32 `DPB` and `vram_hi` at 8192 by 32 in 16 `DPB`, both with byte enables and both already carrying a generic behavioural counterpart under `ifdef VERILATOR`. They are 32-bit like `iwram_ram`, so the halfword split and the strobe handling can follow that conversion, but each has more than eight banks -- 16 for `vram_hi` and 32 for `vram_lo` -- which means the `BLK_SEL` width problem TCL-073 records applies to them too and must be read from their own wiring rather than assumed from `iwram_ram`'s indexed scheme. They go last because they are 48 of the remaining `DPB` on the GPU path every cartridge draws through, so the hardware check is the same one used here: a retail cartridge and a correct full-colour frame, not only the memory suite. Each needs its own testbench in the shape established, with at least two injected defects, one of which should be the `BLK_SEL` width failure. Before that work, and now overdue, the two gate gaps in TCL-070 should close: the memory-placement baseline covers no `iosys` paths and the register-parity baseline is 946 flops stale, so both would hide exactly this kind of change -- and this cycle showed the placement gate doing its job well for the three memories it can see, which makes the blind spot worse rather than better. Three PLL wrappers remain out of scope and unchanged. Nothing about the persistence question has changed: BRD-094 still stands, the store decays rather than clears, so persistence remains unmeasurable on this board.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- fpga/gba/src/fb.ipc
+- fpga/gba/src/fb.mod
+- fpga/gba/src/fb.v
+- fpga/gba/src/fb_ram.v
+- fpga/gba/src/gba2hdmi.sv
+- tools/build_tinygba.sh
+- tools/cells_behavioral.v
+- tools/memory_baseline.json
+- tools/sim/gowin_bram_sim.v
+- tools/sim/run_mem_equiv_tb.sh
+- tools/sim/tb_fb_equiv.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

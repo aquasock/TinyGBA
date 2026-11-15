@@ -627,118 +627,118 @@
       "sound.igba_sound_dmaB.fifo": {
         "RAM16SDP4": 8
       },
-      "video.u_fb.dpx9b_inst_0": {
+      "video.u_fb.bank_i[0].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_1": {
+      "video.u_fb.bank_i[0].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_10": {
+      "video.u_fb.bank_i[10].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_11": {
+      "video.u_fb.bank_i[10].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_12": {
+      "video.u_fb.bank_i[11].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_13": {
+      "video.u_fb.bank_i[11].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_14": {
+      "video.u_fb.bank_i[12].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_15": {
+      "video.u_fb.bank_i[12].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_16": {
+      "video.u_fb.bank_i[13].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_17": {
+      "video.u_fb.bank_i[13].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_18": {
+      "video.u_fb.bank_i[14].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_19": {
+      "video.u_fb.bank_i[14].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_2": {
+      "video.u_fb.bank_i[15].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_20": {
+      "video.u_fb.bank_i[15].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_21": {
+      "video.u_fb.bank_i[16].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_22": {
+      "video.u_fb.bank_i[16].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_23": {
+      "video.u_fb.bank_i[17].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_24": {
+      "video.u_fb.bank_i[17].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_25": {
+      "video.u_fb.bank_i[18].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_26": {
+      "video.u_fb.bank_i[18].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_27": {
+      "video.u_fb.bank_i[1].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_28": {
+      "video.u_fb.bank_i[1].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_29": {
+      "video.u_fb.bank_i[2].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_3": {
+      "video.u_fb.bank_i[2].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_30": {
+      "video.u_fb.bank_i[3].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_31": {
+      "video.u_fb.bank_i[3].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_32": {
+      "video.u_fb.bank_i[4].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_33": {
+      "video.u_fb.bank_i[4].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_34": {
+      "video.u_fb.bank_i[5].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_35": {
+      "video.u_fb.bank_i[5].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_36": {
+      "video.u_fb.bank_i[6].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_37": {
+      "video.u_fb.bank_i[6].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_4": {
+      "video.u_fb.bank_i[7].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_5": {
+      "video.u_fb.bank_i[7].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_6": {
+      "video.u_fb.bank_i[8].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_7": {
+      "video.u_fb.bank_i[8].u_lo": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_8": {
+      "video.u_fb.bank_i[9].u_hi": {
         "DPX9B": 1
       },
-      "video.u_fb.dpx9b_inst_9": {
+      "video.u_fb.bank_i[9].u_lo": {
         "DPX9B": 1
       }
     }
