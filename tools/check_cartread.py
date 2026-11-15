@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Check captured cartridge reads against the ROM, and calibrate the sampling.
 
 The harness logs each cartridge data read as the address plus BOTH candidate data

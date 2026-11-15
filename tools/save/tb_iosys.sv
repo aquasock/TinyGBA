@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 // Testbench for iosys_bl616's save-persistence framing.
 //
 // Why this exists.  `tools/save/tb_save.sv` covers the save engine: the RV bus,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 // gba_save - save persistence engine for TinyGBA.
 //
 // The cartridge's save memory already has a second way in.  `sdram_gba` exposes

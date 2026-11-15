@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 // Testbench for gba_save + rv_sdram_adapter.
 //
 // The pair is the whole save-persistence path: the engine pumps 128 bytes to or

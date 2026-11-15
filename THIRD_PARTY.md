@@ -20,32 +20,28 @@ is in this tree, and no external checkout is involved in a build.
   (`gba_sound.v`, `gba_sound_ch1.v`, `ch3`, `ch4`), `gba_memory.sv`,
   `gba_dma_module.sv` and `gbatang_top.sv`.
 
-  **A subset of that tree is not nand2mario's work and is not GPL-3.0.** Sixteen
-  files under `fpga/gba/src/` are output of Gowin's IP generator and carry
-  `Copyright (C)2014-2024 Gowin Semiconductor Corporation. All rights reserved.`
-  in their header, stating no grant of any kind. Nine of them are in the shipped
-  build: the six memory wrappers `memory/mem_eeprom.v`, `memory/mem_iwram.v`,
-  `gpu/vram_lo.v`, `gpu/vram_hi.v`, `iosys/gowin_dpb_menu.v` and `fb.v`, and the
-  three PLL wrappers `pll/pll_12.v`, `pll/pll_27.v`, `pll/pll_33.v`. The other
-  seven are not built: six are duplicates held in an unused `plla/` directory and
-  `pll/pll_74.v` is superseded by the hand-written `pll/gowin_pll_hdmi.v`. They
-  all arrived inside GBATang's GPL-3.0 tree, but a licensor can only license what
-  it owns, so GBATang's licence does not reach them and neither does this
-  project's. They are carried as build inputs, not as licensed source. Whether
-  Gowin's EULA permits redistributing generated output has not been established:
-  no Gowin EDA is installed here, no EULA text is in the tree, and this project
-  will not assert a permission it has not read. See TCL-065. The `.ipc` and
-  `.mod` files beside them are Gowin project descriptors and are never read by the
-  build.
+  **Sixteen files in that tree are not nand2mario's work.** They are output of
+  Gowin's IP generator and carry `Copyright (C)2014-2024 Gowin Semiconductor
+  Corporation. All rights reserved.` in their header. Nine of them are in the
+  shipped build: the six memory wrappers `memory/mem_eeprom.v`,
+  `memory/mem_iwram.v`, `gpu/vram_lo.v`, `gpu/vram_hi.v`,
+  `iosys/gowin_dpb_menu.v` and `fb.v`, and the three PLL wrappers
+  `pll/pll_12.v`, `pll/pll_27.v` and `pll/pll_33.v`. The other seven are not
+  built: six are duplicates in an unused `plla/` directory and `pll/pll_74.v` is
+  superseded by the hand-written `pll/gowin_pll_hdmi.v`. They are used as build
+  inputs and are not covered by this repository's licence, which cannot extend to
+  material its author did not write. The `.ipc` and `.mod` files beside them are
+  Gowin project descriptors, read only by Gowin's own tooling and never by the
+  build. See TCL-065 for what these files are and where they sit in the netlist.
 
   The six memory wrappers are pure primitive instantiations with no logic in
   them -- `mem_eeprom` is four `DPB` cells and a port list -- so they are
-  replaceable by this project's own RTL, which is the intended direction. Three
-  of the six already carry a generic behavioural counterpart at the same
-  instantiation site under `ifdef VERILATOR`: `mem_iwram`, `vram_lo` and
-  `vram_hi`. `mem_eeprom`'s equivalent exists only as a commented-out
-  `dpram_block` instantiation, and `gowin_dpb_menu` and `fb.v` have none. The PLL
-  wrappers are not yet in scope.
+  replaceable by hand-written wrappers of this project's own that instantiate the
+  same primitives with the same parameters. Three already carry a generic
+  behavioural counterpart at the same instantiation site under `ifdef VERILATOR`:
+  `mem_iwram`, `vram_lo` and `vram_hi`; `mem_eeprom`'s equivalent exists only as a
+  commented-out `dpram_block` instantiation, and `gowin_dpb_menu` and `fb.v` have
+  none. `fpga/gba/src/common/dpram_block.v` is the model for that work.
 
 - **GBATang's Verilator harness** — `tools/sim/sim_main.cpp` is upstream's
   `verilator/sim_main.cpp` at the same commit, GPL-3.0, carried unmodified. It
@@ -99,6 +95,27 @@ is in this tree, and no external checkout is involved in a build.
   replacing the Gowin IP-generator wrapper `pll_74.v`, which remains in the tree,
   unbuilt, so that upstream can be diffed against it.
 
-The licensing of this repository's own additions is not yet decided; the
-vendored GPL-3.0 sources mean a GPL-3.0-compatible licence is the practical
-choice, and that decision is the user's.
+## This repository's own licence
+
+TinyGBA is **GPL-3.0-only**. The text is in `LICENSE`, and every source file
+this repository wrote carries an `SPDX-License-Identifier: GPL-3.0-only` header.
+The one exception is `tools/fs_to_bin.py`, carried in from TinyTang, which keeps
+its own MIT licence -- GPL-3.0 permits that, and the header says so.
+
+The licence is not a preference here. `fpga/gba/src/` is GBATang, which is
+GPL-3.0, vendored in-tree rather than fetched, and this project's RTL is
+compiled into the same bitstream as it, so the result is a single work and
+GPL-3.0 is the only licence that work can carry. `GPL-3.0-only` rather than
+`GPL-3.0-or-later` names what is actually granted: the GBATang sources are
+version 3 as published, with no "or later" in their notices.
+
+The decision was taken on 2026-11-15, replacing the earlier "not yet decided"
+state in which this file recorded that a GPL-3.0-compatible licence was the
+practical choice. Vendored components keep their own terms and are listed above:
+hdl-util's HDMI transmitter stays MIT (`fpga/gba/src/hdmi/LICENSE-MIT`), and the
+Gowin IP-generator output is not covered by this repository's licence at all.
+
+No licence here is legal advice, and one question is deliberately left open:
+whether Gowin's own terms permit redistributing IP-generator output, which no one
+working on this repository has read. See TCL-065. Anyone distributing a bitstream
+built from this tree commercially should satisfy themselves on that point.

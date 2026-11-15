@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Refuse a netlist that clocks one edge of a clock two different ways.
 
 Why this exists.  For GW5A, yosys' synth_gowin keeps only a plain negedge flop

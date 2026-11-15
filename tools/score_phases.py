@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Score each clk16 phase's cartridge reads against the ROM.
 
 Used to test whether a read defect is a property of the design or of the

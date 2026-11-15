@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Load a GBA ROM into a loaded TinyGBA core, over the core's own UART.
 
 Why this is a separate tool rather than a flag on the SNES one.  The frame

@@ -2589,3 +2589,40 @@ The conversion needs one decision before it needs any code, and the honest frami
 - User Test: N/A
 
 ---
+## 81 COMMIT Unreleased 2026-11-15T08:43:52-07:00
+
+#### Coming From:
+
+Unreleased 9d958f1
+
+#### Purpose:
+
+Give the repository a licence it actually states, resolve the contradiction entry 80 left inside `THIRD_PARTY.md`, and bring SPDX coverage in line with the claim, without changing what the design does.
+
+#### Outcome:
+
+The repository now carries a root `LICENSE` holding the unmodified GPL-3.0 text, verified byte-identical by sha256 against two independent copies -- `/usr/share/common-licenses/GPL-3` and TinySNES's own `LICENSE`, both `3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986` at 674 lines -- so the text was checked rather than regenerated from memory. `THIRD_PARTY.md` gained a `## This repository's own licence` section modelled on TinySNES's, stating GPL-3.0-only and recording why the licence is forced rather than chosen: `fpga/gba/src/` is GBATang under GPL-3.0, vendored in-tree and compiled into the same bitstream, so the result is one work and GPL-3.0 is the only licence it can carry, with `-only` rather than `-or-later` matching the absence of an "or later" clause in the GBATang notices. That section replaces the paragraph that had left the question open, which was the contradiction entry 80 introduced: a carve-out at the top of the file saying part of the tree is not GPL, sitting above a closing paragraph saying the licence was undecided and misdescribing the whole of `fpga/gba/src/` as GPL-3.0. The carve-out itself was rewritten to read as an ordinary third-party notice, naming the sixteen Gowin IP-generator files and the nine that are built, saying they are used as build inputs and are not covered by this repository's licence, and dropping the sentence that asserted they could not be relicensed -- which was true and narrow, but had been used to answer a different question and gave a misleading impression about whether the repository could ship at all. The open question is now stated as open: whether Gowin's own terms permit redistributing IP-generator output, which nobody here has read because no Gowin EDA is installed and no EULA text is in the tree. SPDX coverage was brought up to the claim in that section, since it said every file this project wrote carries a header and that was not yet true: seven files gained one, being `tools/check_cartread.py`, `tools/clock_edge_check.py`, `tools/load_gba_rom.py`, `tools/score_phases.py`, `tools/save/tb_save.sv`, `tools/save/tb_iosys.sv` and `fpga/gba/src/memory/gba_save.v`, the last being the only file this project added under `fpga/gba/src/`. The tree now shows 51 `GPL-3.0-only` headers and one `MIT`, `tools/fs_to_bin.py`, which was carried in from TinyTang and keeps its own licence as GPL-3.0 permits; the section names that exception rather than claiming uniformity. Because `gba_save.v` is synthesised RTL and the other six edits touch files the gates read, the claim that none of this changes the design was measured instead of assumed: a pre-change and a post-change synthesis at `TINYGBA_STAGE=synth` with `-DTINYGBA_OVERLAY_OFF` produced netlists that differ only in source-line annotations, with 406 `gba_save.v` references each shifted by exactly one line, and after normalising those the two `modules` objects are identical -- 234 modules, 52,453 cells, identical cell-type counts, everything but the `creator` field compared. Both save testbenches were re-run after the edits and both pass with their must-fail regressions still correctly rejected, and the four Python tools that gained headers were confirmed to exit exactly as their pre-change versions did. One earlier error is corrected here rather than left standing: entry 80 recorded that four of the six memory wrappers have a generic behavioural counterpart, which was wrong -- three do (`mem_iwram`, `vram_lo`, `vram_hi`), `mem_eeprom`'s equivalent is commented out, and `gowin_dpb_menu` and `fb.v` have none -- and the record and the file now say three. A second correction belongs to the same class: this cycle's first draft of the licence section asserted that `.ai/` is covered by the repository licence, which is a decision belonging to the operator rather than to an agent, and the assertion was removed. The wrapper conversion that follows from the licensing question was not started, because it is a separate cycle with real hardware risk and the plan for it changed materially after review. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged, the complete `.ai/` diff was inspected, entry 81 was validated as the eighty-first entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 81 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 161 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+The wrapper conversion is the next cycle and it has an agreed shape, recorded in TCL-066's neighbours and in entry 80: replace all six Gowin memory wrappers with hand-written wrappers of this project's own that instantiate `DPB`, `SP` and `DPX9B` with the same parameters, so the netlist stays identical rather than depending on inference picking the same mapping; a small generator script kept under `tools/` should produce the parameter blocks from depth and width, with `fpga/gba/src/common/dpram_block.v` as the model. The six are `gowin_dpb_menu` at 1 `DPB` and 2048 by 8, `mem_eeprom` at 4 `DPB` with asymmetric 65536 by 1 and 8192 by 8 ports, `mem_iwram` at 16 `SP` and 8192 by 32, `vram_hi` at 16 `DPB` and 8192 by 32, `vram_lo` at 32 `DPB` and 16384 by 32, and `fb.v` at 38 `DPX9B` and 38400 by 18, which is 53 `DPB`, 16 `SP` and 38 `DPX9B` in total. Each conversion must be checked against the counts in TCL-065 and the routing is expected to be identical, so the success criterion is that a `TINYGBA_STAGE=synth` census is unchanged and a full build still passes the timing gate before anything goes to the board. Order the work menu first, then the EEPROM, then IWRAM, then `fb`, and the two VRAMs last and separately, because they hold 48 of the 53 wrapper `DPB` and sit on the GPU path every cartridge draws through; a failure there is expensive to attribute and the EEPROM carries the save path, which is already the most fragile part of this machine. The last step needs the board and the operator, since neither a census nor a timing gate can say whether a picture draws or a save round-trips. Two items remain open and neither is urgent: whether Gowin's terms permit redistributing its generated output, which reading the EULA would settle and which this cycle deliberately did not answer, and whether `.ai/` should be covered by the repository licence, which is the operator's decision and is currently unstated.
+
+#### Files Modified:
+
+- LICENSE
+- THIRD_PARTY.md
+- fpga/gba/src/memory/gba_save.v
+- tools/check_cartread.py
+- tools/clock_edge_check.py
+- tools/load_gba_rom.py
+- tools/score_phases.py
+- tools/save/tb_iosys.sv
+- tools/save/tb_save.sv
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
