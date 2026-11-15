@@ -20,6 +20,33 @@ is in this tree, and no external checkout is involved in a build.
   (`gba_sound.v`, `gba_sound_ch1.v`, `ch3`, `ch4`), `gba_memory.sv`,
   `gba_dma_module.sv` and `gbatang_top.sv`.
 
+  **A subset of that tree is not nand2mario's work and is not GPL-3.0.** Sixteen
+  files under `fpga/gba/src/` are output of Gowin's IP generator and carry
+  `Copyright (C)2014-2024 Gowin Semiconductor Corporation. All rights reserved.`
+  in their header, stating no grant of any kind. Nine of them are in the shipped
+  build: the six memory wrappers `memory/mem_eeprom.v`, `memory/mem_iwram.v`,
+  `gpu/vram_lo.v`, `gpu/vram_hi.v`, `iosys/gowin_dpb_menu.v` and `fb.v`, and the
+  three PLL wrappers `pll/pll_12.v`, `pll/pll_27.v`, `pll/pll_33.v`. The other
+  seven are not built: six are duplicates held in an unused `plla/` directory and
+  `pll/pll_74.v` is superseded by the hand-written `pll/gowin_pll_hdmi.v`. They
+  all arrived inside GBATang's GPL-3.0 tree, but a licensor can only license what
+  it owns, so GBATang's licence does not reach them and neither does this
+  project's. They are carried as build inputs, not as licensed source. Whether
+  Gowin's EULA permits redistributing generated output has not been established:
+  no Gowin EDA is installed here, no EULA text is in the tree, and this project
+  will not assert a permission it has not read. See TCL-065. The `.ipc` and
+  `.mod` files beside them are Gowin project descriptors and are never read by the
+  build.
+
+  The six memory wrappers are pure primitive instantiations with no logic in
+  them -- `mem_eeprom` is four `DPB` cells and a port list -- so they are
+  replaceable by this project's own RTL, which is the intended direction. Three
+  of the six already carry a generic behavioural counterpart at the same
+  instantiation site under `ifdef VERILATOR`: `mem_iwram`, `vram_lo` and
+  `vram_hi`. `mem_eeprom`'s equivalent exists only as a commented-out
+  `dpram_block` instantiation, and `gowin_dpb_menu` and `fb.v` have none. The PLL
+  wrappers are not yet in scope.
+
 - **GBATang's Verilator harness** — `tools/sim/sim_main.cpp` is upstream's
   `verilator/sim_main.cpp` at the same commit, GPL-3.0, carried unmodified. It
   gives the core an SDL window, an FST trace and a WAV-quality audio capture,
