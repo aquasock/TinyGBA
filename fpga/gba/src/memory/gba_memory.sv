@@ -935,9 +935,19 @@ endfunction
 function automatic isreadonly(input [3:0] region);
     case (region)
     4'h0,4'h8,4'h9,4'ha,4'hb,4'hc: isreadonly = 1;
+`ifdef TINYGBA_SRAM_WR_DIAG
+    // Diagnostic only.  No production build defines this; the build script's
+    // configuration key would show it as a separate image.  It forces the
+    // cartridge window writable whatever `config_backup_type` says, which
+    // makes one probe run answer a question the read path cannot: a store to
+    // 0x0E that lands here proves the gate was shut, and one that is still
+    // lost proves the write is dropped further down in `sdram_gba`.
+    4'he,4'hf:                     isreadonly = 0;
+`else
     4'he,4'hf:                     isreadonly = config_backup_type != BACKUP_FLASH512K & 
                                                 config_backup_type != BACKUP_FLASH1M & 
                                                 config_backup_type != BACKUP_SRAM;
+`endif
     default: isreadonly = 0;
     endcase
 endfunction
