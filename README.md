@@ -38,9 +38,12 @@ verified fact.
 - **Memory.** The diagnostic suite passes every internal region at full size:
   IWRAM 32K, EWRAM 256K, VRAM 96K, PRAM 1K, OAM 1K, cells and decoder both, in
   1377 ms. See BRD-069.
-- **Input.** Host-side joystick injection over the core's UART drives the
-  diagnostic cartridge's menu, and the cartridge's own button test confirms all
-  ten controls. See BRD-068.
+- **Input.** Two independent paths work. Host-side joystick injection over the
+  core's UART drives the diagnostic cartridge's menu, and the cartridge's own
+  button test confirms all ten controls — see BRD-068. And the board's own
+  controller works: a Wii Classic Controller on USB-A port 2 drives the GBA
+  keypad directly, with A and X both pressing GBA **A**, B and Y both pressing
+  GBA **B**, and every other button mapping one-to-one — see BRD-079.
 - **Multi-load behaviour.** The bimodality recorded in BRD-014 and BRD-045 — one
   load halting, another running — did not reproduce across six consecutive loads
   of one 8 MiB image on one bitstream. See BRD-077.
@@ -88,17 +91,27 @@ CPU, the GPU or a cartridge.
   netlist booting or not depending only on which spine the master clock takes.
   A hardware reading from this tree is still attributable to the design only with
   that caveat.
-- **Timing margin varies by seed.** Some images need the documented GBATang
-  multicycle relaxation for `clk67` and some do not; `build/rev_prod` reached
-  181 MHz with none, `build/snd_prod` needed the allowance at 53.6 MHz. That is
-  placement variance on one seed, not a property of a change, and a seed sweep
-  recovers it.
+- **Timing margin is a property of the netlist, not of the seed.** Some images
+  need the documented GBATang multicycle relaxation for `clk67` and some do not:
+  `build/rev_prod` reached 181 MHz with none while every build carrying the
+  audio fix lands at 48–57 MHz and needs the allowance. A 24-seed sweep with a
+  matched control shows no seed recovers it, and a build with only the four
+  sound files reverted reproduces the fast netlist and 184 MHz exactly, so the
+  cost is the audio change moving the synthesiser's optimisation boundary rather
+  than the placement. See TCL-056. The relaxation is the one upstream
+  `gbatang.sdc` exists to express, so these images are correct, not marginal —
+  but any timing figure from one must say it needed the allowance.
 - **The save path has never worked.** `tools/load_gba_rom.py` sends only commands
   `0x06`, `0x07` and `0x08`, and `config_backup_type` is assigned from the loader
   stream only in a fourth loading stage this loader never enters, so it stays
   `BACKUP_NONE`, regions `0x0E000000` and `0x0F000000` are treated as read-only,
   and every save write is discarded. No cartridge with a battery-backed save has
   ever had one on this board. See BRD-070.
+- **The Classic Controller's analogue inputs are unused.** The sticks and the
+  two analogue triggers are read by the pad master and thrown away; only the
+  fifteen buttons reach the keypad, because the GBA has no analogue input. The
+  one consequence worth knowing is that LEFT and RIGHT come from the D-pad
+  rather than from a stick.
 - **Link port, RTC and solar sensor** are unexercised; no cartridge here uses
   them.
 
@@ -325,6 +338,36 @@ tools/gba_input.py release                     # all buttons up
 GBA keypad bits, and the states the diagnostic cartridge reports, are in
 `tools/roms/keylive.s` — a probe that polls `KEYINPUT` and paints one square per
 button, so a capture taken during a hold reports the keypad at that moment.
+
+### The controller on the board
+
+A Wii Classic Controller (or an 8BitDo Retro Receiver with its own controller)
+plugs into **USB-A port 2** and drives the GBA keypad with no host involved. The
+port's data pair is an open-drain I2C bus — D+ is SDA, D- is SCL — polled by
+`fpga/gba/src/peripherals/wii_pad_master.sv`, which is TinyNES's master vendored
+byte-identical; the adapter's pull-ups divide against the dock's host pull-downs,
+so no level shifting is needed.
+
+This only works in **two-wire mode, loaded with `tangload`**. A bitstream flashed
+over JTAG runs the core but configures no socket fabric, so no controller can
+respond to it (TCL-054):
+
+```
+python3 ../TinyTang/tools/tinytang_put.py --port /dev/ttyACM1 \
+    build/<dir>/ship/tinygba.bin /root/cores/console138k/tinygba.bin
+tangload /root/cores/console138k/tinygba.bin        # on the board's shell
+```
+
+The mapping, from TinyNES's `pad_test` table as validated on this board: the
+D-pad, A, B, START, SELECT, L and R map one-to-one; **X also presses A** and **Y
+also presses B**, preserving the Classic Controller's physical face-button
+arrangement; **ZL and ZR also press L and R**; HOME is unmapped. The analogue
+sticks and triggers are read and discarded, because the GBA has no analogue
+input.
+
+`tools/pad/run_pad_tb.sh` checks the wiring and the mapping in simulation against
+a byte-level controller model, for both a genuine Classic Controller and the
+receiver, before any bitstream is spent on it.
 
 ### Capturing
 

@@ -145,6 +145,8 @@ sources=(
     "$d/peripherals/controller_ds2.sv"
     "$d/peripherals/dualshock_controller.v"
     "$d/peripherals/gba_joypad.v"
+    # TinyGBA: vendored from TinyNES; see THIRD_PARTY.md
+    "$d/peripherals/wii_pad_master.sv"
 
     "$d/sound/gba_sound.v"
     "$d/sound/gba_sound_ch1.v"

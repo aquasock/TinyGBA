@@ -2023,7 +2023,82 @@ wire overlay = overlay_iosys;
 wire [7:0] overlay_x, overlay_y;
 wire [14:0] overlay_color;
 reg [5:0] ddr_prefetch_delay;
-assign joy_btns_gba = overlay ? 0 : joy_btns | joy_usb1 | joy_usb2 | hid1 | hid2;
+
+// ------------------------------------------------------- Wii Classic pad
+// TinyGBA: the tactile controller.  USB-A port 2's data pair carries an
+// open-drain I2C bus with D+ (`usb1_dp`, H13) as SDA and D- (`usb1_dn`, G13) as
+// SCL, which is exactly how TinyNES wires its controller 1; the adapter's 10K
+// pull-ups divide against the dock's 15K host pull-downs so the pin sees about
+// 3.0 V and no level shifting is needed (TinyNES README, WII-001).  Both pins
+// are ports this tree already declares and leaves free, because `USB1` is not
+// defined -- which is why the pad is gated on the same define and cannot
+// contend with a USB host for them.
+//
+// The master runs on `clk50` and is timed for a 100 kHz bus from that clock:
+// 50.251 MHz / (4 x 126) = 99.7 kHz, the rate TinyNES's default works at on
+// this hardware.  Its button word is a level held for about a millisecond and
+// crosses into `clk16` through two flops, the discipline BRD-050 records.
+//
+// `wii_pad_master` is vendored from TinyNES; see THIRD_PARTY.md.
+`ifndef USB1
+localparam [11:0] PAD_QUARTER = 12'd126;
+wire pad_scl, pad_sda, pad_scl_low, pad_sda_low;
+// Open drain: the buffer only ever pulls low and the pin is read straight back,
+// so a device stretching the clock or a slow pull-up merely slows the bus.
+IOBUF pad_scl_buf (.I(1'b0), .OEN(~pad_scl_low), .O(pad_scl), .IO(usb1_dn));
+IOBUF pad_sda_buf (.I(1'b0), .OEN(~pad_sda_low), .O(pad_sda), .IO(usb1_dp));
+
+wire        pad_present, pad_classic;
+wire [15:0] pad_reads;
+wire [7:0]  pad_fails;
+wire [47:0] pad_data;
+
+wii_pad_master pad0 (
+    .clk(clk50), .resetn(resetn), .restart(1'b0), .quarter(PAD_QUARTER),
+    .scl_in(pad_scl), .sda_in(pad_sda),
+    .scl_low(pad_scl_low), .sda_low(pad_sda_low),
+    .present(pad_present), .classic(pad_classic),
+    .reads(pad_reads), .fails(pad_fails),
+    .data(pad_data), .ident()
+);
+
+// Report bytes 4 and 5, active low, byte 4 in bits 7:0.  The bit positions are
+// TinyNES `firmware/apps/pad_test/main.c`, which the operator validated against
+// a genuine Classic Controller and an 8BitDo Retro Receiver on this board:
+// 15 ZL, 14 B, 13 Y, 12 A, 11 X, 10 ZR, 9 LEFT, 8 UP, 7 RIGHT, 6 DOWN,
+// 5 L, 4 SELECT, 3 HOME, 2 START, 1 R.
+wire [15:0] pad_held = pad_present & pad_classic ? ~pad_data[47:32] : 16'd0;
+
+reg [15:0] pad_held_m = 16'd0, pad_held_s = 16'd0;
+always @(posedge clk16) begin
+    pad_held_m <= pad_held;
+    pad_held_s <= pad_held_m;
+end
+
+// The GBA has one face-button pair and one shoulder pair, so the Classic
+// Controller's second pair and its triggers alias onto them: X plays A and Y
+// plays B (the SNES arrangement), ZL and ZR play L and R.  HOME has nothing to
+// map to and is left out.  X and Y themselves stay clear because nothing
+// downstream reads those two bits.
+wire [11:0] joy_wii = {                  // (R L X A RT LT DN UP START SELECT Y B)
+    pad_held_s[1]  | pad_held_s[10],     // R  <- R, ZR
+    pad_held_s[5]  | pad_held_s[15],     // L  <- L, ZL
+    1'b0,                                // X  (unused by the GBA)
+    pad_held_s[12] | pad_held_s[11],     // A  <- A, X
+    pad_held_s[7],                       // RT -> right
+    pad_held_s[9],                       // LT -> left
+    pad_held_s[6],                       // DN
+    pad_held_s[8],                       // UP
+    pad_held_s[2],                       // START
+    pad_held_s[4],                       // SELECT
+    1'b0,                                // Y  (unused by the GBA)
+    pad_held_s[14] | pad_held_s[13]      // B  <- B, Y
+};
+`else
+wire [11:0] joy_wii = 12'b0;
+`endif
+
+assign joy_btns_gba = overlay ? 0 : joy_btns | joy_usb1 | joy_usb2 | hid1 | hid2 | joy_wii;
 
 `ifdef DDR3_FRAMEBUFFER
 gba2hdmi_ddr3 video (       // DDR3-based framebuffer

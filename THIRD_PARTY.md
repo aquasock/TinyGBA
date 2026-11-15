@@ -45,6 +45,22 @@ is in this tree, and no external checkout is involved in a build.
   and TinyTang's `fpga/desktop/desktop.cst`. `tools/fs_to_bin.py` is TinyNES's
   file, unmodified, via TinySNES.
 
+- **TinyNES, Wii Classic Controller master** —
+  `fpga/gba/src/peripherals/wii_pad_master.sv` is the module `wii_pad_master`
+  from TinyNES `fpga/ae350_soc/wii_pads.sv` at commit `7013393`
+  (https://github.com/aquasock/TinyNES), GPL-3.0-only, which matches this
+  project's licence. The module body is carried byte-identical to upstream and
+  only a provenance header is added, so `diff` against the source still works;
+  everything below that header is upstream's. Only this module is taken:
+  upstream's second module, `wii_pads`, is an AHB slave with a four-bus register
+  file for the AE350 SoC, and TinyGBA has no AHB bus and needs one controller's
+  buttons folded into its keypad, so the wiring lives in `gbatang_top.sv` instead
+  and the GBA memory map is untouched. The bus timing, wake-up sequence,
+  format-3 selection, identity check and format-1 repacking are upstream's and
+  unmodified, as are the button bit positions that TinyNES's `pad_test`
+  validated on this board against a genuine Classic Controller and an 8BitDo
+  Retro Receiver.
+
 - **Build tools** — yosys 0.69 with the slang front end, `nextpnr-himbaechel` and
   `apicula` from the aquasock forks. They are build inputs, not vendored code.
 
