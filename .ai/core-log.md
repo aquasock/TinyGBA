@@ -2909,3 +2909,32 @@ The memory-system work is finished, so what remains is a scope question rather t
 - User Test: NOT RUN
 
 ---
+## 90 COMMIT Unreleased 2026-11-15T13:54:16-07:00
+
+#### Coming From:
+
+Unreleased 435435e
+
+#### Purpose:
+
+Attempt to read Gowin's EULA, which eight cycles of records have named as the action that would settle whether redistributing its IP-generator output is permitted.
+
+#### Outcome:
+
+The attempt did not settle the question, and what it established is that the question cannot be settled from this workspace. There is no Gowin EDA installation on this machine: a filesystem search for a licence file under any path containing `owin` returns nothing, and no `/opt`, `/usr/local` or home-directory Gowin tree exists, which is consistent with TCL-065's finding that the vendor flow was run once as an offline oracle under a setup whose licence acceptance is not reproducible from this tree. The public licence page at `https://www.gowinsemi.com/en/support/license/` was fetched and returns HTTP 200 with 142,556 bytes, but its extracted text is an application form rather than terms: it is headed `Apply License` and offers `Register / Member Login`, and it contains thirteen occurrences of `license`, none of `EULA`, none of `redistribut` and none of `generated`. It is a page for requesting a licence to use the EDA, not a document granting or restricting redistribution of what the EDA emits. Three further candidate URLs were probed and returned no usable content before the attempt was stopped at the operator's instruction. So the terms are behind a registration wall (TCL-077). That makes the standing recommendation, which has appeared in every entry's Next Steps since entry 80, an action this agent cannot take, and it should stop being carried forward as though it were a cheap next step. What remains true without the document is what TCL-065 established: the sixteen original Gowin-headed files carried `All rights reserved` with no grant, the six memory wrappers have since been replaced so no memory in the shipped design is vendor-generated, and three PLL wrappers remain. What cannot be said is whether redistributing those three is permitted, and this entry does not assert either a permission or a prohibition. The practical position is sharper than before rather than fuzzier: the conversion work already done removed the question for the entire memory system, and replacing the three PLL wrappers would remove it completely, whereas confirming the licence would leave the files in place. No source, build script or tool was changed in this cycle. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 90 was validated as the ninetieth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 90 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 177 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Whoever can obtain the EULA -- meaning whoever holds or can create a Gowin account and accept the EDA licence -- should read it and record what it says, because an agent should neither guess at it nor assert a permission or a prohibition it has not read. Short of that, the three remaining PLL wrappers are the only vendor-generated RTL in the shipped design, and replacing them is a known-shaped job with a precedent: `pll_16.v` and `gowin_pll_hdmi.v` are hand-written already, and `pll_33`'s FVCO 1809 MHz operating point sits outside apicula's charge-pump model, so a replacement means either finding an in-band plan or restating the parameters the Gowin EDA oracle produced, which TCL-002 records. Six files in the unused `plla/` directory are duplicates of unbuilt wrappers and could be deleted at zero risk whenever the tree is next tidied, removing six of the ten remaining Gowin-headed files. A further question this cycle did not touch is whether distributing a bitstream built from this tree differs from distributing its source, which is a separate matter from what the EULA says about the emitted files. Nothing about the machine changed: the memory-system conversion finished in entry 89 with all six wrappers this project's own RTL and the diagnostic suite passing every region, and BRD-094's finding that the save store decays rather than clears still stands.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
