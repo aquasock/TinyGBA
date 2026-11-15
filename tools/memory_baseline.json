@@ -1096,148 +1096,148 @@
       }
     },
     "default": {
-      "gpu.drawer.ivram_hi.dpb_inst_0": {
+      "gpu.drawer.ivram_hi.bank_i[0].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_1": {
+      "gpu.drawer.ivram_hi.bank_i[0].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_10": {
+      "gpu.drawer.ivram_hi.bank_i[1].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_11": {
+      "gpu.drawer.ivram_hi.bank_i[1].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_12": {
+      "gpu.drawer.ivram_hi.bank_i[2].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_13": {
+      "gpu.drawer.ivram_hi.bank_i[2].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_14": {
+      "gpu.drawer.ivram_hi.bank_i[3].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_15": {
+      "gpu.drawer.ivram_hi.bank_i[3].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_2": {
+      "gpu.drawer.ivram_hi.bank_i[4].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_3": {
+      "gpu.drawer.ivram_hi.bank_i[4].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_4": {
+      "gpu.drawer.ivram_hi.bank_i[5].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_5": {
+      "gpu.drawer.ivram_hi.bank_i[5].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_6": {
+      "gpu.drawer.ivram_hi.bank_i[6].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_7": {
+      "gpu.drawer.ivram_hi.bank_i[6].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_8": {
+      "gpu.drawer.ivram_hi.bank_i[7].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_hi.dpb_inst_9": {
+      "gpu.drawer.ivram_hi.bank_i[7].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_0": {
+      "gpu.drawer.ivram_lo.bank_i[0].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_1": {
+      "gpu.drawer.ivram_lo.bank_i[0].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_10": {
+      "gpu.drawer.ivram_lo.bank_i[10].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_11": {
+      "gpu.drawer.ivram_lo.bank_i[10].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_12": {
+      "gpu.drawer.ivram_lo.bank_i[11].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_13": {
+      "gpu.drawer.ivram_lo.bank_i[11].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_14": {
+      "gpu.drawer.ivram_lo.bank_i[12].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_15": {
+      "gpu.drawer.ivram_lo.bank_i[12].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_16": {
+      "gpu.drawer.ivram_lo.bank_i[13].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_17": {
+      "gpu.drawer.ivram_lo.bank_i[13].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_18": {
+      "gpu.drawer.ivram_lo.bank_i[14].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_19": {
+      "gpu.drawer.ivram_lo.bank_i[14].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_2": {
+      "gpu.drawer.ivram_lo.bank_i[15].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_20": {
+      "gpu.drawer.ivram_lo.bank_i[15].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_21": {
+      "gpu.drawer.ivram_lo.bank_i[1].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_22": {
+      "gpu.drawer.ivram_lo.bank_i[1].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_23": {
+      "gpu.drawer.ivram_lo.bank_i[2].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_24": {
+      "gpu.drawer.ivram_lo.bank_i[2].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_25": {
+      "gpu.drawer.ivram_lo.bank_i[3].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_26": {
+      "gpu.drawer.ivram_lo.bank_i[3].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_27": {
+      "gpu.drawer.ivram_lo.bank_i[4].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_28": {
+      "gpu.drawer.ivram_lo.bank_i[4].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_29": {
+      "gpu.drawer.ivram_lo.bank_i[5].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_3": {
+      "gpu.drawer.ivram_lo.bank_i[5].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_30": {
+      "gpu.drawer.ivram_lo.bank_i[6].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_31": {
+      "gpu.drawer.ivram_lo.bank_i[6].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_4": {
+      "gpu.drawer.ivram_lo.bank_i[7].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_5": {
+      "gpu.drawer.ivram_lo.bank_i[7].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_6": {
+      "gpu.drawer.ivram_lo.bank_i[8].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_7": {
+      "gpu.drawer.ivram_lo.bank_i[8].u_lo": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_8": {
+      "gpu.drawer.ivram_lo.bank_i[9].u_hi": {
         "DPB": 1
       },
-      "gpu.drawer.ivram_lo.dpb_inst_9": {
+      "gpu.drawer.ivram_lo.bank_i[9].u_lo": {
         "DPB": 1
       },
       "gpu.drawer.linebuf_bg0.ram": {

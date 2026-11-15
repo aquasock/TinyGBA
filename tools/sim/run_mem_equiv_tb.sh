@@ -4,7 +4,7 @@
 # Do this project's restatements of the Gowin memory wrappers compute the same
 # thing as the wrappers they replace, cycle for cycle?
 #
-#   tools/sim/run_mem_equiv_tb.sh [eeprom|iwram|fb|all]
+#   tools/sim/run_mem_equiv_tb.sh [eeprom|iwram|fb|vram_hi|vram_lo|all]
 #
 # Exits 0 only when the shipped pair agrees AND every deliberately broken
 # variant is rejected.  Needs iverilog; simulation only, never touches the Tang.
@@ -73,19 +73,32 @@ one_mem() {
 which="${1:-all}"
 
 # A converted wrapper's original is deleted from the tree, because the point of
-# the work is that the file stops being carried (TCL-065).  Its comparison is
-# then historical: run it only while the original is still present, and say so
-# otherwise rather than failing on a missing file.
+# the work is that the file stops being carried (TCL-065).
+# Fetch a deleted original out of git so the comparison stays live rather than
+# historical.  A converted wrapper's original is removed from the tree (the
+# point of the work), so after a few conversions this script would otherwise
+# report every memory as historical and test nothing at all.
+original_from_git() {   # original_from_git <path> <dest>; 0 on success
+    local path="$1" dest="$2" del
+    del=$(git -C "$root" log -1 --diff-filter=D --format=%H -- "$path" 2>/dev/null)
+    [[ -n "$del" ]] || return 1
+    git -C "$root" show "${del}^:${path}" > "$dest" 2>/dev/null || return 1
+    [[ -s "$dest" ]]
+}
+
 needs_original() {   # needs_original <label> <old.v> <new.v> <tb> <top> <defects...>
     local label="$1" oldf="$2"; shift 2
     if [[ -f "$oldf" ]]; then
         one_mem "$label" "$oldf" "$@"
-    else
-        echo "--- $label: original no longer in the tree ($oldf) ---"
-        echo "    its equivalence and injected-defect runs were done before the"
-        echo "    conversion was committed; see the record for that memory and"
-        echo "    \`git log --diff-filter=D -- $oldf\` for the baseline."
+        return
     fi
+    if original_from_git "$oldf" "$out/$(basename "$oldf")"; then
+        echo "--- $label: original recovered from git history ---"
+        one_mem "$label" "$out/$(basename "$oldf")" "$@"
+        return
+    fi
+    echo "--- $label: original not in the tree and not recoverable from git ---"
+    echo "    the comparison cannot be re-run; see the record for that memory."
 }
 
 if [[ "$which" == eeprom || "$which" == all ]]; then
@@ -111,6 +124,24 @@ if [[ "$which" == fb || "$which" == all ]]; then
         "bank-select-not-gated-on-write:s/if (cea \& ~wrea) bank_a_q <= bank_a;/if (cea) bank_a_q <= bank_a;/" \
         "halves-transposed:s/assign douta = {doa_hi\[bank_a_q\]\[8:0\], doa_lo\[bank_a_q\]\[8:0\]};/assign douta = {doa_lo[bank_a_q][8:0], doa_hi[bank_a_q][8:0]};/" \
         "only-eight-banks-distinguishable:s/wire \[4:0\] bank_a = ada\[15:11\];/wire [4:0] bank_a = {2\x27b00, ada[13:11]};/"
+    echo
+fi
+
+if [[ "$which" == vram_hi || "$which" == all ]]; then
+    needs_original vram_hi fpga/gba/src/gpu/vram_hi.v fpga/gba/src/gpu/vram_hi_ram.v \
+        tools/sim/tb_vram_hi_equiv.sv tb_vram_hi_equiv \
+        "bank-select-not-gated-on-write:s/if (cea \& ~wrea) bank_a_q <= bank_a;/if (cea) bank_a_q <= bank_a;/" \
+        "halves-transposed:s/assign douta = {doa_hi\[bank_a_q\], doa_lo\[bank_a_q\]};/assign douta = {doa_lo[bank_a_q], doa_hi[bank_a_q]};/" \
+        "high-half-strobe-from-low:s/{ada\[9:0\], 2.b00, byte_ena\[3:2\]}/{ada[9:0], 2\x27b00, byte_ena[1:0]}/"
+    echo
+fi
+
+if [[ "$which" == vram_lo || "$which" == all ]]; then
+    needs_original vram_lo fpga/gba/src/gpu/vram_lo.v fpga/gba/src/gpu/vram_lo_ram.v \
+        tools/sim/tb_vram_lo_equiv.sv tb_vram_lo_equiv \
+        "bank-select-not-gated-on-write:s/if (cea \& ~wrea) bank_a_q <= bank_a;/if (cea) bank_a_q <= bank_a;/" \
+        "halves-transposed:s/assign douta = {doa_hi\[bank_a_q\], doa_lo\[bank_a_q\]};/assign douta = {doa_lo[bank_a_q], doa_hi[bank_a_q]};/" \
+        "only-eight-banks-aliased:s/wire \[3:0\] bank_a = ada\[13:10\];/wire [3:0] bank_a = {1\x27b0, ada[12:10]};/"
     echo
 fi
 

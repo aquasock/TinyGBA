@@ -128,8 +128,8 @@ sources=(
     "$d/gpu/gba_gpu_timing.v"
     "$d/gpu/gba_timer.v"
     "$d/gpu/gba_timer_module.v"
-    "$d/gpu/vram_hi.v"
-    "$d/gpu/vram_lo.v"
+    "$d/gpu/vram_hi_ram.v"
+    "$d/gpu/vram_lo_ram.v"
     "$d/gpu/linebuffer.v"
 
     "$d/memory/gba_dma.v"

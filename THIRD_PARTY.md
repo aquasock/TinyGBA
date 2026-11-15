@@ -20,35 +20,32 @@ is in this tree, and no external checkout is involved in a build.
   (`gba_sound.v`, `gba_sound_ch1.v`, `ch3`, `ch4`), `gba_memory.sv`,
   `gba_dma_module.sv` and `gbatang_top.sv`.
 
-  **Twelve files in that tree are not nand2mario's work.** They are output of
+  **Ten files in that tree are not nand2mario's work.** They are output of
   Gowin's IP generator and carry `Copyright (C)2014-2024 Gowin Semiconductor
-  Corporation. All rights reserved.` in their header. Five of them are in the
-  shipped build: two memory wrappers `gpu/vram_lo.v` and `gpu/vram_hi.v`, and the
-  three PLL wrappers `pll/pll_12.v`, `pll/pll_27.v` and `pll/pll_33.v`. The other
-  seven are not built: six are duplicates in an unused `plla/` directory and
-  `pll/pll_74.v` is superseded by the hand-written `pll/gowin_pll_hdmi.v`. Four
-  of the six memory wrappers have been replaced by this project's own RTL:
+  Corporation. All rights reserved.` in their header. Three of them are in the
+  shipped build, all PLL wrappers: `pll/pll_12.v`, `pll/pll_27.v` and
+  `pll/pll_33.v`. The other seven are not built: six are duplicates in an unused
+  `plla/` directory and `pll/pll_74.v` is superseded by the hand-written
+  `pll/gowin_pll_hdmi.v`.
+
+  **All six memory wrappers have been replaced by this project's own RTL**, with
+  the superseded files and their Gowin project descriptors removed:
   `iosys/gowin_dpb_menu.v` by `iosys/menu_ram.v` (TCL-067),
   `memory/mem_eeprom.v` by `memory/eeprom_ram.v` (TCL-069),
-  `memory/mem_iwram.v` by `memory/iwram_ram.v` (TCL-072) and `fb.v` by `fb_ram.v`
-  (TCL-073), with the superseded files and their Gowin project descriptors
-  removed. They are used as build
+  `memory/mem_iwram.v` by `memory/iwram_ram.v` (TCL-072), `fb.v` by `fb_ram.v`
+  (TCL-073), and `gpu/vram_hi.v` and `gpu/vram_lo.v` by `gpu/vram_hi_ram.v` and
+  `gpu/vram_lo_ram.v` (TCL-075, TCL-076). No memory in the shipped design is
+  Gowin-generated any more. They are used as build
   inputs and are not covered by this repository's licence, which cannot extend to
   material its author did not write. The `.ipc` and `.mod` files beside them are
   Gowin project descriptors, read only by Gowin's own tooling and never by the
   build. See TCL-065 for what these files are and where they sit in the netlist.
 
-  The remaining two memory wrappers -- `vram_lo` and `vram_hi` -- are primitive
-  instantiations plus generated logic around them: bank decoders, registered
-  output selects and multiplexer trees. Replacing them means restating that logic
-  in ordinary RTL rather than copying a port list. Both already carry a generic
-  behavioural counterpart at the same instantiation site under
-  `ifdef VERILATOR`.
-  `fpga/gba/src/common/dpram_block.v` is the model for that work, and the
-  substitution is checked by simulation rather than by counting cells:
-  `tools/sim/run_mem_equiv_tb.sh` drives each old and new wrapper side by side
+  Each substitution was checked by simulation rather than by counting cells:
+  `tools/sim/run_mem_equiv_tb.sh` drives the old and new wrapper side by side
   under `tools/sim/gowin_bram_sim.v` and requires deliberately broken variants
-  to fail (TCL-068, TCL-069, TCL-072).
+  to fail, and each was then confirmed on hardware (TCL-068, TCL-069, TCL-072,
+  TCL-073, TCL-075, TCL-076 and the BRD records they cite).
 
 - **GBATang's Verilator harness** — `tools/sim/sim_main.cpp` is upstream's
   `verilator/sim_main.cpp` at the same commit, GPL-3.0, carried unmodified. It

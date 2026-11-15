@@ -2866,3 +2866,46 @@ The two VRAMs are the remaining conversions and are the same job: `vram_lo` at 1
 - User Test: N/A
 
 ---
+## 89 COMMIT Unreleased 2026-11-15T13:44:28-07:00
+
+#### Coming From:
+
+Unreleased da86a46
+
+#### Purpose:
+
+Convert the two VRAM wrappers, which completes the memory-system replacement begun in entry 82, and verify them on the board.
+
+#### Outcome:
+
+All six memory wrappers are this project's own RTL and the machine passes every region on the board. `gpu/vram_hi.v` and `gpu/vram_lo.v` are gone, replaced by `vram_hi_ram.v` and `vram_lo_ram.v`, with their descriptors removed; ten Gowin-headed files remain of which three are built, and all three are PLL wrappers, so no memory in the shipped design is Gowin-generated. The two wrappers turned out to need different bank schemes, and neither could have been inferred from the other: `vram_hi` has sixteen blocks and uses the indexed scheme -- eight banks of two halfword slices, instances 0..7 carrying the low halfword and 8..15 the high, two instances sharing a `BLK_SEL` because they are the halves of one bank -- while `vram_lo` has thirty-two blocks in sixteen banks, more than the three bits of `BLK_SEL` can name, so like the framebuffer it gives every instance the same `BLK_SEL = 3'b001` and its own one-hot decode of the four-bit bank field on `BLKSEL` bit 0, which is what its 32 `LUT4` cells were for (TCL-075, TCL-076). The settling test is `BLK_SEL_0` rather than the instance count: `iwram_ram` and `vram_hi` both have sixteen instances and both are indexed, while `vram_lo` has thirty-two and is one-hot. Both are dual-port with independent clocks, so each port's bank select is registered on its own clock and gated by that port's `~wre & ce`; a single shared register would be wrong whenever the two clocks are unrelated, which they are by construction here. Each was proved separately in simulation against its original with three injected defects that must fail -- for `vram_hi` the bank register gated on `ce` alone gives 5078 mismatches, transposed halves 8891, and the high halfword's strobe driven from `byte_en[1:0]` 7845; for `vram_lo` the same three give 4545, 5121 and 7459, the last being a bank field cut to three bits so banks 8..15 alias onto 0..7. The strobe-split defect is worth naming because a first draft of `vram_hi_ram` had exactly it: sending one strobe pair to both halves builds cleanly and writes the wrong bytes in the upper halfword, and no cell count moves. On hardware both candidate seeds were deployable at zero hold, the routed netlist held 67 `DPB`, 16 `SP` and 43 `DPX9B` unchanged with `change +0 flops` and exactly 96 changed census paths -- 48 removed, 48 added -- and the RetroRegen suite reported `RESULT: ALL REGIONS PASS` with VRAM 96K cells PASS and its decoder PASS in 1377 ms, the same figure as BRD-069 and BRD-098, and Super Mario Advance 2 drew its world map at 89735 distinct colours on the same image (BRD-100). Two mistakes of my own cost time. A build was launched with a stray `-DTINYGBA_BOOTTRACE_TYPO=0` define in the list, which would have polluted the configuration key every gate uses, and had to be killed and re-run; and on the way to `vram_lo` I had recorded intending to read its wiring rather than assume `iwram_ram`'s scheme, which was right, and then the first reading of it was still tentative until `BLK_SEL_0` was checked and found to be a single repeated value. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 89 was validated as the eighty-ninth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 89 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 176 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+The memory-system work is finished, so what remains is a scope question rather than a task. Three PLL wrappers -- `pll/pll_12.v`, `pll/pll_27.v` and `pll/pll_33.v` -- are still Gowin-generated and still built, and they are now the only vendor-generated RTL in the design. Replacing them is not the same job as the memories: `pll_33`'s operating point at FVCO 1809 MHz sits outside apicula's charge-pump model, which is why a Gowin EDA oracle run was needed to measure it in the first place, so a hand-written replacement means either finding an in-band plan or restating the parameters the oracle produced, and `pll_16.v` and `gowin_pll_hdmi.v` are the precedent for how that is written. Six files in an unused `plla/` directory are duplicates of unbuilt wrappers and could simply be deleted whenever the tree is next tidied, which removes six of the ten remaining Gowin-headed files at no risk. Two questions stand open and neither is advanced by more conversion work: whether Gowin's terms permit redistributing IP-generator output, which reading the EULA would settle and which has now been deferred through eight cycles, and whether persistence is testable at all on this board, which BRD-094 answered in the negative because the store decays rather than clears. The two diagnostic configurations without memory baselines, and the twenty diagnostic defines generally, remain deliberately ungated; if a VRAM regression confined to `TINYGBA_PIXTEST` or `TINYGBA_SDRAM_TEST` mattered, the fix is a diagnostic build plus a baseline update, which is now a cheap and well-understood act.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- fpga/gba/src/gpu/gba_gpu_drawer.v
+- fpga/gba/src/gpu/vram_hi.ipc
+- fpga/gba/src/gpu/vram_hi.mod
+- fpga/gba/src/gpu/vram_hi.v
+- fpga/gba/src/gpu/vram_hi_ram.v
+- fpga/gba/src/gpu/vram_lo.ipc
+- fpga/gba/src/gpu/vram_lo.mod
+- fpga/gba/src/gpu/vram_lo.v
+- fpga/gba/src/gpu/vram_lo_ram.v
+- tools/build_tinygba.sh
+- tools/memory_baseline.json
+- tools/sim/run_mem_equiv_tb.sh
+- tools/sim/tb_vram_hi_equiv.sv
+- tools/sim/tb_vram_lo_equiv.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

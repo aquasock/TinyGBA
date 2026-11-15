@@ -851,7 +851,7 @@ end
 
 
     `ifndef VERILATOR
-    vram_lo ivram_lo (
+    vram_lo_ram ivram_lo (
         .clka(mclk), .clkb(fclk), .reseta(1'b0), .resetb(1'b0),
         .cea(1'b1), .ocea(1'b1), .ceb(1'b1), .oceb(1'b1),
         
@@ -862,7 +862,7 @@ end
         .wreb(1'b0), .byte_enb(4'b0)
     );
 
-    vram_hi ivram_hi (
+    vram_hi_ram ivram_hi (
         .clka(mclk), .clkb(fclk), .reseta(1'b0), .resetb(1'b0),
         .cea(1'b1), .ocea(1'b1), .ceb(1'b1), .oceb(1'b1),
         
