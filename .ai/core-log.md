@@ -2462,3 +2462,43 @@ Make saves persist, because that is now the only thing standing between this cor
 - User Test: PASS
 
 ---
+
+## 77 COMMIT Unreleased 2026-11-15T01:23:44-07:00
+
+#### Coming From:
+
+Unreleased 31f156d
+
+#### Purpose:
+
+Give the core a way to move a cartridge's save data between the cartridge and a file on the SD card, so a save can outlive the board losing power.
+
+#### Outcome:
+
+Save persistence is implemented and the transport is proven on hardware, but the persistence claim itself is not: the negative control that would make it a measurement failed, and that is where the next agent must start. The RTL is a new `fpga/gba/src/memory/gba_save.v`, a byte pump that drives the RISC-V port `sdram_gba` already exposes for cart RAM at RV address 0x700000, through `rv_sdram_adapter`, which upstream provided and this tree had never instantiated -- before this change both sides of that interface in `gbatang_top.sv` were driven by nothing, and the EEPROM's port-B write enable was an undriven wire. Two 16-entry asynchronous FIFOs carry bytes across the clock boundary and the engine moves 128 bytes per request, a size chosen because it divides 8 KB, 32 KB, 64 KB and 128 KB exactly. `iosys_bl616.v` gained commands 0x0e and 0x0f and responses 0x10 and 0x11, and TinyTang gained `gbasave` and a restore step inside `gbaload`. The build passed all five gates and reported `clk67: 67.002 MHz constraint, achieved 173.641 MHz, pass` with `Meets the contract with no relaxation needed`, where the previous build had needed the documented GBATang multicycle exception; bitstream `53d9a2c5e0a62fcbeca4b37a051dc5b81dcf9cbacb35294fbd3dc7ee072c9b1a`, `.bin` `338f35faf7ef6c0ddedd16ea6e32fed1d76ba4f836cda063622b61733d473694`. On hardware the round trip is exact for every type the core supports: SRAM 32768 bytes byte-identical at sha256 `611253a4531dea3d840789b4f11a1ad9c4329fbbf85ee1634f2ae601e6da6db0`, flash512K 65536 identical, EEPROM 8192 identical, flash1M 131070 of 131072 with the two outliers at 0x2AAA and 0x5555 holding 0x55 and 0xF0 -- flash command opcodes, which `sdram_gba.v` line 206 lets into the array because `flash_cmd_en` is cleared whenever `f_mode == MODE_WRITE`, a pre-existing property of the flash model rather than of this path. Restore was shown to write correctly against a known-different state: with the array filled with 0xC3 by an earlier restore, `gbaload` restored the offset pattern and the dump returned the pattern, not 0xC3. Three faults were found and fixed along the way, each recorded. The adapter and engine had been instantiated on clk67 against a bus `sdram_gba` paces with mclk, so every 32-bit read returned the previous read's high halfword and every dump was shifted two bytes; the EEPROM could not have worked at clk67 at all, because `mem_eeprom`'s B port is a clk16 memory. `tools/save/tb_save.sv` had certified the broken version because its controller model presented read data in the same cycle as the acknowledgement, under a comment claiming to reproduce the controller's actual order; it now models the real one-cycle gap and runs a must-fail regression with the adapter on clk67. `gbasave` wedged the shell silently and reproducibly, and a host test (`tools/tests/tb_frames.c` case 11, 27 checks) reproduced the mechanism with no board involved: `rx_decode` stops when the sixteen-frame queue is full, `fpga_frames_take` removes only the type it was asked for, and unprompted joypad reports therefore hide the awaited reply indefinitely; `fpga_frames_flush_queue()` between exchanges fixes it, and the instrumented firmware then completed an 8192-byte dump that had previously gone silent. What is NOT established, and is the whole remaining question, is that a save survives the board losing power. The negative control was run and failed: after a cold boot with the `.sav` renamed so no restore could run, the EEPROM was not blank -- 8121 of 8192 bytes were non-blank and 2775 differed from the pattern that had last been written to it, which is neither "erased" nor "the pattern" and therefore cannot be read as persistence. The follow-up experiment that would separate "the game rewrote it" from "the memory never cleared" was interrupted before it ran, so the cause is unknown.
+
+#### Next Steps:
+
+Start with the failed negative control, because everything else depends on it. The experiment that was cut short is the one to run first: with the cartridge running and no `.sav` present, dump twice about fifteen seconds apart and compare -- identical means the memory is stable and simply was not cleared by power loss, differing means the running game is writing the EEPROM and the control has to be taken with the cartridge held in reset instead. If the store genuinely survives power loss, persistence cannot be tested at all on this machine as it stands and the value of the work reduces to moving saves on and off the card, which the round trip already proves; say so plainly rather than claiming persistence. Then either restore the stashed `.sav`, reload and confirm the pattern returns, or, if the control shows the game interferes, hold the core in reset via loader stage 1 while dumping. Two smaller items are recorded and should be closed in the same firmware build: `fpga_frames_flush_queue()` is called outside a critical section in `gba_save_read` and `gba_save_write` where every neighbouring caller into `fpga_frames` takes one (TCL-062 -- bounded, because `s_q_count = 0` is an atomic word store and only discards joypad reports whose state is cached separately, but it is an inconsistency this cycle introduced), and `tools/load_gba_rom.py` still documents the obsolete host-transfer path. `tools/save/tb_iosys.sv` covers the save read framing only; its write case was removed rather than left failing, because the harness cannot drive 135 bytes at 2 Mbaud without the core's receiver stalling, and the reason is written in the file. The tearing the operator reported across all cartridges is BRD-091 and is a display-path question, not a save one. `third_party/tinydesk` in TinyTang shows as modified and is not this cycle's to commit.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_save.v
+- fpga/gba/src/memory/rv_sdram_adapter.v
+- fpga/gba/src/iosys/iosys_bl616.v
+- fpga/gba/src/gbatang_top.sv
+- tools/build_tinygba.sh
+- tools/memory_baseline.json
+- tools/save/tb_save.sv
+- tools/save/tb_iosys.sv
+- tools/save/run_save_tb.sh
+- tools/save/run_iosys_tb.sh
+- tools/save/sav_pattern.py
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

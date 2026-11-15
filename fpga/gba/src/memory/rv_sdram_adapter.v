@@ -83,11 +83,19 @@ always @* begin
     end
 end
 
+// TinyGBA: `mem_req_r` is a toggle that carries the request into the
+// controller, and upstream never resets it.  On the board the flop powers up
+// low so the toggle starts in agreement with the controller's acknowledgement;
+// in simulation it is x, `mem_req` follows it, and the first request is lost --
+// the engine then waits for a rv_ready that never comes.  Resetting it makes the
+// simulated bus agree with the real one.  Added 2026-11-14 with the save
+// engine, which is the first thing in this tree to use the port.
 always @(posedge clk) begin            // RV
     if (~resetn) begin
         rvst <= RV_IDLE_REQ0;
         rv_ready <= 0;
         eeprom_wr_buf <= 0;
+        mem_req_r <= 0;
     end else begin
         reg write;
         write = rv_wstrb != 4'b0;

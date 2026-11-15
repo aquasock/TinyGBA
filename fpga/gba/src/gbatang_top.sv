@@ -1254,7 +1254,16 @@ wire [1:0]  mem_port;
 wire [15:0] dbg_bits;
 wire        dbg_done;
 
-// iosys RV memory interface
+// Save persistence.  The RV bus is the controller's lowest-priority port and
+// its cart-RAM window starts at 0x700000; `rv_sdram_adapter` is upstream's
+// shim from a 32-bit bus to it, and it also routes the EEPROM when the
+// configured save type is 4.  Neither was instantiated in this tree before
+// 2026-11-14, so both sides of the interface below were driven by nothing.  In
+// the deployed netlist (`build/pad_s14/tinygba.json`) the EEPROM's second port
+// shows the consequence: every `ADB` line and `WREB` of each
+// `mem.eeprom.m_eeprom` block RAM is connected to one common constant net, with
+// no path from any register in the design.  The port was inert, not merely
+// unused.
 wire        rv_valid        /* xsynthesis syn_keep=1 */;
 wire        rv_ready        /* xsynthesis syn_keep=1 */;
 wire [22:0] rv_addr         /* xsynthesis syn_keep=1 */;
@@ -1271,13 +1280,61 @@ wire        rv_mem_req      /* xsynthesis syn_keep=1 */;
 wire        rv_mem_req_ack  /* xsynthesis syn_keep=1 */;
 wire        rv_mem_we       /* xsynthesis syn_keep=1 */;
 
+// save engine <-> iosys
+wire        save_start, save_start_we;
+wire [22:0] save_start_addr;
+wire        save_busy;
+wire        save_d_valid;
+wire  [7:0] save_d_byte;
+wire        save_d_ready;
+wire        save_w_valid;
+wire  [7:0] save_w_byte;
+wire        save_w_ready;
+
+gba_save save_engine (
+    // Both engine clocks are clk16.  The RV interface this drives is mclk-timed:
+    // `sdram_gba` acknowledges a request in its cycle[3] slot and offers the read
+    // data in the *next* cycle[3], which is one 16 MHz cycle later -- its port
+    // comment says "read data available on NEXT mclk".  Running the adapter at
+    // clk67 captured that data a clk67 cycle or two after the acknowledge, i.e.
+    // before it existed.  See the note on rv_adapter below for the independent
+    // confirmation, and TCL-060 for the measurement.
+    .clk16(clk16), .clk67(clk16), .resetn(resetn),
+    .start(save_start), .start_we(save_start_we), .start_addr(save_start_addr),
+    .busy(save_busy),
+    .d_valid(save_d_valid), .d_byte(save_d_byte), .d_ready(save_d_ready),
+    .w_valid(save_w_valid), .w_byte(save_w_byte), .w_ready(save_w_ready),
+    .err(save_err),
+    .rv_addr(rv_addr), .rv_wdata(rv_wdata), .rv_wstrb(rv_wstrb),
+    .rv_valid(rv_valid), .rv_ready(rv_ready), .rv_rdata(rv_rdata)
+);
+
+rv_sdram_adapter rv_adapter (
+    // clk16, not clk67.  Two independent reasons, either of which is sufficient.
+    // Timing: the controller's RV handshake is mclk-paced, so at clk67 the read
+    // data is latched before the controller has published it.  Structure: this
+    // adapter's EEPROM port drives `eeprom_wr`/`eeprom_addr`/`eeprom_wdata`,
+    // which land on `mem_eeprom`'s B port -- and that memory is clocked by
+    // clk16, because `gba_memory` runs on clk16 and passes its own clock down
+    // (`gba_memory.sv`: `.clkb(clk)`).  A one-clk67-cycle write pulse (15 ns)
+    // against a clk16 sampling window (60 ns) is simply missed, so at clk67 the
+    // EEPROM path could not have worked at all.
+    .clk(clk16), .resetn(resetn), .config_backup_type(config_backup_type),
+    .rv_valid(rv_valid), .rv_addr(rv_addr), .rv_wdata(rv_wdata),
+    .rv_wstrb(rv_wstrb), .rv_ready(rv_ready), .rv_rdata(rv_rdata),
+    .eeprom_rd(eeprom_rd), .eeprom_wr(eeprom_wr), .eeprom_addr(eeprom_addr),
+    .eeprom_rdata(eeprom_rdata), .eeprom_wdata(eeprom_wdata),
+    .mem_addr(rv_mem_addr), .mem_req(rv_mem_req), .mem_ds(rv_mem_ds),
+    .mem_din(rv_mem_din), .mem_we(rv_mem_we),
+    .mem_req_ack(rv_mem_req_ack), .mem_dout(rv_mem_dout)
+);
+
 // EEPROM accesses
 wire        eeprom_rd, eeprom_wr;
 wire [12:0] eeprom_addr;
 wire  [7:0] eeprom_rdata, eeprom_wdata;
 
 wire        sdram_busy;
-wire  [2:0] config_backup_type;
 wire        backup_written;
 
 wire [16:0] dma_eepromcount;
@@ -2161,6 +2218,12 @@ iosys_bl616 #(.CORE_ID(3), .COLOR_LOGO(15'b01111_01100_10101), .FREQ(16_650_000)
 `else
     .rom_loading(loading), .rom_do(loader_do), .rom_do_valid(loader_do_valid), 
 `endif
+
+    .save_start(save_start), .save_start_we(save_start_we),
+    .save_start_addr(save_start_addr), .save_busy(save_busy),
+    .save_d_valid(save_d_valid), .save_d_byte(save_d_byte), .save_d_ready(save_d_ready),
+    .save_w_valid(save_w_valid), .save_w_byte(save_w_byte), .save_w_ready(save_w_ready),
+    .save_err(save_err),
 
     .uart_tx(UART_TXD), .uart_rx(UART_RXD)
 );

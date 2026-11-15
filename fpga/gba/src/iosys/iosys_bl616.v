@@ -34,6 +34,22 @@ module iosys_bl616 #(
     output reg [7:0] rom_do,        // first 64 bytes are snes header + 32 bytes after snes header 
     output reg rom_do_valid,        // strobe for rom_do
 
+    // Save persistence (see fpga/gba/src/memory/gba_save.v).  One request moves
+    // 128 bytes; the address is a byte address in the window the save engine
+    // understands.  Read commands are answered with a run of data frames, write
+    // commands carry their own data and are answered with one acknowledgement.
+    output reg         save_start,
+    output reg         save_start_we,
+    output reg  [22:0] save_start_addr,
+    input  wire        save_busy,
+    input  wire        save_d_valid,
+    input  wire [7:0]  save_d_byte,
+    output reg         save_d_ready,
+    output wire        save_w_valid,
+    output wire [7:0]  save_w_byte,
+    input  wire        save_w_ready,
+    input  wire        save_err,     // sticky: a restore byte had nowhere to go
+
     // PCXT management interface
     output reg [15:0] mgmt_address,
     output reg        mgmt_read,
@@ -143,6 +159,45 @@ reg [7:0] response_type;
 reg response_req;
 reg response_ack;
 
+// Save persistence.  `save_addr` accumulates the 24-bit address over the
+// command's first three parameter bytes; `save_tx_pending` is what the transmit
+// side waits on, so a response is only started once the whole command arrived.
+// `save_started` records whether the engine actually took the request: it is
+// latched from `~save_busy` at the moment the start is pulsed, which is exactly
+// the condition the engine accepts on.  A request that could not be taken is
+// reported rather than waited on, and its data bytes are dropped instead of
+// being left in the pipe for the next transfer to inherit.
+reg  [22:0] save_addr;
+reg         save_tx_we;
+reg         save_started;
+
+// `save_tx_pending` and `save_d_ready` are owned by the transmit process alone.
+// The receive process used to write them too, which made two always blocks drive
+// one register -- the fault class BRD-064 records, where synth_gowin resolves a
+// conflict arbitrarily and the gate at step 1a refuses the build.  The receive
+// side now signals completion by toggling `save_req_tog`, which only it writes,
+// and the transmit side latches that into `save_tx_pending`, which only it
+// writes.  Both live in clk16, so the toggle needs no synchroniser.
+reg         save_tx_pending;
+reg         save_req_tog;
+reg         save_req_ack;
+
+// The restore stream is combinational rather than a registered pulse: a byte is
+// offered on exactly the cycle the receiver delivers it, so the FIFO in the
+// engine either takes it or the UART's own backpressure path is irrelevant.
+// Registering it would put the write one cycle after the check, which is the
+// mistake that lost 39 of 128 bytes in the dump direction during development.
+//
+// The acceptance test is combinational for the same reason and in the same
+// place: `save_started` is latched on the cycle the *first* data byte arrives,
+// so reading it there would test the previous command's outcome and drop that
+// byte. At that one byte the live `~save_busy` is the same condition.
+wire save_accepting = (data_cnt == 16'd3) ? ~save_busy : save_started;
+assign save_w_byte  = rx_data;
+assign save_w_valid = rx_valid & (recv_state == RECV_PARAM) &
+                      (cmd_reg == 8'h0f) & (data_cnt >= 16'd3) &
+                      save_accepting & save_w_ready;
+
 // mgmt_* multiplex
 reg mgmt_rx;
 reg [15:0] mgmt_address_rx;
@@ -176,6 +231,13 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x0e addr[23:0]            read 128 bytes of save memory at addr (response type 0x10)
+// 0x0f addr[23:0] <data>     write 128 bytes of save memory at addr (response type 0x11)
+//
+// The save pair is a strict request/response exchange: the host asks for one
+// 128-byte chunk at a time and waits for the answer, so nothing has to be
+// paced, buffered or retried in flight.  A dump of the largest save a GBA
+// cartridge can carry -- 128 KB of flash -- is 1024 exchanges.
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -183,6 +245,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x03 joy1[15:0] joy2[15:0] every 20ms, send DS2/SNES joypad state to BL616
 // 0x04 lba[15:0] <data_512>  write a sector to disk
 // 0x05 lba[15:0]             read a sector from disk (followed by command 0x0a)
+// 0x10 addr[23:0] <data_128> 128 bytes of save memory
+// 0x11 addr[23:0] status[7:0] save write accepted (status 0)
 
 // UART RX: command processing
 always @(posedge clk) begin
@@ -200,6 +264,13 @@ always @(posedge clk) begin
         we <= 0;
         cursor_x <= 0;
         cursor_y <= 0;
+        save_addr <= 23'd0;
+        save_tx_we <= 0;
+        save_started <= 0;
+        save_start <= 0;
+        save_start_we <= 0;
+        save_start_addr <= 23'd0;
+        save_req_tog <= 0;
     end else begin
         rom_do_valid <= 0;
         we <= 0;
@@ -207,6 +278,7 @@ always @(posedge clk) begin
         fdd_read_finish <= 0;
         mgmt_rx <= 0;
         kbd_data_valid <= 0;
+        save_start <= 0;
 
         case (recv_state)
 
@@ -243,8 +315,16 @@ always @(posedge clk) begin
                 data_cnt <= data_cnt + 1;
                 // e.g. set_overlay x[7:0], the 1st param byte is the last 
                 //      (data_cnt == 0, len_reg == 2)
-                if (data_cnt + 2 == len_reg)
+                if (data_cnt + 2 == len_reg) begin
                     recv_state <= RECV_IDLE;
+                    // A save write is answered once its last byte is in, not
+                    // when the first one is: the acknowledgement then doubles as
+                    // proof that the engine has drained the whole chunk.
+                    if (cmd_reg == 8'h0f && data_cnt >= 16'd3) begin
+                        save_tx_we  <= 1'b1;
+                        save_req_tog <= ~save_req_tog;
+                    end
+                end
                 
                 case (cmd_reg)
                     3: begin
@@ -311,6 +391,34 @@ always @(posedge clk) begin
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
                     end
+                    8'h0e: case (data_cnt)          // read 128 bytes of save memory
+                        0: save_addr[22:16] <= rx_data;
+                        1: save_addr[15:8]  <= rx_data;
+                        2: begin
+                            save_addr[7:0] <= rx_data;
+                            save_start_addr <= {save_addr[22:8], rx_data};
+                            save_start_we   <= 1'b0;
+                            save_start      <= ~save_busy;
+                            save_started    <= ~save_busy;
+                            save_tx_we      <= 1'b0;
+                            save_req_tog    <= ~save_req_tog;
+                        end
+                        default: ;
+                    endcase
+                    8'h0f: case (data_cnt)          // write 128 bytes of save memory
+                        0: save_addr[22:16] <= rx_data;
+                        1: save_addr[15:8]  <= rx_data;
+                        2: save_addr[7:0]   <= rx_data;
+                        3: begin
+                            // first data byte: hand the address to the engine, which
+                            // then drains the FIFO as the rest of the frame arrives
+                            save_start_addr <= save_addr;
+                            save_start_we   <= 1'b1;
+                            save_start      <= ~save_busy;
+                            save_started    <= ~save_busy;
+                        end
+                        default: ;
+                    endcase
                     default: begin
                         // unknown command: consume all data and return
                     end
@@ -348,8 +456,16 @@ localparam SEND_FDD_READ = 5;
 localparam SEND_HEADER = 6;
 localparam SEND_DONE = 7;
 
-reg [2:0] send_state, send_state_next;
-reg [$clog2(STR_LEN+1)-1:0] send_idx;
+// Save responses.  These are numbered from 0x10 rather than continuing 6 and 7
+// because the response type is the state number itself (see SEND_HEADER), and 6
+// and 7 are already SEND_HEADER and SEND_DONE.
+localparam SEND_SAVE_DATA = 8'h10;  // 3 address bytes + 128 data bytes
+localparam SEND_SAVE_ACK  = 8'h11;  // 3 address bytes + status byte
+
+reg [4:0] send_state, send_state_next;
+reg [7:0] send_idx;
+// Empty transmit slots tolerated inside one save data frame; see SEND_SAVE_DATA.
+reg [12:0] save_stall;
 localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
 reg [15:0] joy1_reg;
@@ -361,11 +477,38 @@ always @(posedge clk) begin
     if (!resetn) begin
         joy_timer <= 0;
         send_state <= 0;
+        save_stall <= 0;
+        save_tx_pending <= 0;
+        save_req_ack <= 0;
+        save_d_ready <= 0;
     end else begin
         tx_valid <= 0;
         mgmt_read <= 0;
         fdd_read_start <= 0;
         fdd_write_finish <= 0;
+        // Take a dump byte only when nothing is queued and nothing is in
+        // flight.  A frame cut short leaves a byte in the pipe, and it would
+        // arrive as the first data byte of the next frame -- but draining too
+        // eagerly is far worse, because the popped byte is discarded rather than
+        // transmitted.
+        //
+        // Two versions of this line were wrong on hardware.  "Whenever not
+        // sending data" was high through SEND_HEADER, so it consumed the
+        // engine's 128 bytes and threw them away before SEND_SAVE_DATA ran; the
+        // frame stalled, was cut short, and the host reported the core stopped
+        // answering at offset 0.  Gating on the idle state alone still left a
+        // window, because the receive side sets `save_req_tog` the cycle it
+        // parses the command while this block needs one more cycle to notice.
+        save_d_ready <= (send_state == SEND_IDLE) && !save_tx_pending &&
+                        (save_req_tog == save_req_ack);
+
+        // Latch a completed save command from the receive side.  One cycle
+        // later than the old shared-register version and in the same domain, so
+        // it costs nothing and removes the second driver.
+        if (save_req_tog != save_req_ack) begin
+            save_req_ack    <= save_req_tog;
+            save_tx_pending <= 1'b1;
+        end
         
         // Joypad state transmission logic
         joy_timer <= joy_timer == 0 ? 0 : joy_timer - 1;
@@ -401,6 +544,19 @@ always @(posedge clk) begin
                         send_state <= SEND_HEADER;
                         resp_frame_len <= 2;
                     end
+                end else if (save_tx_pending && (save_tx_we == 1'b0 || save_busy == 1'b0)) begin
+                    // A read starts as soon as the engine has anything; a write
+                    // is acknowledged only once the engine has finished it.
+                    if (save_tx_we) begin
+                        send_state_next <= SEND_SAVE_ACK;
+                        resp_frame_len  <= 5;        // type + 3 addr + status
+                    end else begin
+                        send_state_next <= SEND_SAVE_DATA;
+                        resp_frame_len  <= 132;      // type + 3 addr + 128 data
+                    end
+                    send_state <= SEND_HEADER;
+                    save_tx_pending <= 1'b0;
+                    save_stall <= 13'd0;
                 end
             end
 
@@ -504,6 +660,69 @@ always @(posedge clk) begin
             end
 
             SEND_DONE: send_state <= SEND_IDLE;     // extra state for fdd_state to transition
+
+            // Save read: 3 address bytes then 128 bytes from the engine, one per
+            // transmit slot.  A byte that has not arrived yet holds the state
+            // rather than padding or truncating the frame, so a full chunk is
+            // always 132 bytes on the wire -- unless the engine stops answering
+            // altogether, in which case the frame is cut short after `save_stall`
+            // empty transmit slots.  That bound matters: without it, an engine
+            // that never produced a byte would wedge this state machine and with
+            // it the whole link, joypad reports included.  A short frame is
+            // unambiguous to the host, which checks the length.
+            SEND_SAVE_DATA: begin
+                if (tx_ready && ~tx_valid) begin
+                    if (send_idx < 8'd3) begin
+                        case (send_idx)
+                            0: tx_data <= save_addr[22:16];
+                            1: tx_data <= save_addr[15:8];
+                            default: tx_data <= save_addr[7:0];
+                        endcase
+                        tx_valid <= 1;
+                        send_idx <= send_idx + 8'd1;
+                    end else if (save_d_valid) begin
+                        tx_data      <= save_d_byte;
+                        save_d_ready <= 1'b1;       // take it from the engine
+                        tx_valid     <= 1;
+                        send_idx     <= send_idx + 8'd1;
+                        save_stall   <= 13'd0;
+                        if (send_idx == 8'd130) begin
+                            send_state   <= SEND_DONE;
+                            response_ack <= response_req;
+                        end
+                    end else if (save_stall == 13'h1FFF) begin
+                        send_state   <= SEND_DONE;
+                        response_ack <= response_req;
+                    end else
+                        save_stall <= save_stall + 13'd1;
+                end
+            end
+
+            // Save write acknowledgement: the address echoed back plus a status
+            // byte -- 0 when the engine took the request, 1 when it was busy and
+            // the chunk was dropped.  The host refuses a non-zero status instead
+            // of recording a save it did not write.
+            SEND_SAVE_ACK: begin
+                if (tx_ready && ~tx_valid) begin
+                    case (send_idx)
+                        0: tx_data <= save_addr[22:16];
+                        1: tx_data <= save_addr[15:8];
+                        2: tx_data <= save_addr[7:0];
+                        // Status 0 only when the engine both took the request
+                        // and moved every byte.  A non-zero status makes the
+                        // host refuse the chunk rather than record a save it
+                        // did not write.
+                        default: tx_data <= (!save_started) ? 8'h01 :
+                                             (save_err)     ? 8'h02 : 8'h00;
+                    endcase
+                    tx_valid <= 1;
+                    send_idx <= send_idx + 8'd1;
+                    if (send_idx == 8'd3) begin
+                        send_state   <= SEND_DONE;
+                        response_ack <= response_req;
+                    end
+                end
+            end
         endcase
     end
 end

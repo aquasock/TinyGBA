@@ -140,6 +140,7 @@ sources=(
     "$d/memory/mem_eeprom.v"
     "$d/memory/mem_iwram.v"
     "$d/memory/rv_sdram_adapter.v"
+    "$d/memory/gba_save.v"
     "$d/memory/sdram_gba.v"
 
     "$d/peripherals/controller_ds2.sv"

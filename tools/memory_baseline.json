@@ -618,9 +618,6 @@
       "mem.mem_bios": {
         "DPB": 8
       },
-      "sdram.din_latch": {
-        "RAM16SDP4": 8
-      },
       "sound.igba_sound_ch3.waveram": {
         "RAM16SDP4": 32
       },
