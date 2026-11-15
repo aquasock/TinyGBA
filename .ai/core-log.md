@@ -2432,3 +2432,33 @@ Chase Pokemon Emerald, because it is now the only cartridge of twelve that fails
 - User Test: PASS
 
 ---
+
+## 76 COMMIT Unreleased 2026-11-14T21:01:28-07:00
+
+#### Coming From:
+
+Unreleased 71a61b4
+
+#### Purpose:
+
+Fix Pokemon Emerald, the one cartridge of twelve that failed, by giving the loader the save-hardware configuration it had never performed for any cartridge.
+
+#### Outcome:
+
+Emerald now boots by itself, the sweep is twelve of twelve, and the cause was found by A/B on one image rather than by theory. BRD-080 had recorded Emerald stopping on the white field the BIOS leaves at handover and had named the absent RTC as the leading suspect, on the reasoning that Mario Kart is EEPROM-save and ran while Emerald is flash-save and reads a clock. That reasoning was wrong and the simpler explanation was right. The first test cost nothing: with the 16 MiB image already in SDRAM from `gbaload`, and knowing that changing the core's loading state does not clear SDRAM, a small `fpgapipe` client drove loader stage 3 directly and set `config_backup_type` to `FLASH1M`, without re-streaming the ROM. Emerald booted at once. That isolated the fault to the save type -- the core's `isreadonly` treats the cartridge save window at regions `0xE` and `0xF` as read-only unless the type is flash or SRAM, so with `BACKUP_NONE` every write the game made was discarded and the game blocked when it could not write its save. The operator then reported the cartridge's own message, `The internal battery has run dry. The game can be played. However, clock-based events will no longer occur.`, which states the RTC's true scope: clock-based events, not boot. Recorded as BRD-088, which names BRD-080's hypothesis as refuted rather than quietly dropping it. The fix makes `gbaload` set the type itself so the result survives a reload. While streaming, it looks for the marker string every GBA save library leaves in the image -- `FLASH1M_V`, `FLASH512_V`, `FLASH_V`, `SRAM_F_V`, `SRAM_V`, `EEPROM_V` -- and sends stage 3 with the matching type before releasing the core, so a 16 MiB load costs nothing extra. The scan searches every byte of each 1024-byte chunk and separately searches the ten-byte tail carried from the previous chunk, so a marker split across a read boundary is still found. My first version searched only a 20-byte window at the start of the chunk and reported `no save marker found` for Emerald, whose marker sits at offset 192 of its chunk; that would have looked exactly like the original fault and read as the fix having failed rather than as it not having run, so it is recorded as TCL-059 along with the rule that caught it -- simulate the scan offline against every real input before building and flashing. The prototype detection was simulated against all thirteen cartridges in the collection and found all thirteen, which also showed two things a guess would have got wrong: Castlevania and Fire Emblem use `SRAM_F_V` rather than `SRAM_V`, and `FLASH1M_V` must be matched before `FLASH_V` or Emerald is misread as 512K flash. On the board the loader now prints `gbaload: save hardware = flash1M` and Emerald boots with no manual step, recorded as BRD-089, and regression loads of Mario Kart and Metroid Fusion detected `flash512K` and `SRAM` correctly, so the change does not disturb the other types. During that regression the second of two back-to-back loads was seen to freeze part-way through its BIOS boot and then booted normally; the capture taken at the moment it was reported showed a live animating picture, so no fault is established and it is recorded as BRD-090 with the discipline rather than a diagnosis. What is now visibly absent is persistence: the core writes the save window but nothing reads it back to the card, so a save survives only until the next `gbaload`, and the RTC is still unimplemented, which the cartridge says on screen. The core-syntax audit re-read `.ai/core.md` and `.ai/core-syntax.md`, inspected the complete `.ai/` diff, confirmed `.ai/core.md` was not changed and entries 1 to 75 were not rewritten, confirmed the four new records carry unique ids and the canonical field order, and validated this entry as entry 76 with the six canonical sections, a one-sentence Purpose, prose in Outcome and Next Steps, and a count of seventy-six against the 100-entry limit.
+
+#### Next Steps:
+
+Make saves persist, because that is now the only thing standing between this core and behaving like the hardware for a player rather than only on screen: the core already writes the cartridge save window, so the work is in the loader -- read the window out to a file on the card when a cartridge is unloaded or the board is asked to, and restore it before the cartridge starts, keyed to the cartridge so two games cannot overwrite each other's save. The window is 64 KB at the region `0xE`/`0xF` mapping in `tosdram`, and GBA save types are all smaller than that, so one fixed-size file per cartridge covers every type. The RTC is the other absent capability and is worth doing as its own cycle after that, following TinyGBC's host-side model in shape but not in mechanism: TinyTang reads the DS3231 at 0x68 over I2C and hands a date to its software core through `tn_rt_set_date`, where this core needs either fabric logic speaking the cartridge's register protocol at `0x080000C4`/`C6`/`C8` or a date delivered to that logic over the loader's UART. Until either is done, Emerald's battery message is expected and must not be read as a fault. The three cosmetic artefacts from the sweep -- the Advance Wars scanline (BRD-081), the Fire Emblem flames (BRD-082) and the Castlevania pop (BRD-085) -- remain recorded fingerprints with no diagnosis and each needs an instrument rather than another observation. `tools/load_gba_rom.py` still documents the obsolete host-transfer path and should be retired or rewritten around the card workflow.
+
+#### Files Modified:
+
+- None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
