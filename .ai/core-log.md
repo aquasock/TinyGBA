@@ -2688,3 +2688,41 @@ Unchanged from entry 82 and unaffected by these corrections: the next cycle writ
 - User Test: N/A
 
 ---
+## 84 COMMIT Unreleased 2026-11-15T09:28:17-07:00
+
+#### Coming From:
+
+Unreleased 5d39131
+
+#### Purpose:
+
+Give the block RAM primitives a behavioural model so a memory wrapper can be checked by simulation, and use it to replace the EEPROM wrapper with this project's own RTL.
+
+#### Outcome:
+
+The second memory wrapper is converted and this time the substitution is proved by simulation, which is what entry 82 said was missing. `tools/sim/gowin_bram_sim.v` now models `DPB`, `SP`, `SPX9` and `DPX9B` rather than declaring them: the width-to-depth relation of a 16 Kbit block, the 64 `INIT_RAM_*` words, one-cycle read latency, `OCE` output gating, `RESET_MODE`, byte strobes taken from a 16-bit port's address bits [1:0], and `BLKSEL` compared against each instance's `BLK_SEL`. That last is the semantic the vendor's wrappers depend on and the one that made the primitive impossible to restate from reasoning: `mem_iwram` drives `BLKSEL` from `{ad[12],ad[11],ad[10]}` while pinning its instances to `BLK_SEL` 0 through 15, so the block acts only when the two agree, whereas yosys's own inference ties every `BLKSEL` to `3'b000` and never uses it. `MUX2` and `DFFRE` were modelled alongside so that a wrapper can be simulated without pulling in the whole cell library. `fpga/gba/src/memory/mem_eeprom.v` is gone, replaced by `fpga/gba/src/memory/eeprom_ram.v`, which follows the vendor's structure deliberately: four blocks, each told its identity by `BLK_SEL_n` and told the current bank by `BLKSEL` from the top address bits, port A 1 bit over 65536 addresses and port B 8 bits over 8192 as two views of the same storage, and an output multiplexer whose select is registered one cycle ahead of the data and gated by the read enables so a write does not redirect it. The `.ipc` and `.mod` descriptors went with the file. `tools/sim/tb_eeprom_equiv.sv` instantiates both wrappers side by side and compares both outputs on every clock edge over 12000 random cycles plus a directed pass over every bank, giving 24018 samples and 48036 comparisons with no mismatch, and `tools/sim/run_mem_equiv_tb.sh` runs that and then requires two deliberate defects to fail: gating the bank register on `cea` alone rather than `cea & ~wrea` produces 1603 mismatches and selecting the mux from the live address rather than the registered one produces 1872, so the test is demonstrably able to see both the latency and the gating class of fault. That gate matters more than the passing result: the first attempt at this wrapper, reverted in entry 82, had exactly the write-gating defect the first injected case reproduces. The build's census is unchanged at 66 `DPB`, 16 `SP`, 43 `DPX9B`, 125 block RAM and 66 distributed RAM, and both save testbenches still pass with their must-fail regressions rejected. `THIRD_PARTY.md` now lists fourteen Gowin files with seven in the build. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 84 was validated as the eighty-fourth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 84 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 164 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Four wrappers remain and the model now makes each of them a bounded job rather than a guess: `mem_iwram` at 16 `SP` over 8192 by 32, `fb.v` at 38 `DPX9B` over 38400 by 18, and `vram_hi` then `vram_lo` at 16 and 32 `DPB` over 8192 and 16384 by 32, the two VRAMs last because they hold 48 of the remaining `DPB` on the GPU path every cartridge draws through. Take `mem_iwram` next, but settle one thing before writing it: all sixteen of its instances are driven by the same `BLKSEL` and pinned to `BLK_SEL` values 0 through 15, so two instances share each value and the model's enable-by-match cannot be exactly what the device does -- it will make a wrapper that happens to work because the addresses never collide, rather than one that is right. Whether the model should carry a `BLK_SEL` that selects a group rather than an instance is a question about the primitive that simulation cannot answer on its own, and the honest options are to widen the model's `BLK_SEL` semantics with a comment saying it is a reading, or to convert `fb.v` first since its 38 instances span distinct groups in a way that can be checked. What must not happen is arithmetic on cell counts standing in for a simulation pass: entry 82 established that a cell census moves by hundreds of LUTs for reasons unrelated to the change. Independently, none of this work has been on hardware: `menu_ram` has still never drawn an OSD text page and `eeprom_ram` has never round-tripped a save, so a build with both and a cartridge that both prints to the OSD and writes its save would settle two conversions at once, and BRD-092's round trip is the measurement to repeat rather than to assume. The three PLL wrappers remain out of scope and unchanged.
+
+#### Files Modified:
+
+- THIRD_PARTY.md
+- fpga/gba/src/memory/eeprom_ram.v
+- fpga/gba/src/memory/gba_eeprom.sv
+- fpga/gba/src/memory/mem_eeprom.v
+- fpga/gba/src/memory/mem_eeprom.ipc
+- fpga/gba/src/memory/mem_eeprom.mod
+- tools/build_tinygba.sh
+- tools/sim/gowin_bram_sim.v
+- tools/sim/run_mem_equiv_tb.sh
+- tools/sim/tb_eeprom_equiv.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: NOT RUN
+- User Test: NOT RUN
+
+---

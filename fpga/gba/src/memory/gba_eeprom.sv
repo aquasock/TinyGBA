@@ -69,7 +69,7 @@ assign dout = out1 ? 1'b1 : mem_dout;
 
 //`ifdef M138K
 
-mem_eeprom m_eeprom (
+eeprom_ram m_eeprom (
     .clka(clk), .cea(1'b1), .reseta(rst),
     .ada(fulladdr[15:0]), .wrea(mem_write), .ocea(1'b1),
     .douta(mem_dout), .dina(mem_din),
