@@ -3031,3 +3031,38 @@ The place to look is now narrow and named. `sdram_gba`'s CPU write path decides 
 - User Test: PASS
 
 ---
+## 94 COMMIT Unreleased 2026-11-15T15:43:21-07:00
+
+#### Coming From:
+
+Unreleased 199ab1d
+
+#### Purpose:
+
+Record the probe-tooling work committed in 199ab1d, which entry 93 did not cover, and correct an inaccuracy in the record it introduced.
+
+#### Outcome:
+
+Two defects in how this project builds the probe ROMs it draws conclusions from were found and fixed, and both were found the hard way.
+
+The first is that the binary behind two board records had no build recipe. `build/test/saveprobe.gba` is the image that produced BRD-101 and BRD-103, and reproducing it from `tools/roms/saveprobe.s` took three guesses -- the pad length, the header complement, and whether the assembler target mattered -- with the first two producing a file differing at byte 0xBD. `tools/make_probe_bin.py` now assembles a `.s` into a padded image, asserts the fixed 0x96 at 0xB2 and computes the header complement, and it reproduces that local file byte for byte. The correction this entry exists to make is that the earlier text called that file "committed"; it was never committed, because `build/` is gitignored from line 1 of `.gitignore` and no `.gba` is tracked anywhere in the tree. So the check is against a scratch artifact that happens to be the one the board results came from, which is a real but weaker provenance than the record claimed, and TCL-080 now says so rather than leaving the stronger claim standing (TCL-080).
+
+The second is more dangerous and is the reason the tooling is worth a commit of its own. The GNU assembler accepts some instructions it only warns about and encodes them anyway: `mul r8, r9, r8` has Rd equal to Rm, which ARM7TDMI leaves UNPREDICTABLE, and `as` assembled it with the message `Rd and Rm should be different in mul` and exit status zero. The probe built from it drew nine status squares and nine bit strips in exactly the right places, in exactly the right colours, and reported garbage values for stores that a one-case ROM wrote and read back correctly. That is the worst shape a measurement fault can take: not a crash, not an empty screen, but a plausible instrument reporting a failing machine. `make_probe_bin.py` now assembles with `--fatal-warnings`, so this class of mistake stops the build. One limit is recorded with the finding: `tools/roms/savewprobe.s`, the nine-case width and lane probe written during this work, assembles cleanly under the new rule and is still wrong -- it reports red for stores to EWRAM that a one-case ROM in `saveprobe.s`'s idiom reports green for -- so it is committed marked NOT VALIDATED, it has not been run on the board, and no result has been taken from it. The banner in that file records what was ruled out so the next pass does not repeat it: the addressing (the literal pool was read out of the built image byte by byte and holds `0x020100`, `0x020101` and so on), the store and load encodings (disassembled and correct), the `mul` fault (fixed, and the result did not change), and the VRAM clear (removed, and the result did not change). What remains different between the working one-case ROM and the failing nine-case one is the `status` call and the sequence of cases, which is where the next pass should look. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 94 was validated as the ninety-fourth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 94 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 183 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary. A discipline fault is also recorded: TCL-080 was appended in 199ab1d without a log entry of its own, which is what this entry repairs, and it should not have taken the operator asking for a commit to surface it.
+
+#### Next Steps:
+
+Nothing on the machine changes from this. The place to look for the dropped SRAM store remains `sdram_gba`'s CPU write path, since BRD-103 exonerated `isreadonly()`, and the cheapest instrument for that is a probe whose results can be trusted. The first task is therefore to finish `savewprobe.s`: reduce it to the one-case shape that is known to work, confirm green, then add cases back one at a time until it breaks, which localises the fault in the probe in a handful of four-kilobyte builds rather than a synthesis run. Only then is a width-and-lane result worth taking to the board, and only after that does the twenty-minute place-and-route cycle on the controller make sense. Two smaller things follow from this entry. The `gba_memory` single-byte-lane behaviour for the whole `0x0E` window is a real defect for halfword and word stores and should be fixed on its own merits, with the note that it cannot explain the byte-store failure being chased. And if probe binaries are going to keep being the evidence for board claims, the question of whether a specific probe image should be tracked in the repository -- small, and the thing that makes a result reproducible later -- is one for the operator rather than for another silent decision.
+
+#### Files Modified:
+
+- tools/make_probe_bin.py
+- tools/roms/savewprobe.s
+- .ai/core-reference.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---
