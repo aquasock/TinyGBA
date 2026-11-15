@@ -2834,3 +2834,35 @@ Two wrappers remain and they are the pair to do together: `vram_lo` at 16384 by 
 - User Test: NOT RUN
 
 ---
+## 88 COMMIT Unreleased 2026-11-15T13:04:51-07:00
+
+#### Coming From:
+
+Unreleased 8c22d0b
+
+#### Purpose:
+
+Close the placement-gate gap that entry 87 called overdue, after establishing what the gap actually was rather than acting on the earlier diagnosis of it.
+
+#### Outcome:
+
+Neither placement gate was gating the configuration this project ships, and the earlier diagnosis of why was partly wrong. Both gates key on a configuration name derived from the `-DTINYGBA_*` defines; a production build defines none of them, so its key is `default`, and neither baseline file had a `default` entry -- the memory census held `TINYGBA_FETCHTRACE+TINYGBA_STALLTRACE` and `TINYGBA_OVERLAY_OFF`, and the parity baseline held `TINYGBA_OVERLAY_OFF` and `TINYGBA_STATUS_TEST`. Every production image this project has deployed was therefore never checked by either. TCL-070 had recorded this as an `iosys` coverage gap in the census tool, and that was wrong: the tool covers `iosys` correctly and finds `iosys.disp.menu_mem.u_menu` in a production netlist, and the reason no `iosys` path appeared was simply that the baseline being compared against had no production entry at all (TCL-074). The two gates also disagreed about what a missing baseline means, which is what made the gap silent: `synth_parity` returns 2 and the build prints `(no baseline for this configuration)` and continues, while `memory_census --check` returned 0, indistinguishable from a pass. Three baselines were recorded -- `default` at 12479 flops and 149 block RAM with a 124-array census, `TINYGBA_OVERLAY_OFF` corrected from 11471 flops and 156 block RAM to 12417 and 148, and `TINYGBA_STATUS_TEST` corrected from 9100 to 10004 flops -- and the staleness was worth finding on its own: `STATUS_TEST` had been passing at `+904 flops (+9.9%)` against a ten per cent budget, one tenth of a point from failing on changes that were entirely deliberate. `memory_census.py` now returns 2 for a missing baseline under `--check`, matching the parity gate's convention, and the build handles exit 2 as an informational warning exactly as it already did for gate 1b, with 1 still a failure. A production build now reports `change +0 flops` and `census matches the baseline for 'default'`, where before it was invisible to both, and an injected one-entry baseline change still returns 1 with a DIFFERS report, so the gate is live rather than merely present. The build's own comment had claimed that an ungated configuration was "reported and skipped rather than silently passing", which was not true and is now corrected to describe what happens and why diagnostics are exempt. Diagnostic configurations are deliberately still ungated, since there are twenty such defines and most are used once by hand; that is now stated in the warning and distinguishable by exit code rather than implied by a pass. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 88 was validated as the eighty-eighth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 88 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 173 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+The two VRAMs are the remaining conversions and are the same job: `vram_lo` at 16384 by 32 in 32 `DPB` and `vram_hi` at 8192 by 32 in 16 `DPB`, both with byte enables and both already carrying a generic behavioural counterpart under `ifdef VERILATOR`. Both are 32-bit like `iwram_ram`, so the halfword split and the strobe handling can follow that conversion, but both have more than eight banks -- 16 and 32 -- so the `BLK_SEL` width problem TCL-073 records applies to each and must be read from its own wiring rather than assumed from `iwram_ram`'s indexed scheme. Each needs its own testbench in the established shape with at least two injected defects, one of which should be the `BLK_SEL` width failure, and the hardware check is a retail cartridge and a correct full-colour frame rather than only the memory suite, since the VRAMs are 48 of the remaining `DPB` on the GPU path. The gate work in this cycle makes that safer than it would have been: a VRAM change now has a production baseline to move, so an unintended placement change in the shipped configuration will be caught, which it would not have been yesterday. Two things remain open and unchanged. The three PLL wrappers are out of scope and unbuilt copies of two of them sit in an unused `plla/` directory. And reading Gowin's EULA would still settle whether any of the wrapper conversion is required for distribution rather than merely desirable -- nothing in this cycle bears on that, and the persistence question is likewise untouched, since BRD-094's finding that the store decays rather than clears stands.
+
+#### Files Modified:
+
+- tools/build_tinygba.sh
+- tools/memory_baseline.json
+- tools/memory_census.py
+- tools/synth_baseline.json
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---

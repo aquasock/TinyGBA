@@ -741,6 +741,733 @@
       "video.u_fb.bank_i[9].u_lo": {
         "DPX9B": 1
       }
+    },
+    "TINYGBA_STATUS_TEST": {
+      "gpu.drawer.ivram_hi.dpb_inst_0": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_1": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_10": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_11": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_12": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_13": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_14": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_15": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_2": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_3": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_4": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_5": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_6": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_7": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_8": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_9": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_0": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_1": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_10": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_11": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_12": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_13": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_14": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_15": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_16": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_17": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_18": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_19": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_2": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_20": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_21": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_22": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_23": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_24": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_25": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_26": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_27": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_28": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_29": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_3": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_30": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_31": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_4": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_5": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_6": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_7": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_8": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_9": {
+        "DPB": 1
+      },
+      "gpu.drawer.oamram.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.oamram.dpb1": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_bg.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_bg.dpb1": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_oam.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_oam.dpb1": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[0].u_bank": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[1].u_bank": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[2].u_bank": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[3].u_bank": {
+        "DPB": 1
+      },
+      "mem.iwram.bank_i[0].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[0].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[1].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[1].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[2].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[2].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[3].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[3].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[4].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[4].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[5].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[5].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[6].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[6].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[7].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[7].u_lo": {
+        "SP": 1
+      },
+      "mem.loader_buf": {
+        "RAM16SDP4": 2
+      },
+      "mem.mem_bios": {
+        "DPB": 8
+      },
+      "sound.igba_sound_ch3.waveram": {
+        "RAM16SDP4": 32
+      },
+      "sound.igba_sound_dmaA.fifo": {
+        "RAM16SDP4": 8
+      },
+      "sound.igba_sound_dmaB.fifo": {
+        "RAM16SDP4": 8
+      },
+      "video.u_fb.bank_i[0].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[0].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[10].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[10].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[11].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[11].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[12].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[12].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[13].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[13].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[14].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[14].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[15].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[15].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[16].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[16].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[17].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[17].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[18].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[18].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[1].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[1].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[2].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[2].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[3].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[3].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[4].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[4].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[5].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[5].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[6].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[6].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[7].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[7].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[8].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[8].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[9].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[9].u_lo": {
+        "DPX9B": 1
+      }
+    },
+    "default": {
+      "gpu.drawer.ivram_hi.dpb_inst_0": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_1": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_10": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_11": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_12": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_13": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_14": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_15": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_2": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_3": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_4": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_5": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_6": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_7": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_8": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_hi.dpb_inst_9": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_0": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_1": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_10": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_11": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_12": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_13": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_14": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_15": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_16": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_17": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_18": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_19": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_2": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_20": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_21": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_22": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_23": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_24": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_25": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_26": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_27": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_28": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_29": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_3": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_30": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_31": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_4": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_5": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_6": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_7": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_8": {
+        "DPB": 1
+      },
+      "gpu.drawer.ivram_lo.dpb_inst_9": {
+        "DPB": 1
+      },
+      "gpu.drawer.linebuf_bg0.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_bg1.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_bg2.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_bg3.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_obj_color.ram": {
+        "DPX9B": 1
+      },
+      "gpu.drawer.linebuf_obj_settings.ram": {
+        "RAM16SDP4": 16
+      },
+      "gpu.drawer.oamram.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.oamram.dpb1": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_bg.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_bg.dpb1": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_oam.dpb0": {
+        "DPB": 1
+      },
+      "gpu.drawer.paletteram_oam.dpb1": {
+        "DPB": 1
+      },
+      "iosys.disp.menu_mem.u_menu": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[0].u_bank": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[1].u_bank": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[2].u_bank": {
+        "DPB": 1
+      },
+      "mem.eeprom.m_eeprom.bank[3].u_bank": {
+        "DPB": 1
+      },
+      "mem.iwram.bank_i[0].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[0].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[1].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[1].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[2].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[2].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[3].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[3].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[4].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[4].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[5].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[5].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[6].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[6].u_lo": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[7].u_hi": {
+        "SP": 1
+      },
+      "mem.iwram.bank_i[7].u_lo": {
+        "SP": 1
+      },
+      "mem.loader_buf": {
+        "RAM16SDP4": 2
+      },
+      "mem.mem_bios": {
+        "DPB": 8
+      },
+      "sound.igba_sound_ch3.waveram": {
+        "RAM16SDP4": 32
+      },
+      "sound.igba_sound_dmaA.fifo": {
+        "RAM16SDP4": 8
+      },
+      "sound.igba_sound_dmaB.fifo": {
+        "RAM16SDP4": 8
+      },
+      "video.u_fb.bank_i[0].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[0].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[10].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[10].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[11].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[11].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[12].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[12].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[13].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[13].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[14].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[14].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[15].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[15].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[16].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[16].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[17].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[17].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[18].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[18].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[1].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[1].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[2].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[2].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[3].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[3].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[4].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[4].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[5].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[5].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[6].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[6].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[7].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[7].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[8].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[8].u_lo": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[9].u_hi": {
+        "DPX9B": 1
+      },
+      "video.u_fb.bank_i[9].u_lo": {
+        "DPX9B": 1
+      }
     }
   },
   "note": "recorded by tools/memory_census.py; a change here is a deliberate change of memory placement"

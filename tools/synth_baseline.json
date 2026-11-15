@@ -1,10 +1,14 @@
 {
   "TINYGBA_OVERLAY_OFF": {
-    "bram": 156,
-    "flops": 11471
+    "bram": 148,
+    "flops": 12417
   },
   "TINYGBA_STATUS_TEST": {
     "bram": 132,
-    "flops": 9100
+    "flops": 10004
+  },
+  "default": {
+    "bram": 149,
+    "flops": 12479
   }
 }

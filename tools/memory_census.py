@@ -141,9 +141,17 @@ def main(argv):
         return 0
 
     if key not in base:
-        print(f"no baseline for {key!r}; recording one is a deliberate act:")
-        print(f"  tools/memory_census.py {args.netlist} --key {key} --update-baseline")
-        return 0
+        print(f"no baseline for {key!r}, so this configuration is NOT GATED:")
+        print(f"  record one with: tools/memory_census.py {args.netlist} "
+              f"--key {key} --update-baseline")
+        # Exit 2 matches tools/synth_parity.py, whose own missing-baseline path
+        # returns 2 and which build_tinygba.sh treats as informational.  It used
+        # to return 0 here, indistinguishable from a pass, and the consequence
+        # was that the production configuration ran with no baseline in either
+        # gate for months while both reported success (TCL-074).  A caller that
+        # wants to gate on this can distinguish 1 from 2; a caller that does not
+        # still sees the warning.
+        return 2 if args.check else 0
 
     was, now = base[key], current
     if was == now:

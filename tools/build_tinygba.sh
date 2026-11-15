@@ -393,16 +393,21 @@ fi
 # then a baseline update, which is a visible act with a diff.
 #
 # Keyed on $cfg like the register-parity gate, so a diagnostic configuration
-# does not have to match the production mapping.  A configuration with no
-# baseline is reported and skipped rather than silently passing.
+# does not have to match the production mapping.  Exit 2 means "no baseline for
+# this configuration", handled exactly as gate 1b handles it: reported loudly,
+# not fatal, because there are twenty diagnostic defines and most are used once.
+# That is the warning that went unnoticed -- the production configuration had no
+# baseline in either gate and both reported success (TCL-074), so the deployable
+# configurations are now recorded and a missing one is impossible to read as a
+# pass.
 echo "=== 1d. memory-placement gate (config: $cfg) ==="
 census=0
 "$suite/py3bin/python3" "$root/tools/memory_census.py" "$out/tinygba.json" \
     --check --key "$cfg" >"$out/memory-census.log" 2>&1 || census=$?
 sed 's/^/  /' "$out/memory-census.log"
 if [[ $census -eq 2 ]]; then
-    echo "memory-placement gate could not read the netlist; see $out/memory-census.log" >&2
-    exit 1
+    echo "  (no baseline for this configuration, so memory placement is NOT gated here;"
+    echo "   record one with: tools/memory_census.py $out/tinygba.json --key $cfg --update-baseline)"
 elif [[ $census -ne 0 ]]; then
     echo "memory placement changed for $cfg; if that was intended, record it:" >&2
     echo "  tools/memory_census.py $out/tinygba.json --key $cfg --update-baseline" >&2
