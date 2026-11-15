@@ -2967,3 +2967,32 @@ Nothing in the code follows from this, which is the useful part: the conversion 
 - User Test: N/A
 
 ---
+## 92 COMMIT Unreleased 2026-11-15T14:27:47-07:00
+
+#### Coming From:
+
+Unreleased c4f2df4
+
+#### Purpose:
+
+Find out whether a cartridge can actually write its own save on the board, which every earlier save record tested only through the host's transport path and none tested through the path a game uses.
+
+#### Outcome:
+
+It cannot, and that is the finding. A new probe, `tools/roms/saveprobe.s`, writes a known pattern through the cartridge SRAM window at `0x0E000000` as a game would and paints two squares: whether the canonical pattern was already present when it started, and whether writing a *different* pattern and reading it back succeeded. Under mGBA 0.10.5 both squares are green with mGBA's own `.sav` in place, so the probe is sound. On the board, with `gbaload` reporting `save hardware = SRAM` and `save restored, 32768 bytes of SRAM`, the first square is green and the second is red: the CPU reads the SRAM window correctly, finding the 32768-byte pattern the host had just restored, but a pattern the CPU wrote itself is not there when it reads it back. Writes to the cartridge SRAM window are silently dropped while reads from it work (BRD-101). That is the first evidence that separates a game-written save from transport, because BRD-092 proved the host could move bytes through the RISC-V port, which never consults `gba_memory`'s write gate at all, and nothing had tested the path a cartridge uses. The consequence is larger than one probe: no cartridge with an SRAM save has ever been able to save on this board, and the four SRAM titles in the sweep -- Metroid Fusion, Metroid Zero Mission, Castlevania and Fire Emblem -- boot and play while silently failing to persist, which is why it went unnoticed, since a dropped SRAM write is invisible unless something reads it back. The leading hypothesis, not yet confirmed, is `gba_memory.sv`'s `isreadonly()` gate: for regions `0x0E` and `0x0F` it forces `sdram_wr = 0` and `sdram_rd = 1` unless `config_backup_type` is flash512K, flash1M or SRAM, so a wrong `config_backup_type` would turn every CPU write into a read that returns the old contents -- exactly what the probe sees, and invisible to the host restore path for the same reason. The alternative is that the write reaches SDRAM and the read returns a buffered value, which the same evidence also fits. One diagnostic build forcing `isreadonly(0x0E)` false would separate them. The probe itself had a defect found the hard way and fixed before either result was recorded: its first version tested the write by writing the canonical pattern and reading it back, which goes green whenever the window already holds that pattern -- and on the second board run, after a restore, both squares went green for exactly that reason. It now writes a pattern differing by one, and both the mGBA pass and the board failure were re-taken with that version. Two operational notes are recorded because they cost time: `pkill -f mgba-qt` matches the invoker's own command line and kills the calling shell, so processes are stopped with `pkill -x`; and an early capture grabbed the whole X root window rather than mGBA's window, which was the operator's desktop and not this work's to read, so captures are now taken with `import -window <id>` against the mGBA window only. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 92 was validated as the ninety-second entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 92 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 179 records with no duplicate ids, every record in canonical field order, and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Settle the hypothesis before anything else, because everything about battery saves depends on it: build one diagnostic image on a scratch tree with `isreadonly(0x0E)` forced false, load `saveprobe`, and read the two squares. If the second turns green the write gate was the fault and the fix is to establish why `config_backup_type` is not `BACKUP_SRAM` at the moment the CPU runs -- the loader sends stage 3 and `gbaload` prints the type it sent, so the question is whether the core received it, and the way to answer that is to have the probe report `config_backup_type` through the status band or an MMIO word rather than by inference. If it stays red, the fault is downstream in the SDRAM write path and the place to look is `sdram_gba`'s byte-write handling for the cart-RAM area, where `hi = !cpu_be[1:0]` and `cpu_ready <= cpu_be[3:2] == 0 | cpu_be[1:0] == 0` decide how a single-lane byte write is issued. Either outcome should be recorded as the next entry, and once a CPU write lands, the full chain becomes testable in the order it should be: probe writes, `gbasave`, power cycle, `gbaload` with the `.sav`, probe reports the pattern came back -- and unlike the EEPROM that BRD-094 found decays rather than clears, SRAM lives in SDRAM and a power cycle should genuinely clear it, so a real negative control is available here for the first time. Only after that is automatic capture worth building, since an auto-save that dumps a window the CPU cannot write would preserve nothing. Nothing about the six converted memory wrappers is implicated: the diagnostic suite still passes every region, and this is the CPU write gate rather than the storage.
+
+#### Files Modified:
+
+- tools/roms/saveprobe.s
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
