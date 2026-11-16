@@ -3097,3 +3097,37 @@ The first thing to do is the experiment that was stopped: run the probe under `-
 - User Test: N/A
 
 ---
+
+## 96 COMMIT Unreleased 2026-11-15T22:25:19-07:00
+
+#### Coming From:
+
+Unreleased 64c42ce
+
+#### Purpose:
+
+Find why a CPU store to the cartridge SRAM window is lost, by getting the simulation to reproduce the board's red square and then tracing the store to the pins.
+
+#### Outcome:
+
+The simulation now reproduces the board's failure and the first cause is found and fixed, but the fault is not yet cleared. The reproduction is the cycle's main result: with `-DTINYGBA_SDRAM_RTL` and the retail BIOS, `saveprobe` runs to 155,443,407 cartridge fetch cycles with 63,261,975 halted (25.3%), renders exactly 512 nonzero pixels, and paints BOTH squares red `(252,0,0)`. Square 0 red is correct behaviour in the model because no save is planted, and square 1 red is `verify_alt` reporting mismatches -- the same signature BRD-103 recorded on hardware. That settles the fork entry 95 left open: the fault is in RTL and the model is a usable instrument for it. Tracing the store to the pin-level part (`fpga/gba/diag/sdram_model.v`, whose WR/RD command decode already existed but had no way to be turned on selectively) showed the store never arriving as an SDRAM write at all: the run issued 4,096 WR commands, all from the loader's fill, while `sdram_gba`'s flash path consumed the probe's own data 65,480 times -- `flash write: 0000 1 08`, `0001 2 27`, `0002 4 46`, `0003 8 65`, which is the probe's alternative pattern `(i*31+8) & 0xFF` byte for byte across its two 32 KiB fills. The cause is a truncated signal, not a sequencer defect. `config_backup_type` is driven by `gba_memory` as a 3-bit value but was never declared in `gbatang_top.sv`, so Verilog gave it an implicit one-bit net and every consumer saw only bit 0: SRAM `3'b011` reached `sdram_gba` as `3'b001`, which is FLASH512K. `is_flash` therefore evaluated true, and because `tosdram` maps the whole cartridge-RAM window to `10'h204` the flash gate opened on every CPU store, the flash interpreter found no matching opcode at `f_addr` 0 and discarded the byte, and the store vanished while `cpu_ready` was still raised so the CPU believed it had succeeded. That is exactly the silent drop BRD-101 describes. The truncation is visible in the generated model as `bufp->chgBit(...)` against a 3-bit `chgCData` port, and was then confirmed at runtime rather than by inspection: a temporary `FLASHGATE` print in the broken build reports `cfg=1 is_flash=1` while the loader's own line reports `backup type=  3`. The fix is one declaration, `wire [2:0] config_backup_type;` in `gbatang_top.sv`; after it the same run issues zero flash writes against 65,480 before, and the one-bit trace line is gone from the generated model. The probe result did not change: square 1 is still red, so a second cause remains below this one and the store still does not persist. Three instrument faults in this cycle are recorded because each produced a wrong reading first. A controller binary 11 minutes older than `gba_memory.sv` was run and produced 61,853 flash writes that I briefly read as a design alarm; rebuilt from HEAD the same run was correct, which is the stale-binary trap again. I then reported zero flash writes for a run I had grepped in its first seconds, when its final count was 65,536 -- the same premature-measurement error entry 95 records. And the first selective pin trace flooded with 2.9 million `cs deasserted` lines because that print was gated on `TRACE` rather than `TRACE > 1`, hiding the writes it existed to reveal; the model now takes 0 silent, 1 writes only, 2 every command. A separate observation is recorded without conclusion: the behavioural-array build, rebuilt from the same tree, no longer boots any cartridge (0 cartridge fetches, 87.4 to 93.5% halted, white screen) while the controller build boots normally, which inverts the historical relationship between those two configurations and makes the array unusable as a control until it is explained. Two files left over from the previous session, `tools/roms/saveprobe_iw.s` and `tools/save/pipe_save_dump.py`, remain untracked and unvalidated; `gba.aud`, the simulation's audio dump, is now ignored as the generated artifact it is. No bitstream was built and nothing was deployed, so no hardware result exists for this cycle. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 96 was validated as the ninety-sixth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 96 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 186 records with no duplicate ids, every record in canonical field order and every status inside the three-value vocabulary.
+
+#### Next Steps:
+
+Find the second cause, because the truncation fix alone does not make the store persist: square 1 is still red with zero flash writes, so the request now goes somewhere else and is still lost. The instrument for it already exists and should be used before any new trace is written -- rebuild with `-DTINYGBA_SDRAM_RTL -DTINYGBA_SDRAM_PINTRACE` and confirm whether the probe's byte stores now appear as WR commands at the pins with the right DQM and address, which the run that would have answered it was stopped before reaching. If they appear, the fault is in the read-back or in `gba_memory`'s assembly of `cpu_rdata`; if they still do not, it is still in `sdram_gba`'s CPU write path, and BRD-103's note that `gba_memory` forces a single byte lane across the whole `0x0E` window -- `sdram_be = 4'b1 << ram_addr[1:0]` whenever `ram_addr[27:25] == 3'b111` -- is the next thing to fix on its own merits. Do not re-derive the truncation or re-run the flash path; both are measured and the runtime print is in the tree. The width fix must be treated as unverified on hardware: it changes what `sdram_gba` receives for every backup type, and the next build for the board needs an explicit check that `backup type=  3` reaches the controller as 3 rather than 1, because a flash-type cartridge is the configuration most likely to move under it. The array-versus-controller inversion should be settled before any future cycle relies on the array as a reference, since every pre-BRD-105 simulation result in this log that used it assumed it booted. And the four false readings this cycle produced -- a stale binary, a premature grep, a flooding trace, and an inherited assumption that the array worked -- are the same class the log already records three times; the standing rule that a trace must be shown to fire on a known-good event before its silence or its noise means anything is what would have caught all four.
+
+#### Files Modified:
+
+- .gitignore
+- fpga/gba/diag/gba_sdram_rtl.v
+- fpga/gba/diag/sdram_model.v
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/sdram_gba.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: N/A
+- User Test: N/A
+
+---

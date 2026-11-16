@@ -184,7 +184,14 @@ module gba_sdram_rtl (
     end
 `endif
 
+`ifdef TINYGBA_SDRAM_PINTRACE
+    // Write-only pin trace for the dropped-store hunt: every WR this die accepts,
+    // with its decoded word address and DQM.  Off by default so no existing image
+    // changes; pass -DTINYGBA_SDRAM_PINTRACE through TINYGBA_SIM_DEFINES.
+    snes_sdram_model #(.SIZE_WORDS(16 * 1024 * 1024), .TRACE(1)) die0 (
+`else
     snes_sdram_model #(.SIZE_WORDS(16 * 1024 * 1024)) die0 (
+`endif
         .SDRAM_DQ(SDRAM_DQ),
         .SDRAM_A(SDRAM_A),
         .SDRAM_BA(SDRAM_BA),

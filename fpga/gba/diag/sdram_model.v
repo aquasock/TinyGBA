@@ -35,6 +35,10 @@
 // is exactly the distinction the hardware probe cannot make.
 module snes_sdram_model #(
     parameter integer SIZE_WORDS = 16 * 1024 * 1024,   // 16-bit words; 32 MiB default
+    // 0 = silent, 1 = WR commands only, 2 = every command.  Writes are rare --
+    // stores and DMA only -- so level 1 is small enough to keep for a whole run,
+    // while level 2 over a full run is hundreds of millions of lines and is only
+    // useful for a short window.
     parameter         TRACE      = 0
 )(
     inout      [15:0] SDRAM_DQ,
@@ -114,7 +118,7 @@ module snes_sdram_model #(
     end
 
     always @(posedge SDRAM_nCS) begin
-        if (TRACE) $display("sdram: cs deasserted");
+        if (TRACE > 1) $display("sdram: cs deasserted");
     end
 
     always @(posedge clk) begin
@@ -134,12 +138,12 @@ module snes_sdram_model #(
                 // A[6:4] is the CAS latency; clamp to something usable.
                 cas_latency <= (SDRAM_A[6:4] == 3'd0) ? 3'd1 :
                                (SDRAM_A[6:4] > 3'd4)  ? 3'd4 : SDRAM_A[6:4];
-                if (TRACE) $display("sdram: MRS A=%04X cas=%0d", SDRAM_A, SDRAM_A[6:4]);
+                if (TRACE > 1) $display("sdram: MRS A=%04X cas=%0d", SDRAM_A, SDRAM_A[6:4]);
             end
             CMD_ACT: begin
                 row[SDRAM_BA]       <= SDRAM_A;
                 row_valid[SDRAM_BA] <= 1'b1;
-                if (TRACE) $display("sdram: ACT bank %0d row %04X", SDRAM_BA, SDRAM_A);
+                if (TRACE > 1) $display("sdram: ACT bank %0d row %04X", SDRAM_BA, SDRAM_A);
             end
             CMD_WR: begin
                 // DQM masks on write: a high bit leaves that byte alone.  This is
@@ -159,7 +163,7 @@ module snes_sdram_model #(
                 rd_pipe[0]       <= (w < SIZE_WORDS) ? mem[w] : 16'h0000;
                 dqm_pipe[0]      <= SDRAM_DQM;      // masks on read too
                 rd_valid_pipe[0] <= 1'b1;
-                if (TRACE) $display("sdram: RD  [%07X] dqm=%b -> %04X",
+                if (TRACE > 1) $display("sdram: RD  [%07X] dqm=%b -> %04X",
                                     w, SDRAM_DQM, mem[w]);
                 if (SDRAM_A[10]) row_valid[SDRAM_BA] <= 1'b0;   // auto precharge
             end

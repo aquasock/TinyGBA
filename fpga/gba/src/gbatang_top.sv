@@ -749,6 +749,16 @@ assign dbg_done      = 1'b0;
 wire [6:0]  tr_sel;
 wire [31:0] tr_word;
 wire [15:0] tr_valid;
+
+// TinyGBA: `gba_memory` drives this as a 3-bit value (0 none, 1 flash512K,
+// 2 flash1M, 3 SRAM, 4 EEPROM) and `sdram_gba` reads it to decide whether the
+// cartridge window speaks the flash protocol.  It was never declared here, so
+// Verilog gave it an IMPLICIT ONE-BIT NET and every consumer saw only bit 0:
+// SRAM `3'b011` arrived as `3'b001` (flash512K), which turned the flash command
+// path on for the whole cartridge window and swallowed every CPU store to it
+// (BRD-101..104).  Declaring the width is the fix; the truncation is invisible
+// in simulation without -Wall and warns about nothing in synthesis.
+wire [2:0]  config_backup_type;
 `ifdef TINYGBA_STALLTRACE
 // Stall-trace readout (layout v5), generated after the DMA block further down.
 wire [31:0] stl_word;

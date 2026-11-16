@@ -149,6 +149,10 @@ localparam MODE_ID          = 3'd4;
 
 localparam FLASH_BASE       = (32*1024*1024+256*1024)/4;
 
+`ifdef VERILATOR
+integer tr_flashdbg_n = 0;  // FLASHGATE print budget
+`endif
+
 // state
 reg [11:0] cycle;       // one hot encoded
 reg normal, setup, setup_ncs;
@@ -419,6 +423,18 @@ always @(posedge clk) begin
                     end
                 endcase
                 $display("flash write: %h %h %h", f_addr, cpu_be, f_din);
+`ifdef VERILATOR
+                // Why is the flash path open at all?  `config_backup_type` is
+                // printed by the loader as 3 (SRAM), for which `is_flash` above
+                // evaluates false and this block cannot run.  One print of the
+                // terms as the simulator sees them settles it instead of a
+                // fourth round of reading the expression.
+                if (tr_flashdbg_n < 8) begin
+                    $display("FLASHGATE t=%0t cfg=%0d is_flash=%b flash=%0d f_mode=%0d f_addr=%h",
+                             $time, config_backup_type, is_flash, flash, f_mode, f_addr);
+                    tr_flashdbg_n = tr_flashdbg_n + 1;
+                end
+`endif
 
                 case (flash)
                 FLASH_IDLE: begin
