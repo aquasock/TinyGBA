@@ -66,6 +66,29 @@ device=GW5AST-LV138PG484AC1/I0
 family=GW5AST-138C
 seed="${TINYGBA_SEED:-1}"
 defines="${TINYGBA_DEFINES:-}"
+
+# The retail BIOS is mandatory and is resolved here rather than left to
+# `gba_memory.sv`'s default, because that default was silently the FREE one and
+# produced bitstreams that passed every gate and drew a black screen.  Measured
+# 2026-11-16: three images built without this define were blamed on placement
+# seed for a whole cycle when the BIOS was the only thing wrong (BRD-107).  A
+# build that does not name a BIOS now stops here instead of shipping.
+#
+# The retail image is Nintendo's copyrighted work and is deliberately untracked
+# (`build/` is gitignored).  TINYGBA_BIOS_HEX, when set explicitly by the
+# caller, wins; otherwise it is taken from build/test/official_bios.hex.
+if [[ "$defines" != *TINYGBA_BIOS_HEX* ]]; then
+    bios_hex="${TINYGBA_BIOS_IMAGE:-$root/build/test/official_bios.hex}"
+    if [[ ! -f "$bios_hex" ]]; then
+        echo "no retail BIOS at $bios_hex" >&2
+        echo "  every board result this project records was taken with the retail" >&2
+        echo "  BIOS, and the free one in the tree is deleted because a build that" >&2
+        echo "  silently used it looked correct and drew a black screen (BRD-107)." >&2
+        echo "  Put the image at build/test/official_bios.hex or set TINYGBA_BIOS_IMAGE." >&2
+        exit 2
+    fi
+    defines="$defines -DTINYGBA_BIOS_HEX=\"$bios_hex\""
+fi
 # nextpnr is always allowed to finish with violations, so that it writes
 # timing.json and the routed netlist for the gate below to judge.  nextpnr must
 # not be the judge: it analyses every path as a single cycle and cannot express

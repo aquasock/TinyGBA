@@ -3160,3 +3160,37 @@ None.
 - User Test: NOT RUN
 
 ---
+## 98 COMMIT Unreleased 2026-11-16T11:07:31-07:00
+
+#### Coming From:
+
+Unreleased 6d14c9b
+
+#### Purpose:
+
+Find why three bitstreams drew a black screen, and in doing so settle whether the cartridge SRAM store still fails after the `config_backup_type` width fix.
+
+#### Outcome:
+
+The black screens were the free BIOS, and the store works. `tools/build_tinygba.sh` assembled its synthesis defines from `TINYGBA_DEFINES` alone and never set `TINYGBA_BIOS_HEX`, so `gba_memory.sv` took its `ifdef` fallback and loaded the vendored Cult-of-GBA image, which does not boot a retail cartridge. Nothing failed and nothing warned: the build compiled, all nine gates passed, the bitstream packed and loaded, and the board drew a uniform black field inside its `(43,43,43)` pillarbox. Every image that had ever booted supplied the define by hand, and the synthesis logs still show it -- `build/prod3/synth.log` and `build/sdiag3/synth.log` each contain one `-DTINYGBA_BIOS_HEX="build/test/official_bios.hex"`, while `build/wrfix_board/synth.log` and `build/nowfix/synth.log` contain none. Rather than infer, the BIOS inside each netlist was read out of the `INIT_RAM_*` parameters of the eight `DPB` cells named `mem_bios`: `prod3` and `sdiag3` share signature `a599090b2107db6d`, `wrfix_board` and `nowfix` share `5953aaf13e0e7692`, and a third synthesis passing the retail image explicitly reproduces `a599090b2107db6d` exactly (BRD-108). That refutes BRD-107's seed hypothesis outright and, with it, entry 97's claim that the store still fails on images that boot -- both booting images predated the fix, so no board image had ever carried it. Three mechanisms now make the fault impossible to repeat: `gba_memory.sv` has no fallback and fails elaboration on a `$readmemh` of a file named `gba_bios_DELETED_pass_TINYGBA_BIOS_HEX.hex`, `tools/build_tinygba.sh` resolves the retail image itself and exits 2 when it is absent, `tools/sim/build_gba_sim.sh` lost its `TINYGBA_SIM_BIOS=cultofgba` opt-out, and the free image and its git entry are deleted (TCL-083). A `$fatal` and a `` `error `` were both tried first and rejected: the project's slang build refuses `$fatal` in an initial block and does not recognise `` `error `` at all, which is why the failure is a missing-file read rather than a directive. With the mechanism in place, `build/head_retail_s1` was built at the default placement seed 1, `.bin` sha256 `83afd2c9ee0a77e106f7ea8eb754dbf46e8ac783ed694279d9935544d1840bf4`, every gate passing with `hold 0`, and its netlist confirmed to carry the retail BIOS signature before it was loaded. On the board, with a 32768-byte file of ZEROS planted as the save so that square 0 could not be satisfied by stale contents, `saveprobe` painted square 0 RED `(226,0,0)` and square 1 GREEN `(18,255,0)`: the CPU wrote its own pattern through `0x0E000000` and read all 32768 bytes back matching. Against BRD-103, which measured square 1 RED on `build/sdiag3` -- retail BIOS, same probe, `config_backup_type` still one bit -- this is a matched hardware A/B whose only functional difference is the width declaration, so the dropped store is closed and BRD-105's mechanism is confirmed on hardware (BRD-109). A later read of the window over `fpgapipe` returned the canonical pattern, which is the expected final state because the probe restores canonical as its last action, and that measurement incidentally validates `tools/save/pipe_save_dump.py`, which is committed here as the first of the two files left untracked from the previous session. Four of my own errors are recorded because each produced a wrong reading first: I captured the board fourteen seconds into an eighty-eight-second load and read the resulting black as a build fault; I tested `nowfix` without a cartridge and compared it against `prod3` with one, when `prod3` without a cartridge is black too; I read a LUT4 `INIT` parameter as though it were the BIOS block RAM and drew a conclusion from it before finding the `INIT_RAM_*` fields; and I reported a `$fatal` guard as working when the toolchain had rejected it. No RTL logic was changed: the only source change is the BIOS selection, which alters a block-RAM image and no logic. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 98 was validated as the ninety-eighth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 98 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 192 records with 192 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 177 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+The store works, so the chain entry 92 named is finally testable and is the next thing to run, in this order: have the probe write, `gbasave` the window, power cycle, `gbaload` with the `.sav`, and have the probe report the pattern came back, with the genuine negative control that SRAM in SDRAM now allows -- a power cycle without the restore should leave square 0 red where it was green. Then re-take the save measurements this defect invalidated rather than merely doubted: BRD-092's four-type round trip and BRD-094's EEPROM power-cycle result were both taken through a `config_backup_type` that reached `rv_sdram_adapter` as one bit, where `is_eeprom = config_backup_type == 4` could never be true, so neither is evidence about the EEPROM store and both need re-running on a post-fix image. `tools/roms/savewprobe.s` is still marked NOT VALIDATED and should either be finished or dropped, and `tools/roms/saveprobe_iw.s` remains untracked and unvalidated, deliberately not committed here. Two seed questions are now open but not urgent: seed 1 is shown to boot with the retail BIOS, and seed 3 failed the clock-plane gate on the current tree, so the seed-sensitivity story from earlier cycles should be treated as unmeasured rather than settled. The log is at 98 of 100 entries, so the rollover is the next cycle's housekeeping whatever it contains. Do not build without a BIOS image present, and do not treat a black screen as a placement fault until the bitstream's BIOS signature has been read.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_memory.sv
+- fpga/gba/src/memory/gba_bios_cultofgba.hex
+- tools/build_tinygba.sh
+- tools/sim/build_gba_sim.sh
+- tools/save/pipe_save_dump.py
+- README.md
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

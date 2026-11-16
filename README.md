@@ -177,7 +177,7 @@ save path; see Status):
 
 ```
 TINYGBA_BUILD_DIR=build/save_s14 TINYGBA_SEED=14 \
-TINYGBA_DEFINES='-DTINYGBA_OVERLAY_OFF -DTINYGBA_BIOS_HEX="/abs/path/official_bios.hex"' \
+TINYGBA_DEFINES='-DTINYGBA_OVERLAY_OFF' \
 tools/build_tinygba.sh
 ```
 
@@ -199,7 +199,8 @@ since 2026-11-13 was built with the default. See TCL-036.
 | `TINYGBA_STAGE` | `synth`, `pnr`, `pack` or `all` |
 | `TINYGBA_BUILD_DIR` | output directory |
 | `TINYGBA_SEED` | placement seed; the router is seed-sensitive and will fail to converge on some |
-| `TINYGBA_DEFINES` | preprocessor defines, including `-DTINYGBA_BIOS_HEX="/abs/path.hex"` to substitute a BIOS |
+| `TINYGBA_DEFINES` | preprocessor defines, e.g. `-DTINYGBA_OVERLAY_OFF`; `TINYGBA_BIOS_HEX` is added automatically |
+| `TINYGBA_BIOS_IMAGE` | path to the retail BIOS image; defaults to `build/test/official_bios.hex`. **Required** — the build fails without it, because the free-BIOS fallback produced bitstreams that passed every gate and drew a black screen (BRD-107) |
 | `TINYGBA_WIDELUT` | `1` disables the default `-nowidelut`, mapping wide muxes onto `MUX2_LUT` primitives |
 | `TINYGBA_SYNTH_EXTRA` | extra arguments for `synth_gowin`, appended after the default; for experiments |
 | `TINYGBA_FORCE_SYNTH` | `1` re-synthesises even when a cached netlist exists |

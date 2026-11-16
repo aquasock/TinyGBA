@@ -813,27 +813,40 @@ wire sel_cartram= bram_addr[27:25] == 3'b111;                    // 64KB of cart
 
 // BIOS:        0:000000 - 0:003FFF (16KB)
 //
-// The image is the open-source Cult-of-GBA BIOS vendored beside this file.  A
-// build may substitute its own by defining TINYGBA_BIOS_HEX to a quoted path:
+// TINYGBA_BIOS_HEX IS MANDATORY, and there is deliberately no fallback.
 //
 //   TINYGBA_DEFINES='-DTINYGBA_BIOS_HEX="/abs/path/bios.hex"'
 //
 // The front end resolves a relative path against THIS FILE's directory rather
 // than the process's working directory -- measured 2026-11-02 by running the
-// same source from two directories -- so a relative path here works and an
-// external one must be absolute.  A path that does not resolve is a hard
-// elaboration error ("failed to open file"), not a silent zero-filled memory,
-// so a build that succeeds has loaded something.
+// same source from two directories -- so an external path must be absolute.  A
+// path that does not resolve is a hard elaboration error ("failed to open
+// file"), not a silent zero-filled memory, so a build that succeeds has loaded
+// something.
 //
-// This exists so the machine can be exercised against a BIOS the operator
-// supplies, without that image entering the repository: an official GBA BIOS is
-// Nintendo's copyrighted work and must not be committed here.  The vendored
-// Cult-of-GBA image carries no such restriction and stays the default.
+// Why there is no default any more.  Until 2026-11-16 this fell back to the
+// vendored Cult-of-GBA image, which meant a build that forgot the define
+// silently produced a DIFFERENT MACHINE that looked completely normal: both
+// build paths here compiled, every gate passed, the bitstream loaded, and the
+// screen stayed black because the free BIOS does not boot a retail cartridge.
+// That cost a whole cycle -- three bitstreams were built at three seeds and
+// blamed on placement when the only thing wrong was the BIOS (BRD-107).  A
+// default that can be silently wrong is worse than a hard failure, so the
+// fallback and the free image are both gone.
+//
+// The failure mode is a `$readmemh` of a file that does not exist, which is a
+// hard elaboration error in both slang and Verilator.  The filename names the
+// fix, so the error says what to do.  (`error would read better but this
+// project's slang build rejects it as an unknown directive.)
+//
+// The image itself must not enter the repository: an official GBA BIOS is
+// Nintendo's copyrighted work.  The build resolves it from `build/`, which is
+// gitignored, exactly as `tools/build_tinygba.sh` and the simulation harness do.
 reg [31:0] mem_bios [0:4095];
 `ifdef TINYGBA_BIOS_HEX
 initial $readmemh(`TINYGBA_BIOS_HEX, mem_bios);
 `else
-initial $readmemh("gba_bios_cultofgba.hex", mem_bios);
+initial $readmemh("gba_bios_DELETED_pass_TINYGBA_BIOS_HEX.hex", mem_bios);
 `endif
 always @(posedge clk) 
     if (ce) begin
