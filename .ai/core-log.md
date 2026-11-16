@@ -3194,3 +3194,32 @@ The store works, so the chain entry 92 named is finally testable and is the next
 - User Test: NOT RUN
 
 ---
+## 99 COMMIT Unreleased 2026-11-16T11:36:42-07:00
+
+#### Coming From:
+
+Unreleased 919a466
+
+#### Purpose:
+
+Run the persistence chain that the closed store defect made testable -- probe write, `gbasave`, real power cycle, `gbaload`, probe re-read -- with a negative control, and delete the second unreferenced BIOS image.
+
+#### Outcome:
+
+A cartridge save round-trips across a real power cycle, and that closes the last open question in the save path. The power cut was made by `~/Desktop/reboot_in 2_wire.py`, which drives a relay sequence over LXMF -- every contact open, one second, VBUS alone for ten seconds so the board boots with the data pair still open, then all four -- and the node acknowledged all three steps, so this was a genuine loss of power and not an in-system reset; that matters because SRAM lives in SDRAM and only a real cut clears it. Four steps, each captured. With 32768 bytes of ZEROS planted, `saveprobe` drew square 0 RED `(226,0,0)` and square 1 GREEN `(18,255,0)`, meaning canonical was absent at start and the CPU's own write verified. A host read of the live window over `fpgapipe` then returned 32768 bytes matching the canonical pattern, sha256 `611253a4...`, which is the first measurement that shows the CPU's 32 KiB write actually sitting in SDRAM rather than merely being acknowledged. `gbasave` wrote that window to the card, the board was power-cycled, `tangload` and `gbaload` restored the file, and the probe drew BOTH squares GREEN: a pattern the CPU had written before the cut came back after it. The negative control is what makes that mean anything -- zeros planted again, a second power cycle, zeros restored, and the probe returned to the baseline of square 0 RED and square 1 GREEN, so the green square 0 was attributable to the restored file and not to SDRAM surviving the cut. Square 1 was green in all three runs, so the write path was working throughout and the only variable was what was planted or restored (BRD-110). This also answers BRD-094's question by a route BRD-094 did not expect: rather than waiting for the EEPROM to decay into a blank store, SRAM in SDRAM gives a reliable blank after a power cut, and so a genuine negative control exists and was used. Two limits are recorded with the result. This is an SRAM cartridge only -- the EEPROM, flash512K and flash1M paths are untested in this chain, and BRD-092's four-type round trip and BRD-094's EEPROM power-cycle result were both measured while `config_backup_type` reached `rv_sdram_adapter` as one bit, where `is_eeprom = config_backup_type == 4` could never be true, so neither is evidence about those stores. And this is a probe writing through the cartridge window, not a retail title saving its own game. Separately, `fpga/gba/src/memory/gba_bios_normmatt.hex` was deleted: a 40,960-byte hex image with no reference in any source, script, constraint or document, so it could never be loaded and was dead weight of the same kind as the free BIOS. No RTL logic was changed and no bitstream was rebuilt for this cycle, because the image under test was already the post-fix one. Three of my own errors are worth recording for the next session: I captured the board once before a load had finished and read the black as a build fault; I compared a build tested without a cartridge against one tested with it, when the no-cartridge state is black for both; and I nearly recorded a `$fatal` BIOS guard as working when the toolchain had rejected it. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 99 was validated as the ninety-ninth entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 99 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 193 records with 193 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 178 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+The next entry is number 100, so the rollover is due and should be done deliberately rather than as a side effect: archive the active log into `archived_logs` with the current timestamp, clear it, and open it with a handoff entry numbered 1 that names the archive and summarises the live state. Before or after that, the work that now matters is the save types this chain did not touch. Re-run BRD-092's four-type round trip and BRD-094's EEPROM power-cycle measurement on a post-fix image, because both were taken through a one-bit `config_backup_type` where the EEPROM decode could never be true and so neither says anything about the EEPROM store; the same relay sequence now makes that test cheap, since it supplies the real power cut those records need. Then an in-game save in a retail title, which is the one thing that would show a cartridge using this path rather than a probe: an SRAM title such as Metroid Fusion and, once the EEPROM and flash paths are re-measured, Emerald, whose flash1M configuration reached the controller as `BACKUP_NONE` before the width fix and is the case most likely to move. `tools/roms/savewprobe.s` is still marked NOT VALIDATED and `tools/roms/saveprobe_iw.s` is still untracked; both should be finished or dropped rather than carried. Do not treat the SRAM result as covering the other save types, and do not describe BRD-092 or BRD-094 as established until they are re-taken.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/gba_bios_normmatt.hex
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
