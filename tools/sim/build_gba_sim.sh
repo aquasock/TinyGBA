@@ -13,6 +13,22 @@
 #                                  gba_sdram_rtl.v).  Slower, and the only way
 #                                  to exercise the controller at all.
 #
+#   TINYGBA_SIM_BIOS=cultofgba      run the free ReGBA/cult-of-gba BIOS instead
+#                                  of the retail one, for a case where no retail
+#                                  image is available.
+#
+# The BIOS default is the RETAIL image, and it is not a silent choice.  Every
+# board result this project has recorded was taken with the retail BIOS (builds
+# pass `TINYGBA_BIOS_HEX` pointing at `build/test/official_bios.hex`), while
+# `gba_memory.sv` falls back to the vendored free BIOS when that define is
+# absent -- so a simulation that does not set it is running a different machine
+# from the one on the bench.  Measured the hard way on 2026-11-15: a whole
+# series of controller traces was taken against the free BIOS because this
+# script never set the define, and the results could not be compared with the
+# board.  So the retail image is required: if it is missing this script fails
+# rather than quietly building something else.  `TINYGBA_SIM_BIOS=cultofgba`
+# is the explicit opt-out.
+#
 # Why this exists.  Every hardware result this project has produced came from a
 # 16-bit strip on a capture card, one word per flash cycle, with no reference to
 # compare against -- the sibling SNES project reached exactly that impasse and
@@ -63,8 +79,10 @@ srcs=(
     "$d/memory/gba_memory.sv"
     "$d/memory/gba_flash_sram.sv"
     "$d/memory/gba_eeprom.sv"
-    "$d/memory/mem_eeprom.v"
+    "$d/memory/gba_save.v"
+    "$d/memory/eeprom_ram.v"
     "$d/memory/sdram_sim.v"
+    "$d/memory/rv_sdram_adapter.v"
     # The real controller and its pin-level model, for TINYGBA_SDRAM_RTL builds.
     # Compiled always; selected at elaboration by the define in gbatang_top.sv.
     "$d/memory/sdram_gba.v"
@@ -105,6 +123,29 @@ done
 
 cmd="${1:-build}"; shift || true
 
+# Resolve the BIOS before anything is built, because which image is inside the
+# model decides whether a result is comparable with the bench.  The retail image
+# is Nintendo's copyrighted work and is therefore untracked (`build/` is
+# ignored); the vendored free BIOS is the fallback and must be asked for by name.
+bios_define=""
+if [[ "${TINYGBA_SIM_BIOS:-}" == "cultofgba" ]]; then
+    bios_define="-DTINYGBA_BIOS_HEX=\"$d/memory/gba_bios_cultofgba.hex\""
+    echo "!!! BIOS: cult-of-gba (free) -- results are NOT comparable with board results"
+else
+    retail="${TINYGBA_SIM_BIOS:-$root/build/test/official_bios.hex}"
+    if [[ ! -f "$retail" ]]; then
+        echo "no retail BIOS at $retail" >&2
+        echo "  every board result was taken with the retail BIOS, so a simulation" >&2
+        echo "  without it is a different machine and its results cannot be compared." >&2
+        echo "  put the image there, point TINYGBA_SIM_BIOS at it, or pass" >&2
+        echo "  TINYGBA_SIM_BIOS=cultofgba to accept the free BIOS explicitly." >&2
+        exit 2
+    fi
+    retail="$(cd -- "$(dirname -- "$retail")" && pwd)/$(basename -- "$retail")"
+    bios_define="-DTINYGBA_BIOS_HEX=\"$retail\""
+    echo "=== BIOS: retail ($retail) ==="
+fi
+
 case "$cmd" in
 build)
     mkdir -p "$out"
@@ -112,7 +153,7 @@ build)
     verilator --top-module "$top" --trace-fst \
         -Wno-WIDTH -Wno-PINMISSING -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
         -Wno-LATCH -Wno-IMPLICIT -Wno-REDEFMACRO \
-        ${TINYGBA_SIM_DEFINES:-} \
+        ${TINYGBA_SIM_DEFINES:-} $bios_define \
         --cc --exe \
         -CFLAGS "$(sdl2-config --cflags) -O2" \
         -LDFLAGS "$(sdl2-config --libs)" \
@@ -121,9 +162,10 @@ build)
         "${srcs[@]}" "$root/tools/sim/sim_main.cpp"
     echo "=== compile ==="
     make -C "$out/obj_dir" -f "V$top.mk" "V$top" -j"$(nproc)"
-    # The BIOS is read with $readmemh at elaboration and the working directory is
-    # where the binary runs, so the image has to sit beside it.
-    cp "$d/memory/gba_bios_cultofgba.hex" "$out/obj_dir/"
+    # The BIOS is read with $readmemh when the model is elaborated, which for
+    # Verilator happens at process start, so `bios_define` above carries an
+    # absolute path and no copy into the run directory is needed or wanted --
+    # a copy is how a stale image silently outlived a change to this script.
     echo
     echo "built: $out/obj_dir/V$top"
     ;;

@@ -475,6 +475,15 @@ always @(posedge clk) begin
                     end else begin                              // start multi-cycle request 2 for RAM
                         // req2.sdram
                         state <= REQ2_START;
+`ifdef VERILATOR
+                        if ((ram_addr[27:24] == 4'hE) & (tr_st2_req < 8)) begin
+                            $display("TRACE2 t=%0t req2 formed for %08x: wr=%b addr=%06x be=%b ro=%b",
+                                     $time, ram_addr, ram_wen, tosdram(ram_addr),
+                                     (ram_addr[27:25] == 3'b111) ? (4'b1 << ram_addr[1:0]) : ram_be,
+                                     isreadonly(ram_addr[27:24]));
+                            tr_st2_req = tr_st2_req + 1;
+                        end
+`endif
                         sdram_rd_buf <= ~ram_wen;
                         sdram_wr_buf <= ram_wen;
                         if (isreadonly(ram_addr[27:24])) begin
@@ -972,6 +981,91 @@ endfunction
 //         end
 //     end
 // end
+
+//////////////////////////////////////////////
+// TinyGBA: simulation-only trace of the cartridge save window.
+//
+// The stages a CPU store to 0x0E passes through, counted separately, because
+// a single observation of "the write did not land" cannot say which stage
+// dropped it.  `VERILATOR` is defined only by tools/sim/build_gba_sim.sh and
+// never by tools/build_tinygba.sh, so this cannot reach a bitstream.  Each
+// counter reports its first few events rather than every one: a 32768-byte
+// fill would otherwise bury the interesting line.
+//
+//   1. the CPU store arrives at gba_memory with region 0x0E
+//   2. gba_memory forms an SDRAM write request for it (after isreadonly)
+//   3. sdram_gba accepts it as a CPU write to the cart window
+//   4. sdram_gba issues a Write command on the CAS slot
+//
+// The first counter that stays at zero is the stage that loses the store.
+//////////////////////////////////////////////
+`ifdef VERILATOR
+integer tr_st1_store;
+integer tr_st2_req;
+integer tr_st3_accept;
+integer tr_st4_cas;
+initial begin
+    tr_st1_store = 0;
+    tr_st2_req = 0;
+    tr_st3_accept = 0;
+    tr_st4_cas = 0;
+end
+`endif
+
+always @(posedge clk) begin
+`ifdef VERILATOR
+    if (ram_cen & ram_wen & ram_addr[27:24] == 4'hE) begin
+        // What the combinational request block has formed this cycle, which is
+        // the only place sdram_wr/sdram_addr are valid as a function of the
+        // CPU's access rather than of the buffer.
+        if ((state == MAIN) & (tr_st1_store < 8))
+            $display("TRACE1 t=%0t MAIN store %08x be=%b wd=%08x -> wr=%b rd=%b addr=%06x sbe=%b ro=%b",
+                     $time, ram_addr, ram_be, ram_wdata, sdram_wr, sdram_rd,
+                     sdram_addr, sdram_be, isreadonly(ram_addr[27:24]));
+        tr_st1_store = tr_st1_store + 1;
+    end
+    // The request is buffered into sdram_*_buf when the FSM leaves MAIN for a
+    // RAM access, so sample the buffered values on the following cycle.
+`endif
+end
+
+
+//////////////////////////////////////////////
+// TinyGBA: simulation-only trace of the FSM transitions around a region-E
+// store.  Stage 2 showing nothing while stage 1 shows the store means the RAM
+// access never becomes an SDRAM request, and the only way that happens is here:
+// a CPU that is fetching from the cartridge while it stores issues the store as
+// *request 2*, which is entered only when `state == REQ1_WAIT & sdram_ready`.
+// So the transition out of REQ1_WAIT is the thing to watch.
+//////////////////////////////////////////////
+`ifdef VERILATOR
+reg [2:0] tr_state_r;
+integer   tr_st5_n;
+integer   tr_st6_n;
+initial begin
+    tr_state_r = 3'd0;
+    tr_st5_n = 0;
+    tr_st6_n = 0;
+end
+always @(posedge clk) begin
+    if ((state != tr_state_r) & (tr_st5_n < 60)) begin
+        $display("TRACE5 t=%0t fsm %0d->%0d rom_en=%b ram_cen=%b wen=%b rdy=%b dma=%b",
+                 $time, tr_state_r, state, rom_en, ram_cen, ram_wen, sdram_ready, dma_on);
+        tr_st5_n = tr_st5_n + 1;
+    end
+    tr_state_r <= state;
+
+    // The decision point itself: both accesses outstanding when a request 1
+    // completes.  Region E only.
+    if ((state == MAIN | state == REQ1_WAIT) & rom_en & ram_cen &
+        (ram_addr[27:24] == 4'hE) & (tr_st6_n < 20)) begin
+        $display("TRACE6 t=%0t state=%0d rdy=%b bram_port=%0d double_req=%b -> req2=%b",
+                 $time, state, sdram_ready, bram_port, double_req,
+                 (state == MAIN & bram_port != PORT_NONE) | (state == REQ1_WAIT & sdram_ready));
+        tr_st6_n = tr_st6_n + 1;
+    end
+end
+`endif
 
 endmodule
 `undef pproc_bus_gba

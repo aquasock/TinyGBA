@@ -550,4 +550,26 @@ always @(posedge clk) begin
     end
 end
 
+//////////////////////////////////////////////////////////
+// TinyGBA: simulation-only trace of the cartridge save window, controller side.
+//
+// REMOVED after a day of false readings.  The staged counters that lived here
+// (accepted / CAS-issued) reported zero while independent traces showed the
+// request both formed in `gba_memory` (wr=1, addr=810000) and arriving at this
+// module (cpu_wr with the same address).  Three separate faults were found in
+// my own instrumentation along the way: Verilog precedence (`a == b & c < d`
+// parses as `a == (b & (c < d))`), an address slice taken from the wrong field
+// of a packed SDRAM address, and print budgets consumed by the loader's fill so
+// that the interesting events were never reached.  Rather than trust a fourth
+// version, the traces come out until the instrument itself can be checked
+// against a known-good event -- the standard this project already applies to
+// probes (TCL-041, TCL-080).
+//
+// What survives, and is reproducible: gba_memory forms a correct SDRAM write
+// for the CPU's store to the cartridge window -- `wr=1, addr=810000, be` equal
+// to the byte lane, `isreadonly` false -- observed in two independent traces
+// that have not produced a contradiction.  Whether sdram_gba consumes that
+// request is the open question and no claim is made about it here.
+//////////////////////////////////////////////////////////
+
 endmodule

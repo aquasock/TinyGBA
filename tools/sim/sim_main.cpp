@@ -90,6 +90,17 @@ int dump_every = 0;               // -pe N: dump every Nth frame (0 = off)
 int dump_first = 0;               // -pf N: start dumping at frame N
 int dump_last = INT_MAX;          // -pl N: stop dumping after frame N
 
+// Headless measurement mode.  The SDL window is the model's control panel: a
+// SPACE keypress pauses the simulation, and ESC quits it.  That is fine for
+// poking at a game and wrong for a measurement, because the window sits on
+// whatever desktop the operator is using and any keystroke reaching it changes
+// or ends the run.  Measured on 2026-11-15: a controller trace came back with
+// every stage at zero because the simulation had been stopped by a SPACE at
+// sim_time 864300, which reads exactly like "the CPU never issued the store".
+// A run that is evidence must not be steerable from outside the model, so
+// -headless builds no window at all: frames still go to PPM with -p, the frame
+// counter and every $display still print, and nothing can pause the run.
+bool headless = false;			// -headless, or TINYGBA_SIM_HEADLESS=1
 bool trace_toggle;				// -t or "t" key
 bool trace_loading;				// -tl option
 long long start_trace_time;		// -tt option
@@ -108,6 +119,7 @@ void usage()
 	printf("  -f     print flash related memory accesses\n");
 	printf("  -p P   write frames as PPM: PREFIX_frameNNNN.ppm\n");
 	printf("  -press BIT@FRAME[:DUR] scripted button; 0=B 2=SEL 3=START 8=A\n");
+	printf("  -headless  build no SDL window; frames and traces still run\n");
 	printf("  -pe N  dump every Nth frame (default every frame when -p given)\n");
 	printf("  -pf N  first frame to dump      -pl N  last frame to dump\n");
 }
@@ -430,6 +442,10 @@ int main(int argc, char **argv, char **env)
 			memlog_en = true;
 			printf("Printing memory log\n");
 		} 
+		else if (strcmp(argv[i], "-headless") == 0) {
+			headless = true;
+			printf("Headless: no SDL window, no keyboard control\n");
+		}
 		else if (strcmp(argv[i], "-press") == 0 && i + 1 < argc) {
 			char *spec = strdup(argv[++i]);
 			for (char *tok = strtok(spec, ","); tok && n_presses < 64; tok = strtok(nullptr, ",")) {
@@ -483,37 +499,44 @@ int main(int argc, char **argv, char **env)
 		exit(1);
 	}
 
-	if (SDL_Init(SDL_INIT_VIDEO) < 0)
-	{
-		printf("SDL init failed.\n");
-		return 1;
-	}
+	if (const char *e = getenv("TINYGBA_SIM_HEADLESS"))
+		if (e[0] != '0' && e[0] != '\0')
+			headless = true;
 
 	SDL_Window *sdl_window = NULL;
 	SDL_Renderer *sdl_renderer = NULL;
 	SDL_Texture *sdl_texture = NULL;
 
-	sdl_window = SDL_CreateWindow("GBATang Sim", SDL_WINDOWPOS_CENTERED,
-								  SDL_WINDOWPOS_CENTERED, H_RES * 2, V_RES * 2, SDL_WINDOW_SHOWN);
-	if (!sdl_window)
+	if (!headless)
 	{
-		printf("Window creation failed: %s\n", SDL_GetError());
-		return 1;
-	}
-	sdl_renderer = SDL_CreateRenderer(sdl_window, -1,
-									  SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-	if (!sdl_renderer)
-	{
-		printf("Renderer creation failed: %s\n", SDL_GetError());
-		return 1;
-	}
+		if (SDL_Init(SDL_INIT_VIDEO) < 0)
+		{
+			printf("SDL init failed.\n");
+			return 1;
+		}
 
-	sdl_texture = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_RGBA8888,
-									SDL_TEXTUREACCESS_TARGET, H_RES, V_RES);
-	if (!sdl_texture)
-	{
-		printf("Texture creation failed: %s\n", SDL_GetError());
-		return 1;
+		sdl_window = SDL_CreateWindow("GBATang Sim", SDL_WINDOWPOS_CENTERED,
+									  SDL_WINDOWPOS_CENTERED, H_RES * 2, V_RES * 2, SDL_WINDOW_SHOWN);
+		if (!sdl_window)
+		{
+			printf("Window creation failed: %s\n", SDL_GetError());
+			return 1;
+		}
+		sdl_renderer = SDL_CreateRenderer(sdl_window, -1,
+										  SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+		if (!sdl_renderer)
+		{
+			printf("Renderer creation failed: %s\n", SDL_GetError());
+			return 1;
+		}
+
+		sdl_texture = SDL_CreateTexture(sdl_renderer, SDL_PIXELFORMAT_RGBA8888,
+										SDL_TEXTUREACCESS_TARGET, H_RES, V_RES);
+		if (!sdl_texture)
+		{
+			printf("Texture creation failed: %s\n", SDL_GetError());
+			return 1;
+		}
 	}
 
 	FILE *f = fopen("gba.aud", "w");
@@ -524,14 +547,17 @@ int main(int argc, char **argv, char **env)
 	bool done = false;
 	uint64_t cnt = 0;
 
-	SDL_UpdateTexture(sdl_texture, NULL, screenbuffer, H_RES * sizeof(Pixel));
-	SDL_RenderClear(sdl_renderer);
-	SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
-	SDL_RenderPresent(sdl_renderer);
-	SDL_StopTextInput(); // for SDL_KEYDOWN
+	if (!headless)
+	{
+		SDL_UpdateTexture(sdl_texture, NULL, screenbuffer, H_RES * sizeof(Pixel));
+		SDL_RenderClear(sdl_renderer);
+		SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
+		SDL_RenderPresent(sdl_renderer);
+		SDL_StopTextInput(); // for SDL_KEYDOWN
 
-	createSpritesWindow();
-	createTilemapWindow();
+		createSpritesWindow();
+		createTilemapWindow();
+	}
 
 	// (R L X A RT LT DN UP START SELECT Y B)
 	// top->joy_btns = 1 << 6;	// left button is on
@@ -706,10 +732,13 @@ int main(int argc, char **argv, char **env)
 				{
 					// check for quit event
 					frame_updated = true;
-					SDL_UpdateTexture(sdl_texture, NULL, screenbuffer, H_RES * sizeof(Pixel));
-					SDL_RenderClear(sdl_renderer);
-					SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
-					SDL_RenderPresent(sdl_renderer);
+					if (!headless)
+					{
+						SDL_UpdateTexture(sdl_texture, NULL, screenbuffer, H_RES * sizeof(Pixel));
+						SDL_RenderClear(sdl_renderer);
+						SDL_RenderCopy(sdl_renderer, sdl_texture, NULL, NULL);
+						SDL_RenderPresent(sdl_renderer);
+					}
 					frame_count++;
 
 					if (frame_count % 5 == 0 || m_trace)
@@ -733,11 +762,13 @@ int main(int argc, char **argv, char **env)
 							dump_frame(dump_prefix, frame_count);
 					}
 
-					if (showFrameCount) {
-						SDL_SetWindowTitle(sdl_window, ("GBATang Sim - frame " + to_string(frame_count) + 
-											(trace_toggle ? " tracing" : "")).c_str());
-					} else {
-						SDL_SetWindowTitle(sdl_window, "GBATang Sim");
+					if (!headless) {
+						if (showFrameCount) {
+							SDL_SetWindowTitle(sdl_window, ("GBATang Sim - frame " + to_string(frame_count) +
+												(trace_toggle ? " tracing" : "")).c_str());
+						} else {
+							SDL_SetWindowTitle(sdl_window, "GBATang Sim");
+						}
 					}
 				}
 			}
@@ -746,9 +777,17 @@ int main(int argc, char **argv, char **env)
 		}
 
 		if (!sim_on)
+		{
+			if (headless) {
+				printf("simulation paused, and nothing headless can resume it; stopping\n");
+				break;
+			}
 			SDL_Delay(20);   // paused or finished: do not burn a core while idle
+		}
 
-		if (cnt % 100 == 0)
+		// No window means no events, so no way for anything outside the model to
+		// pause, resume or quit the run.
+		if (!headless && cnt % 100 == 0)
 		{
 			// check for SDL events
 			SDL_Event e;
@@ -917,10 +956,13 @@ int main(int argc, char **argv, char **env)
 	else
 		printf("NEVER fetched from the cartridge (no rom_addr[27:24] non-zero)\n");
 
-	SDL_DestroyTexture(sdl_texture);
-	SDL_DestroyRenderer(sdl_renderer);
-	SDL_DestroyWindow(sdl_window);
-	SDL_Quit();
+	if (!headless)
+	{
+		SDL_DestroyTexture(sdl_texture);
+		SDL_DestroyRenderer(sdl_renderer);
+		SDL_DestroyWindow(sdl_window);
+		SDL_Quit();
+	}
 
 	return 0;
 }
