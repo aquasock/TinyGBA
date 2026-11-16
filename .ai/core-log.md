@@ -3131,3 +3131,32 @@ Find the second cause, because the truncation fix alone does not make the store 
 - User Test: N/A
 
 ---
+## 97 COMMIT Unreleased 2026-11-16T09:43:51-07:00
+
+#### Coming From:
+
+Unreleased 181bf2f
+
+#### Purpose:
+
+Find why a CPU store to the cartridge SRAM window is still lost after the `config_backup_type` width fix, and establish whether that fix is safe on the board, by repairing the simulation instrument before trusting it again.
+
+#### Outcome:
+
+The store was never lost in the way the previous cycle concluded, because the instrument that said so was corrupting its own evidence. `fpga/gba/diag/sdram_model.v` decides whether a die drives the shared 16-bit `SDRAM_DQ` bus with a priority list that tests a pending read before the write branch, so a die still holding read data keeps driving while the other die is written; the wrapper puts die0 on `SDRAM_nCS` and die1 on `~SDRAM_nCS` on that one bus, and cart RAM is on die1. A temporary `BUSOBS` print reporting the pin, the controller's own `dq_out`, and both dies' `dq_oen` at the same instant settled it on the probe's first store: the controller drove `0808` correctly, die0 was driving stale read data `e156`, and the pin read `e95e`, which is `0x0808 | 0xe156` exactly; all 1024 corrupted writes in the run were explained by that wired-OR and none needed another cause (BRD-106). Gating the model's drive on a chip select latched at command time -- not a combinational gate, which suppresses reads because the controller drops `nCS` before the read data appears, a wrong turn that cost one build -- makes the probe's verification square green `(0,252,0)` while square 0 stays red for the correct reason that the simulation plants no save. The controller is therefore exonerated: the request forms as `wr=1, addr=810000, be=0001`, `din_latch[0]` and `dq_out` both hold the CPU's own byte, and `dq_oen` is driving, so BRD-104's open question about whether a Write command reaches the pins was an artefact of the trace rather than a fact about the machine. Two further instrument faults were found and are recorded: the wrapper traced and dumped die0 only while cart RAM lives on die1, which is why one run printed 4096 `sdram: WR` lines -- all the loader's fill -- where the same code tracing die1 printed 266240 (TCL-082), and the dump fires at a fixed early cycle that samples the loader's cartridge-ROM fill. My own readings were wrong three more times in the same class: a `DCAS` print filtered by address hid other commands, `08080808` was treated as probe-unique when the loader writes it too, and results from two differently configured builds were compared against each other, which is the error entry 96 named and this cycle repeated. All diagnostics used the entry-73 restore-trap pattern and the tree was confirmed byte-identical to `HEAD` after every one. On the board the width fix is exonerated and a larger problem surfaced: four bitstreams were loaded in one session with the same commands and the same probe, and `build/prod3` and `build/sdiag3`, both recorded as seed 3, render the probe's green-then-red squares -- reproducing BRD-103 and proving board, capture and probe sound -- while `build/wrfix_board` at the default seed 1 and `build/nowfix`, which is `HEAD` with only the width declaration removed, both render a uniform black field inside the `(43,43,43)` pillarbox and never boot the BIOS, with every build gate passing and `hold 0` (BRD-107). So the width fix is not what breaks the board, since removing it changes nothing, and the default seed is now the leading suspect without being established, because no seed-1 image from the same commit as a working seed-3 image has been tested. Nothing on the machine is fixed by this cycle: the store is still lost on hardware, the probe's square 1 is still red on images that boot, and the root cause is still open. What the cycle bought is an instrument that stops inventing evidence. No RTL was changed and no source was left modified. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 97 was validated as the ninety-seventh entry with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 97 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 189 records with 189 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 174 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+Settle the seed question before any further hardware claim, because every black-screen reading in this project is now unattributable until a matched pair exists: build the current tree at seed 3, load it with the same probe, and compare it against the seed-1 image already captured, which costs one placement and one capture and decides whether the default seed is unsafe or the two black images share some other cause. Then fix the harness properly rather than by patch, since it will be used again for exactly this question: give die1 the same `TRACE` parameter die0 has, gate each die's bus drive on a chip select latched at command time, and make the memory dump cover both dice at a time chosen relative to the event being measured instead of a fixed early cycle. With that in place the outstanding hardware question is answerable and is unchanged from BRD-101: on an image that boots, the probe's square 1 is red, so the CPU's store to `0x0E000000` still does not verify, and it is now known not to be a pin-trace artefact, not the flash gate, not `isreadonly()`, and not the controller's data path for a single byte. The full chain entry 92 named stays untested behind it. Two files remain untracked from the previous session, `tools/roms/saveprobe_iw.s` and `tools/save/pipe_save_dump.py`, still unvalidated and not committed here. Do not quote a timing or placement result without naming its seed, and do not deploy a default-seed image without capturing what it draws.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
