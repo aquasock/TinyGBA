@@ -568,22 +568,24 @@ that killed it.
 
 ## Known gaps
 
-- **No game's own save has been carried across a power cut and resumed.** Each
-  half is measured. A retail game saving in-game on the board produces a file mGBA
-  accepts unchanged, for all three save types (Metroid Fusion, Super Mario Advance
-  2, Pokemon Emerald), and a pattern written by a probe survives a relay power cut
-  and comes back when restored. What has not been run end to end is a game's own
-  save, through `pipe_save_dump.py`, a power cut, `gbaload`, and the game
-  continuing from where it left off. Note when running it that **no save type on
+- **No game has been played on past `CONTINUE` after a power cut.** The save
+  itself is proven: a game's own save, restored after a real relay power cut, is
+  read by the cartridge as valid and offered on the menu (BRD-117). What has not
+  been walked through is gameplay continuing from that point, which is ordinary
+  play rather than a save-path event. Note when working here that **no save type on
   this board is non-volatile**: SRAM and flash live in SDRAM and EEPROM in block
   RAM, and `gba_eeprom.sv` deliberately rewrites its store with all-ones on every
   reset to present an erased part. A `.sav` on the card is therefore the only copy
   that outlives the board, and `gbasave` is not the way to take it — it has killed
   the console three times (TCL-064); `tools/save/pipe_save_dump.py` reads the same
-  window over `fpgapipe` without the SD path. See BRD-110, BRD-113 and BRD-116. An earlier note here said the
-  store could not be made to lose its contents (BRD-094); that was measured through
-  a `config_backup_type` that reached the save engine as one bit, so it never
-  touched the EEPROM store at all.
+  window over `fpgapipe` without the SD path. See BRD-113, BRD-116 and BRD-117.
+- **Every cartridge tested reformats a save it cannot validate.** Super Mario
+  Advance 2, Metroid Fusion and Pokemon Emerald each rewrote a planted pattern or
+  an invalid save on boot. A host round-trip test against a running cartridge is
+  only meaningful when the game's own save is what was planted, and an exact round
+  trip is the expected result both when the write path works and when the cartridge
+  cannot write at all — which is how BRD-092's SRAM row came to be wrong. See
+  BRD-112 and BRD-118.
 - **The console dies on large SD transfers.** Three times in one session a
   `gbasave` or `tangput` left the BL616 console silent with the device still
   enumerated, recoverable only by removing power. `tangload` and `gbaload` never

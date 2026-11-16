@@ -144,3 +144,32 @@ Two things follow directly. The `.sav` convention changed, so anything written b
 - User Test: PASS
 
 ---
+## 6 COMMIT Unreleased 2026-11-16T15:06:57-07:00
+
+#### Coming From:
+
+Unreleased 1999b98
+
+#### Purpose:
+
+Check the byte-order fix for regressions in the save types it also touches, close the last documented save gap with a game's own save through a real power cut, and rank the finished sweep seeds.
+
+#### Outcome:
+
+Three results and one correction. First, the byte-order fix introduced no regression, which was the risk worth checking because `rev8` sits in `rv_sdram_adapter` and that adapter carries every RV save transfer, not only EEPROM. On `build/eeprom_s7` a 65,536-byte canonical pattern planted as Mario Kart's `.sav` read back byte-identical (sha256 `ef463692...`, the same digest this project measured before the fix), and `saveprobe` on the same bitstream drew square 0 RED and square 1 GREEN, which is the baseline that shows the width fix is still doing its work. SRAM and flash share the same non-EEPROM path through the adapter, so flash being exact covers both. Second, the last documented save gap is closed: your in-game Pokemon Emerald save, captured off the board over `fpgapipe` and written to the card, was restored by `gbaload` on the post-fix image and read back byte-identical (`1cbedc9a...`), the board was then power-cycled by the relay sequence with all three steps acknowledged, and after `tangload` and `gbaload` the window again read `1cbedc9a...` and the game booted to its title screen and then to a main menu offering `CONTINUE` with the saved player name, play time and badge count on screen. That menu is the observation a window dump cannot make: the cartridge found a save it considers valid and was prepared to resume, so a retail game's own save has now survived a real power loss end to end (BRD-117). Third, five of the eight sweep seeds have finished and all pass every gate with `hold 0`, no relaxation and `clk67` on a measured-good plane; seed 7 is the best at `clk67` 206.70 MHz against seed 3's 194.78, seed 1's 190.80, seed 8's 177.53 and seed 4's 176.40, and it also routed in the fewest iterations at 385,361 against 424,720, 433,391, 411,076 and 493,121, so the deployed image is the right one. Seeds 2, 5 and 6 were still routing when the cycle closed and are not recorded. The correction is the significant part. BRD-092's SRAM row is vacuous: it was committed on 2026-11-15 at 08:08 and the width declaration `181bf2f` landed that day at 22:26, so on the image it measured `config_backup_type` was one bit, SRAM reached the controller as flash512K, the flash interpreter swallowed every CPU store to the cartridge window, Metroid could not write, the planted pattern survived untouched, and the exact read-back BRD-092 recorded as a successful round trip is what an unwritable store returns. Re-running the same test on the fixed image gives 32,642 of 32,768 bytes differing and Metroid's own header in the window (`b4c89ba1... MetroidAGB-EU`), because the game reformatted the pattern on boot (BRD-118). I found this by making the same mistake twice, which is worth recording: I planted a pattern in Metroid's `.sav` expecting a round trip, and the game reformatted it, exactly as BRD-112 records for Super Mario Advance 2. All three cartridges now tried -- SMA2, Metroid and Emerald -- rewrite a save they cannot validate, so a host round-trip against a running cartridge is only meaningful when the game's own save is what was planted, and an exact round trip is the expected result both when the path works and when the cartridge cannot write at all. BRD-092 is annotated as refuted in part with its heading and statement left as settled history. Your card saves were backed up to `/tmp` before the tests disturbed them and Metroid's was restored afterwards; Mario Kart's now holds the test pattern and the Emerald `.sav` was restored from the verified copy. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 6 was validated as the sixth entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 6 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 201 records with 201 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 186 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+The save path is now measured end to end for all three types, so what remains is cleanup and a decision rather than a test. Cleanup: restore Mario Kart's `.sav` on the card from `/tmp/card_mariokart_backup.sav`, which currently holds a test pattern, and note that the two unvalidated probe instruments are still outstanding -- `tools/roms/savewprobe.s` is marked NOT VALIDATED and `tools/roms/saveprobe_iw.s` is untracked, and the defect they were written to chase is now closed and explained, so they should either be finished or deleted. The decision is the release: `core.md` calls for a MINOR bump at a hardware-proven capability and no tags exist in this repository, and the capability is now there to justify one -- twelve titles run, all three save types save from a real game and are accepted by an independent emulator, and a game's own save survives a real power loss. Tagging is external publication, so it waits on you. Two smaller items: seeds 2, 5 and 6 of the sweep were still routing and none is expected to beat seed 7's 206.70 MHz, but if one does it is worth knowing before seed 7 is called the reference placement; and the README's known-gaps section should drop the power-cut entry now that this cycle closed it, which is a documentation change I would fold into whichever cycle comes next. Do not run `gbasave` on this board -- it has killed the console three times -- and use `tools/save/pipe_save_dump.py`, which reads the same window over `fpgapipe`.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: PASS
+
+---
