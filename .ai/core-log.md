@@ -85,3 +85,32 @@ None.
 - User Test: NOT RUN
 
 ---
+## 4 COMMIT Unreleased 2026-11-16T12:48:45-07:00
+
+#### Coming From:
+
+Unreleased fa1c1bc
+
+#### Purpose:
+
+Test the EEPROM path against an independent emulator, which is both the check BRD-112's argument wanted and the remaining unknown after it -- whether a cartridge can read a save back.
+
+#### Outcome:
+
+Three results, one of which is a new defect. Following the same route as before, the SMA2 cartridge image was fetched off the card with the shell's `tangget`, run in mGBA 0.10.5 with no save present so that the game formatted a fresh 8,192-byte EEPROM save, and that file was diffed against the window the board held after the same game had likewise formatted one. The layouts are identical -- same `0xFF` runs, same 8-byte records at `0x10` and `0x20`, same slot header at `0x100`, `0x280`, `0x400`, `0x580`, `0x700` and `0x880` -- but the values are bit-reversed: at every one of the 1,504 positions where neither side holds `0xFF`, the hardware byte equals the bit-reversal of the mGBA byte, 1,504 of 1,504, and the slot header reads `00 00 41 21 0c a2 ea 82` against mGBA's bytes reversed. That is a real defect and it is explained by the store's two views: `eeprom_ram` is bit-serial on port A, where the game writes the protocol's most-significant bit first into increasing bit address, and byte-wise on port B, where byte `n` occupies bit addresses `8n` to `8n+7` with `8n` as the least-significant bit, so a most-significant-first byte arrives in port B reversed (BRD-114). The consequence is narrow but matters: `gbasave` and `gbaload` are self-consistent because write and read both cross port B, which is why planted patterns round-tripped in every region the game did not touch, but the EEPROM `.sav` is not in the byte order an emulator uses, so it cannot be moved between board and emulator without reversing each byte -- which is the interoperability that already works for the other three types. The game is unaffected because it only speaks port A. Second, the CPU-side read path works, and this was the last unproven part of the save system: mGBA's save was bit-reversed into this core's order, written to the card, restored by `gbaload`, and after the game had run for 55 seconds the window still read byte-identical to the file uploaded, sha256 `4b069f40...`, with the game visibly running -- so the cartridge read a save produced outside the board, found it valid and continued without formatting over it (BRD-115). The contrast is what makes that evidence: with a ramp pattern, a constant `0xAA`, and a freshly configured `0xFF` store, the same cartridge rewrote the window into its own layout within the same 25-second window, so it demonstrably inspects its save at boot and reformats what it cannot read. Third, this confirms BRD-112 by a route that does not depend on any argument about byte patterns, since a save the game accepts is exactly the records BRD-111 called corruption. Two limits are recorded with the results. The emulator save and the cartridge image live in `/tmp` and the ROM is the operator's own cartridge, so neither enters the repository and the comparison rests on scratch files; and no save of actual gameplay has yet been written by a cartridge and recovered after a power cycle, which is the remaining test and needs play rather than a format. The board was left running SMA2 with the accepted save. No RTL was changed. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 4 was validated as the fourth entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 4 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 198 records with 198 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 183 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+Correct the EEPROM byte order, which is now the only known save defect and is a host-side change: reverse the bit order in `eeprom_ram`'s port B, or in the firmware's `gbasave`/`gbaload` for EEPROM cartridges, and verify by round-tripping a `.sav` to and from mGBA both ways without a manual reversal in between -- the direction that has not been tested is a board-produced save opened in the emulator. Whichever side is fixed, the cartridge must be unaffected, so the acceptance test of BRD-115 is the regression check: plant a save, run the game, confirm the store is not reformatted. That fix needs approval because it changes RTL or firmware, and it should be its own commit rather than folded into a documentation cycle. After it, the last save test is a cartridge writing its own gameplay and finding it again across a power cut -- an in-game save in Metroid Fusion for SRAM, Emerald for flash1M and SMA2 for EEPROM, then `gbasave`, the relay power cycle, `gbaload`, and continuing the game, with each `.sav` also loaded in mGBA to check interoperability. The relay tool at `~/Desktop/reboot_in 2_wire.py` supplies the power cut that test needs. Two housekeeping items remain untouched: `tools/roms/savewprobe.s` and `tools/roms/saveprobe_iw.s` are unvalidated instruments for a defect that is now closed and should be finished or deleted, the latter still untracked; and the release question stays with the operator, since `core.md` calls for a MINOR bump at a hardware-proven capability and the save path is close to that mark. Do not cite BRD-092 for the EEPROM store, and do not assume an EEPROM `.sav` from this project opens in an emulator until the byte order is fixed.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
