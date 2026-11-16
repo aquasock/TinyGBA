@@ -56,3 +56,32 @@ None.
 - User Test: NOT RUN
 
 ---
+## 3 COMMIT Unreleased 2026-11-16T12:41:12-07:00
+
+#### Coming From:
+
+Unreleased 05fb025
+
+#### Purpose:
+
+Re-examine the EEPROM failure entry 2 recorded, after another agent read the same dumps and attributed the differing bytes to the game rather than to the hardware.
+
+#### Outcome:
+
+Entry 2's EEPROM conclusion was wrong and is corrected. That entry reported 1,495 of 8,192 bytes differing and called it "an addressing or read-timing fault" and "not stored save data"; re-reading the same three dumps refutes both parts. At every one of those 1,495 positions the constant-`0xAA` dump and the post-power-cycle blank dump hold IDENTICAL values, 1,495 of 1,495 in each case, so three runs that began from three completely different contents agree byte for byte wherever they agree at all; and outside the differing region all 5,776 bytes from `0x970` to `0x1FFF` hold each run's own planted content, which is a clean round trip of the host byte port (BRD-112). The differing bytes are Super Mario Advance 2's save layout: 8-byte records repeated at `0x10` and `0x20`, an identical record at `0x80` and `0xc0`, and the same 8-byte slot header `00 00 41 21 0c a2 ea 82` every `0x180` bytes at `0x100`, `0x280`, `0x400`, `0x580`, `0x700` and `0x880`. On hardware the cartridge was loaded with `gbaload: save hardware = EEPROM` and captured at its title screen, so the game was executing and writing its own save over the planted pattern, and the dump was taken after it had been running. No read or addressing fault can produce these facts: aliasing or a lane swap would return planted data from the wrong address and would therefore differ between runs whose planted contents differ, and it would also corrupt the untouched region, which is correct in every byte. My error was one of inference rather than measurement -- I took "the junk is present even when nothing was planted" as proof it was not stored data, when a game that rewrites its save on every boot produces exactly the same observation. Two things follow that are better than what entry 2 recorded. This is the first hardware observation of a CPU-side EEPROM write landing in `eeprom_ram`: the game's records are visible through the host port and the game runs, which is evidence for the shared storage and the port-A write path. And the method lesson is worth stating because it will recur: a host round-trip test is only valid against a running cartridge if the cartridge provably does not write its save, which the flash and SRAM tests happened to satisfy and the EEPROM test did not. Chasing why the blank read is `0xFF` rather than the netlist's zero-valued `INIT_RAM` turned up a fact that retires a much older record: `gba_eeprom.sv` enters an `INIT` state on `rst` and walks all 65,536 bit addresses writing `1`, so a freshly configured board reads the all-ones state a real erased EEPROM presents, and the contents cannot survive a reconfigure because the reset fills them with ones (BRD-113). That is what BRD-094's "the EEPROM keeps its contents across a power cycle, decaying 360 of 8,192 bytes" was measuring, or rather failing to measure -- those accesses went to plain SDRAM under the one-bit `config_backup_type`, and with the real path selected the store is wiped on every reset. The general fact worth carrying is that no save type on this board is non-volatile, SRAM, flash and EEPROM all living in SDRAM or block RAM, which is the premise the save engine exists to compensate for. BRD-111 is annotated as refuted with its heading and statement left as settled history. What is still not established is the CPU read path -- whether a cartridge reads its own EEPROM save back correctly -- and an exact round trip of a save the cartridge considers valid, which needs an emulator-produced save or an in-game save. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 3 was validated as the third entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 3 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 196 records with 196 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 181 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+Prove the EEPROM CPU read path, which is the one thing now standing between the board and a save system trusted for every cartridge: an in-game save in Super Mario Advance 2, then `gbasave`, a relay power cycle, `gbaload` and continuing the game, because a cartridge that accepts its own restored save is the only evidence that the read side works and that the restored bytes are a valid save rather than a plausible layout. The same test is worth running for Metroid Fusion on SRAM and Emerald on flash1M, and the strongest version is to move a `.sav` in both directions between the board and mGBA 0.10.5, which BRD-092's method already assumes. Note before running it that the store is re-initialised to all-ones on every reset, so a save is only ever as durable as the card copy written by `gbasave`, and that no save type here is non-volatile. Two records worth revisiting in that light: BRD-092's EEPROM row should be struck rather than merely questioned, since it measured the SDRAM path, and the README's save section still cites BRD-092 as authority. Once a cartridge round-trips its own save, the release question the project has deferred is live again -- `core.md` calls for a MINOR bump at a hardware-proven capability and no tags exist yet -- but that is external publication and waits on the operator. `tools/roms/savewprobe.s` and `tools/roms/saveprobe_iw.s` remain the outstanding loose ends, unvalidated and the latter still untracked.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---

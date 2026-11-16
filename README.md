@@ -58,13 +58,18 @@ verified fact.
   of one 8 MiB image on one bitstream. See BRD-077. Loading two cartridges
   back to back can still catch the second in the BIOS sequence and look like a
   freeze; it boots normally when loaded again. See BRD-090.
-- **Saves move on and off the card.** `gbasave` dumps a cartridge's save window to
-  a `.sav` beside the ROM and `gbaload` restores it before releasing the core, for
-  all four save types the core supports. The round trip is byte-exact for SRAM,
-  flash512K and EEPROM, and 131,070 of 131,072 bytes for flash1M — the two
-  outliers are flash command opcodes that this core's flash model lets into the
-  array, not a save-path fault. See BRD-092. What is *not* established is that a
-  save survives the board losing power; see Known gaps.
+- **Saves move on and off the card, and survive a power cut.** `gbasave` dumps a
+  cartridge's save window to a `.sav` beside the ROM and `gbaload` restores it
+  before releasing the core. Measured on the post-fix image: SRAM (32,768 B),
+  flash512K (65,536 B) and flash1M (131,072 B) all round-trip with **zero** bytes
+  differing — flash1M is now exact because flash command bytes no longer leak into
+  the array. For SRAM the whole chain is measured across a real power cut made by
+  a relay, not a reset: probe writes, `gbasave`, power off, `gbaload`, pattern
+  returns — with an all-zeros negative control that comes back red, so the restore
+  did the work and not leftover memory. See BRD-109, BRD-110 and BRD-111, and
+  BRD-112 for why EEPROM needs its own handling. What is
+  *not* established is a retail cartridge saving its own game and accepting it
+  back; see Known gaps.
 
 ### The two defects that blocked it, both now fixed
 
@@ -126,20 +131,20 @@ CPU, the GPU or a cartridge.
   one upstream `gbatang.sdc` exists to express, so an image that needs it is
   correct rather than marginal, and any timing figure must say whether it needed
   the allowance.
-- **Save persistence is not testable on this board.** The transport works in both
-  directions (BRD-092), but the store cannot be made to lose its contents: after
-  two verified power cycles — the FPGA answering its default core 84 before
-  `tangload` each time — the EEPROM read back `65047658…`, identical to what it
-  held before, which is the pattern last written to it with 360 of 8192 bytes
-  decayed. `mem_eeprom` is Gowin block RAM with no `INIT_` parameters, so
-  nothing in the design restores it; it does not clear, it partially decays. That
-  is also the mechanism behind the failed negative control entry 77 recorded.
-  Since the only available destruction event does not destroy the store, nothing
-  here can distinguish "the save persisted" from "the memory was never lost" —
-  and a 4.4% corruption rate per cycle means the store is not trustworthy for a
-  save either. The demonstrated value is moving a save on and off the card. See
-  BRD-094 and BRD-093. The running cartridge is not what disturbs a reading: two
-  dumps fifteen seconds apart during play were identical. See BRD-095.
+- **Save persistence is testable now, and passes for SRAM.** This section used to
+  say the opposite, on the strength of an EEPROM that appeared to keep its
+  contents across two power cycles. That measurement never touched the EEPROM
+  store: the accesses went to plain SDRAM because `config_backup_type` reached the
+  save engine as a one-bit net, so `is_eeprom` could never assert. With the width
+  fixed, `gba_eeprom.sv` rewrites its store with all-ones on every reset to present
+  an erased part, so the store clears rather than decays and a negative control is
+  available — and it was used: a probe writes, `gbasave` takes the window, a relay
+  cuts power, `gbaload` restores, the pattern returns, and an all-zeros control
+  comes back red. See BRD-110 and BRD-113. Two smaller notes survive from this
+  passage and are still true: the running cartridge is not what disturbs a reading
+  in general, two dumps fifteen seconds apart during play being identical (BRD-095)
+  — though a cartridge that reformats its save on boot does write the window, which
+  is what BRD-112 records.
 - **Occasional single-frame tearing** is visible across cartridges, roughly once
   every few minutes, possibly during busy areas. It is the first cosmetic defect
   here that is not tied to one title, so it is a property of the display path
@@ -402,16 +407,19 @@ releases the core it looks for `<rom-path>.sav` and restores it. See BRD-089
 and BRD-092.
 
 `gbasave` is the other direction: it dumps whatever is in the cartridge's save
-window to `<rom-path>.sav`, so a save can leave the board. The round trip is
-byte-exact for SRAM, flash512K and EEPROM, and 131,070 of 131,072 for flash1M —
-the two differing bytes are flash command opcodes that the flash model admits
-into the array rather than a save-path fault. See BRD-092.
+window to `<rom-path>.sav`, so a save can leave the board. SRAM, flash512K and
+flash1M round-trip with zero bytes differing. One caution for EEPROM cartridges
+and for any title that reformats an unreadable save on boot: the cartridge may
+rewrite the window while it runs, so a dump taken during play shows the game's
+save rather than the pattern you planted. See BRD-111 and BRD-112.
 
-**This is transport, not persistence.** Both save stores live in resources the
-loader never writes, so a save survives `tangload` and a reload whether or not
-the save path exists — a reload cannot distinguish "the save persisted" from
-"the save was never lost". Only a power cycle tests the card, and that test has
-not yet produced a readable result. See BRD-093 and Known gaps.
+**Transport is not persistence.** Both save stores live in resources the loader
+never writes, so a save survives `tangload` and a reload whether or not the save
+path exists — a reload cannot distinguish "the save persisted" from "the save was
+never lost". Only a power cycle tests it, and that test has now been run for SRAM:
+the relay cuts power, and the pattern returns only because the `.sav` on the card
+was restored. Since no save type here is non-volatile, the card copy is the only
+thing that outlives the board. See BRD-110 and BRD-113.
 
 A save written by the game reaches the card only when `gbasave` runs; there is no
 save-on-exit.
@@ -554,9 +562,18 @@ that killed it.
 
 ## Known gaps
 
-- **Save persistence across power loss is unmeasured**, and cannot be measured
-  here: the store retains its contents across a power cycle rather than clearing,
-  so neither a reload nor a power cycle can test it. See BRD-094.
+- **No cartridge has saved its own game and read it back.** Transport and
+  persistence are both measured — SRAM survives a real relay power cut — but every
+  measurement plants a pattern from the host or reads a window through the host
+  port. An in-game save in a retail title, restored after a power cut and accepted
+  by the game, is the test not yet run. Note when running it that **no save type
+  on this board is non-volatile**: SRAM and flash live in SDRAM and EEPROM in block
+  RAM, and `gba_eeprom.sv` deliberately rewrites its store with all-ones on every
+  reset to present an erased part. A `.sav` on the card is therefore the only copy
+  that outlives the board. See BRD-110 and BRD-113. An earlier note here said the
+  store could not be made to lose its contents (BRD-094); that was measured through
+  a `config_backup_type` that reached the save engine as one bit, so it never
+  touched the EEPROM store at all.
 - **The console dies on large SD transfers.** Three times in one session a
   `gbasave` or `tangput` left the BL616 console silent with the device still
   enumerated, recoverable only by removing power. `tangload` and `gbaload` never
