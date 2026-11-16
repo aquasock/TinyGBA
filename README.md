@@ -63,13 +63,17 @@ verified fact.
   before releasing the core. Measured on the post-fix image: SRAM (32,768 B),
   flash512K (65,536 B) and flash1M (131,072 B) all round-trip with **zero** bytes
   differing — flash1M is now exact because flash command bytes no longer leak into
-  the array. For SRAM the whole chain is measured across a real power cut made by
-  a relay, not a reset: probe writes, `gbasave`, power off, `gbaload`, pattern
-  returns — with an all-zeros negative control that comes back red, so the restore
-  did the work and not leftover memory. See BRD-109, BRD-110 and BRD-111, and
-  BRD-112 for why EEPROM needs its own handling. What is
-  *not* established is a retail cartridge saving its own game and accepting it
-  back; see Known gaps.
+  the array. EEPROM (8,192 B) round-trips **and interoperates**: its `.sav` files
+  are byte-compatible with mGBA in both directions, which they were not until the
+  byte order was corrected. For SRAM the whole chain is measured across a real
+  power cut made by a relay, not a reset: probe writes, `gbasave`, power off,
+  `gbaload`, pattern returns — with an all-zeros negative control that comes back
+  red, so the restore did the work and not leftover memory. Beyond patterns, all
+  three types have now been saved **by a retail game** and accepted unchanged by
+  mGBA: Metroid Fusion (SRAM), Super Mario Advance 2 (EEPROM) and Pokemon Emerald
+  (flash1M). See BRD-109, BRD-110, BRD-112 and BRD-116. What is *not* yet
+  established is a game's own save carried across a power cut with the game
+  continuing from it; see Known gaps.
 
 ### The two defects that blocked it, both now fixed
 
@@ -407,11 +411,13 @@ releases the core it looks for `<rom-path>.sav` and restores it. See BRD-089
 and BRD-092.
 
 `gbasave` is the other direction: it dumps whatever is in the cartridge's save
-window to `<rom-path>.sav`, so a save can leave the board. SRAM, flash512K and
-flash1M round-trip with zero bytes differing. One caution for EEPROM cartridges
-and for any title that reformats an unreadable save on boot: the cartridge may
-rewrite the window while it runs, so a dump taken during play shows the game's
-save rather than the pattern you planted. See BRD-111 and BRD-112.
+window to `<rom-path>.sav`, so a save can leave the board. SRAM, flash512K,
+flash1M and EEPROM all round-trip with zero bytes differing, and EEPROM `.sav`
+files exchange with mGBA in both directions. Two cautions. A cartridge that
+reformats an unreadable save on boot rewrites the window while it runs, so a dump
+taken during play shows the game's save rather than the pattern you planted. And
+EEPROM `.sav` files written by images older than 2026-11-16 are in a reversed
+byte order and need converting once. See BRD-112 and BRD-116.
 
 **Transport is not persistence.** Both save stores live in resources the loader
 never writes, so a save survives `tangload` and a reload whether or not the save
@@ -562,15 +568,19 @@ that killed it.
 
 ## Known gaps
 
-- **No cartridge has saved its own game and read it back.** Transport and
-  persistence are both measured — SRAM survives a real relay power cut — but every
-  measurement plants a pattern from the host or reads a window through the host
-  port. An in-game save in a retail title, restored after a power cut and accepted
-  by the game, is the test not yet run. Note when running it that **no save type
-  on this board is non-volatile**: SRAM and flash live in SDRAM and EEPROM in block
+- **No game's own save has been carried across a power cut and resumed.** Each
+  half is measured. A retail game saving in-game on the board produces a file mGBA
+  accepts unchanged, for all three save types (Metroid Fusion, Super Mario Advance
+  2, Pokemon Emerald), and a pattern written by a probe survives a relay power cut
+  and comes back when restored. What has not been run end to end is a game's own
+  save, through `pipe_save_dump.py`, a power cut, `gbaload`, and the game
+  continuing from where it left off. Note when running it that **no save type on
+  this board is non-volatile**: SRAM and flash live in SDRAM and EEPROM in block
   RAM, and `gba_eeprom.sv` deliberately rewrites its store with all-ones on every
   reset to present an erased part. A `.sav` on the card is therefore the only copy
-  that outlives the board. See BRD-110 and BRD-113. An earlier note here said the
+  that outlives the board, and `gbasave` is not the way to take it — it has killed
+  the console three times (TCL-064); `tools/save/pipe_save_dump.py` reads the same
+  window over `fpgapipe` without the SD path. See BRD-110, BRD-113 and BRD-116. An earlier note here said the
   store could not be made to lose its contents (BRD-094); that was measured through
   a `config_backup_type` that reached the save engine as one bit, so it never
   touched the EEPROM store at all.

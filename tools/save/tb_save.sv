@@ -177,9 +177,33 @@ module tb_save;
     // EEPROM model.  Port B of `mem_eeprom` is a clk16 memory -- `gba_memory`
     // runs on clk16 and passes its own clock down -- so this must be clk16, not
     // clk67.  Registered read, write when wreb, matching `gba_eeprom`.
+    //
+    // The store has two views and this models both, because modelling only one
+    // is how a byte-order defect went unnoticed.  `emem` holds the bytes as the
+    // CARTRIDGE sees them -- port A, serial, a byte's most significant bit first,
+    // so the first bit of byte n lands at bit address 8n.  Port B, the view the
+    // adapter uses, maps bit k of byte n to bit address 8n+k, which makes bit
+    // address 8n the byte's LEAST significant bit.  The two conventions are
+    // therefore bit-reversed with respect to one another, and a port-B byte is
+    // the reversal of the cartridge-visible byte.
+    //
+    // That reversal is not this testbench's invention: measured on hardware
+    // 2026-11-16 against mGBA, the board's port-B window equalled the bit
+    // reversal of the emulator's save at all 1504 positions where both held
+    // data (BRD-114).  `rv_sdram_adapter` converts at the host boundary, so the
+    // bytes above this model are in cartridge order.  With this model the
+    // assertions below check the property that actually matters and would fail
+    // if the adapter stopped converting.
+    function [7:0] rev8;
+        input [7:0] b;
+        begin
+            rev8 = {b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]};
+        end
+    endfunction
+
     always @(posedge clk16) begin
-        if (eeprom_wr) emem[eeprom_addr] <= eeprom_wdata;
-        eeprom_rdata <= emem[eeprom_addr];
+        if (eeprom_wr) emem[eeprom_addr] <= rev8(eeprom_wdata);
+        eeprom_rdata <= rev8(emem[eeprom_addr]);
     end
 
     // ------------------------------------------------------------- checking

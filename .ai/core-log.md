@@ -114,3 +114,33 @@ None.
 - User Test: NOT RUN
 
 ---
+## 5 COMMIT Unreleased 2026-11-16T14:26:32-07:00
+
+#### Coming From:
+
+Unreleased 92b24e5
+
+#### Purpose:
+
+Fix the EEPROM byte order that entry 4 measured, prove it on hardware in both directions, and use the 8-seed sweep to choose the placement.
+
+#### Outcome:
+
+The EEPROM byte-order defect is fixed and verified on the board in both directions. `rv_sdram_adapter.v` now applies a `rev8` at the host boundary in both directions -- on write through `eeprom_wdata` and the `rv_wdata` lane, and on read through the three `eeprom_rdata0` lanes and the `rv_rdata` assembly -- rather than converting inside `eeprom_ram`, because that file is deliberately byte-identical to the vendor primitive and `tb_eeprom_equiv.sv` asserts exactly that (TCL-065), while the byte order is a property of the external interface. Proof, on `build/eeprom_s7` with every gate passing and `hold 0`: mGBA's standard-order SMA2 save uploaded UNMODIFIED was accepted by the cartridge and the window still read byte-identical after 30 seconds of play, where before the fix an unmodified emulator save was reformatted within 25 seconds; and then the reversed file this project previously had to produce was uploaded as a negative control, the cartridge rejected and reformatted it, and the fresh save the game wrote read back out byte-identical to mGBA's independently generated file. That last step is what proves the reverse direction, because those bytes came from the game's own write path and arrived at the host in emulator order (BRD-116). The regression is committed rather than incidental: `tools/save/tb_save.sv` now models the store bit-faithfully -- cartridge-visible bytes above the model, `rev8` across it -- and was mutation-tested, giving 360 mismatches with the adapter conversion removed and PASS with it, so the order cannot silently drift back. This also closes the third save type with a real game rather than a probe: your in-game Pokemon Emerald save, captured off the running board over `fpgapipe`, wrote sectors 13 to 26 with valid `0x08012025` footers and mGBA accepted it byte for byte unchanged, which with Metroid Fusion's SRAM save and the SMA2 EEPROM save means all three save types now have a `gbasave` equivalent proven end to end against an independent emulator. One incidental finding came out of that dump and is recorded because it misled the first reading: Emerald's flash held the previous cartridge's SRAM image in sectors 0 to 12, byte-identical to Metroid's save including its `b4c89ba1` signature, so the loader does not clear the save window when it changes cartridge and a dump's contents outside a game's own sectors say nothing about that game. The sweep the operator asked for ran as eight concurrent placements: seeds 1, 3 and 7 produced bitstreams and all three pass every gate with `hold 0`, no relaxation and `clk67` on `SPINE25/TOP1=good`; seed 7 is the best and was deployed, at `clk67` 206.697 MHz against seed 1's 190.803 and seed 3's 194.780, `hclk` 94.251 against 85.638 and 90.901, and 385,361 router iterations against 433,391 and 424,720. Seeds 2, 4, 5, 6 and 8 were still routing when this cycle closed and their outcomes are not recorded here. This netlist routes harder than the previous one for a trivial reason worth noting: `rev8` added 29 arcs, 175,507 against 175,478, and seed 1 needed 433,391 iterations where the pre-fix netlist finished at 410,007. Three of my own errors are recorded: I described the first build as being in placement for forty minutes when it was forty minutes into routing; I read a 128 KiB dump's Metroid signature as evidence that the capture had failed, when it was stale data from the previous cartridge that the loader legitimately leaves in place; and my first sweep monitor read only the routing table, so it reported every seed as `ITER 0` until I made it report the phase. The board was left running `build/eeprom_s7` with SMA2 and its accepted save. No RTL logic other than the byte-order conversion changed. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 5 was validated as the fifth entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 5 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 199 records with 199 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 184 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+Two things follow directly. The `.sav` convention changed, so anything written by an earlier image of this project is in the reversed order and needs converting once -- the SMA2 in-game save was converted and put back on the card, but Mario Kart's flash512K save and the older test files were left as they were, and any save the operator cares about should be checked before the next load. Then the remaining save test is the whole chain with a game rather than a probe: an in-game save in each type, `pipe_save_dump.py` rather than `gbasave` because `gbasave` has killed the console three times (TCL-064), a relay power cycle, `gbaload`, and the game continuing from its own save. Metroid Fusion is the natural first case since its SRAM save already reads out in a standard order that mGBA accepts. Also outstanding: seeds 2, 4, 5, 6 and 8 of the sweep were still routing, and if any of them finishes with a better `clk67` than seed 7's 206.697 MHz it is worth knowing before seed 7 is treated as the reference placement; the log is at 5 of 100 entries so there is room either way. Two instruments remain unvalidated and should be finished or deleted: `tools/roms/savewprobe.s` is marked NOT VALIDATED and `tools/roms/saveprobe_iw.s` is still untracked. Finally the release question is now live on its own merits -- three save types are proven with real games, and `core.md` calls for a MINOR bump at a hardware-proven capability with no tags existing yet -- but tagging is external publication and waits on the operator.
+
+#### Files Modified:
+
+- fpga/gba/src/memory/rv_sdram_adapter.v
+- tools/save/tb_save.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
