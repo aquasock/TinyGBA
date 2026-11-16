@@ -27,3 +27,32 @@ None.
 - User Test: N/A
 
 ---
+## 2 COMMIT Unreleased 2026-11-16T12:26:44-07:00
+
+#### Coming From:
+
+Unreleased fbac46d
+
+#### Purpose:
+
+Re-take the save round trips that the one-bit `config_backup_type` invalidated, for all four save types, on the post-fix image.
+
+#### Outcome:
+
+Three of the four types are re-established on the fixed image and one is newly broken, which is the finding. On `build/head_retail_s1` at seed 1 with the retail BIOS, each `tools/save/sav_pattern.py` pattern was planted as the cartridge's `.sav`, loaded with `gbaload` and read back over `fpgapipe`: flash512K (Mario Kart, 65,536 bytes) differs in 0 bytes, flash1M (Pokemon Emerald, 131,072 bytes) differs in 0 bytes, and EEPROM (Super Mario Advance 2, 8,192 bytes) differs in 1,495 (BRD-111). The flash1M result is strictly better than BRD-092's 131,070 of 131,072, because the two flash command bytes at `0x2AAA` and `0x5555` no longer leak into the array now that the flash protocol is actually selected rather than arriving as `BACKUP_NONE`. The EEPROM failure is an addressing or read-timing fault rather than corrupt data, and three independent checks say so: the differing positions are identical for a ramp pattern and for a constant `0xAA`, so they depend on address and not content; a second read started 64 bytes later returned byte-identical values at all 8,128 overlapping addresses, so the values belong to the address and not to my instrument's 128-byte chunking; and after a power cycle with no `.sav` restored the window reads `0xff` across most of its span with the same fixed values at the same addresses, so a blank store is producible and the junk is not stored save data. The differing blocks run `0x0010`, `0x0080`, `0x00c0`, then `0x0100`, `0x0280`, `0x0400`, `0x0580`, `0x0700`, `0x0880` -- a 384-byte period from `0x100` onward -- while `0x0970-0x1fff` is entirely correct. What this corrects is larger than the failure itself: BRD-092's EEPROM round trip and BRD-094's EEPROM power-cycle measurement both travelled the plain-SDRAM path, because `is_eeprom = config_backup_type == 4` could never assert against a one-bit net, so the `eeprom_ram` wrapper has never actually been exercised on the board and BRD-096's inference that it was hardware-verified does not hold. The defect is newly reachable rather than newly introduced. It also answers BRD-094 in the affirmative: a blank EEPROM store is reachable, so its persistence is testable, contrary to that record's negative conclusion. The root cause is not isolated. On paper the adapter presents each RV 32-bit word as four consecutive EEPROM byte addresses and captures each byte one cycle after presenting its address, which matches `eeprom_ram` port B's one-cycle latency, so the fault is likelier in the bank select or in whether the save engine issues word-aligned 32-bit reads than in the lane sequence. Two side effects are recorded rather than dropped: the pattern writes replaced the existing `.sav` files for Mario Kart and Emerald on the card, which were prior test artifacts and not operator data, and the Super Mario Advance 2 `.sav` was hidden during the blank test and left renamed `t_sma2.sav.bak`. No RTL was changed and no bitstream was rebuilt. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 2 was validated as the second entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 2 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 194 records with 194 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 179 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+Isolate the EEPROM fault, which is now the only save defect left and is well bounded: the failing addresses are fixed and known, the window is only 8 KB, and the simulation harness can build the real `gba_eeprom` and `eeprom_ram` under Verilator, so a write-then-read of the pattern there will show whether `bank_b` or the lane sequence is wrong without another place-and-route. Check first whether the save engine issues word-aligned 32-bit RV reads, because the adapter assumes `rv_addr[1:0] == 0` when it forces the first lane to `2'b00`, and a byte-granular transaction through that path would alias four addresses onto one and produce exactly this shape. Then re-run the two records the old result invalidated: BRD-094's persistence question is now answerable because a blank EEPROM store is producible, so write a pattern, power-cycle with the relay, read back with no restore to confirm it clears, then restore and confirm it returns; and BRD-096's claim that `eeprom_ram` was verified on hardware needs either a hardware result through the real EEPROM path or a note that it rests on the SDRAM path. Once the EEPROM store round-trips, the remaining save work is a retail title saving its own game -- an SRAM title such as Metroid Fusion, and Emerald afterwards. Two card files were left changed by this cycle and should be tidied when convenient: `t_sma2.sav.bak` should go back to `t_sma2.gba.sav`, and the Mario Kart and Emerald `.sav` files now hold test patterns rather than their previous contents. Do not cite BRD-092 or BRD-094 for the EEPROM store, and do not treat the EEPROM failure as evidence about the flash or SRAM paths, which are measured separately and pass.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: PASS
+- User Test: NOT RUN
+
+---
