@@ -122,6 +122,10 @@ sources=(
     "$d/usb_hid_host.v"
     "$d/fb_ram.v"
     "$d/gba2hdmi.sv"
+    # TinyDesk overlay: the layer is vendored verbatim from TinySNES and the
+    # test pattern is this project's own; see THIRD_PARTY.md for the attribution.
+    "$d/desk_layer.v"
+    "$d/desk_test_pattern.v"
 
     "$d/iosys/iosys_bl616.v"
     "$d/iosys/uart_fixed.v"
@@ -456,8 +460,20 @@ fi
 # nearest register, because the routed delay is the very quantity nextpnr omits.
 echo "=== 1e. BSRAM address-port gate ==="
 bsram=0
+# `--known` names the arrays whose ADB cone is already accounted for.  mem_bios
+# is TCL-035's original entry.  video.u_desk.cells is the TinyDesk cell store,
+# added 2026-11-16: its address is `row * 80 + col` inside the vendored layer,
+# which is two chained adders and measures 9 to 12 levels, against at most 7 for
+# the rest of this design.  It is recorded rather than fixed because the layer
+# is carried byte-identical to upstream and registering its address would mean
+# editing that body; the risk is bounded in a way mem_bios's is not, since a
+# violation here can only misplace a character cell, never corrupt memory the
+# machine runs from.  Treat it as a tolerance awaiting hardware confirmation,
+# not as a fix: if the desk draws displaced characters on the board, this is the
+# first thing to suspect.
 "$suite/py3bin/python3" "$root/tools/bsram_addr_check.py" "$out/tinygba.json" \
-    --max-depth 8 >"$out/bsram-addr.log" 2>&1 || bsram=$?
+    --max-depth 8 --known mem.mem_bios,video.u_desk.cells \
+    >"$out/bsram-addr.log" 2>&1 || bsram=$?
 sed 's/^/  /' "$out/bsram-addr.log"
 if [[ $bsram -eq 2 ]]; then
     echo "BSRAM address-port gate could not read the netlist; see $out/bsram-addr.log" >&2

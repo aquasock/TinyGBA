@@ -24,6 +24,15 @@ module iosys_bl616 #(
     input [7:0] overlay_x,          // 0-255
     input [7:0] overlay_y,          // 0-223
     output [14:0] overlay_color,    // BGR5
+
+    // TinyDesk overlay (vendored desk_layer.v).  TinyTang's desktop draws an
+    // 80x45 character grid into whichever core is loaded; these are the cell
+    // writes it sends.  `desk_on` gates the whole layer, and `desk_wr_tog` marks
+    // one completed cell with `desk_wr_addr`/`desk_wr_data` already stable.
+    output            desk_on,
+    output reg        desk_wr_tog,
+    output reg [11:0] desk_wr_addr,
+    output reg [36:0] desk_wr_data, // {char[6:0], fg[14:0], bg[14:0]}, colours {b,g,r}
     input [11:0] joy1,              // DS2/SNES joystick 1: (R L X A RT LT DN UP START SELECT Y B)
     input [11:0] joy2,              // DS2/SNES joystick 2
     output reg [15:0] hid1,         // USB HID joystick 1
@@ -84,6 +93,21 @@ localparam BAUD_RATE = 2_000_000;
 
 reg overlay_reg = 1;
 assign overlay = overlay_reg;
+
+// TinyDesk cell state.  `desk_on` follows the firmware's 0x08 overlay command
+// AND its 0x15 enable, which is what TinyNES/TinyGBC/TinySNES do: the desktop
+// raises the overlay first and enables cells once it has painted them, so a
+// half-drawn grid is never shown over the game.
+localparam integer DESK_CELLS = 80 * 45;
+reg        desk_overlay = 1'b0;
+reg        desk_enable  = 1'b0;
+reg [11:0] desk_cursor  = 12'd0;
+reg [7:0]  desk_x       = 8'd0;
+reg [2:0]  desk_nth     = 3'd0;    // byte index within the current 0x14 cell
+// The 0x14 frame carries five bytes per cell and `data_reg` keeps only three,
+// so the cell bytes are accumulated separately here.
+reg [31:0] desk_shift   = 32'd0;
+assign desk_on = desk_overlay & desk_enable;
 
 reg [7:0] rom_loading_reg = LOADING_STATE;
 assign rom_loading = rom_loading_reg;
@@ -308,6 +332,7 @@ always @(posedge clk) begin
                 else
                     recv_state <= RECV_IDLE;
                 data_cnt <= 0;
+                desk_nth <= 0;      // a cell never spans two frames
             end
             
             RECV_PARAM: if (rx_valid) begin
@@ -355,8 +380,33 @@ always @(posedge clk) begin
                         rom_do_valid <= 1;      // pulse data valid
                     end
                     8: begin
-                        overlay_reg <= rx_data[0];
+                        // Overlay show/hide.  Drives the desk as well as the
+                        // legacy text page: the desktop raises this first, then
+                        // paints cells, then enables them with 0x15.
+                        overlay_reg  <= rx_data[0];
+                        desk_overlay <= rx_data[0];
                     end
+                    8'h13: case (data_cnt)          // TinyDesk: cursor to (x, y) of 80x45
+                        0: desk_x <= rx_data;
+                        1: desk_cursor <= (desk_x < 80 && rx_data < 45) ?
+                                          {rx_data[5:0], 6'd0} + {2'd0, rx_data[5:0], 4'd0} + {4'd0, desk_x} :
+                                          DESK_CELLS[11:0];
+                        default: ;
+                    endcase
+                    8'h14: begin                    // TinyDesk: cells, five bytes each
+                        desk_nth <= desk_nth == 3'd4 ? 3'd0 : desk_nth + 3'd1;
+                        if (desk_nth == 3'd4 && desk_cursor < DESK_CELLS) begin
+                            // Bytes arrive char, fg[14:8], fg[7:0], bg[14:8], bg[7:0];
+                            // data_reg holds the first four and rx_data the fifth.
+                            desk_wr_addr <= desk_cursor;
+                            desk_wr_data <= {data_reg[30:24], data_reg[22:16], data_reg[15:8],
+                                             data_reg[6:0], rx_data};
+                            desk_wr_tog  <= ~desk_wr_tog;
+                            desk_cursor  <= desk_cursor + 12'd1;
+                        end
+                    end
+                    8'h15: if (data_cnt == 0)       // TinyDesk: enable cell drawing
+                        desk_enable <= rx_data[0];
                     9: begin
                         case (data_cnt)
                             0: hid1[15:8] <= rx_data;

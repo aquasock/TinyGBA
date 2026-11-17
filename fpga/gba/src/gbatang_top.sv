@@ -2167,6 +2167,52 @@ wire [11:0] joy_wii = 12'b0;
 
 assign joy_btns_gba = overlay ? 0 : joy_btns | joy_usb1 | joy_usb2 | hid1 | hid2 | joy_wii;
 
+// ---------------------------------------------------------------- TinyDesk --
+//
+// Cells arrive on the menu clock from `iosys_bl616` and are redrawn on the
+// pixel clock by the vendored `desk_layer`, so these cross a clock domain and
+// the layer owns the synchronisers for it.  Under TINYGBA_DESK_TEST the write
+// port is driven by `desk_test_pattern` instead of the firmware, and the layer
+// is held on, so a built image shows the colour bars with no host involved --
+// that is the point of the test image, and it is why the test does not need
+// TinyDesk, the console or a cartridge to say something.
+wire        desk_on;
+wire        desk_wr_tog;
+wire [11:0] desk_wr_addr;
+wire [36:0] desk_wr_data;
+
+// `iosys` always drives these, whether or not the test overrides them, so the
+// port list does not depend on the define.
+wire        desk_on_iosys, desk_wr_tog_iosys;
+wire [11:0] desk_wr_addr_iosys;
+wire [36:0] desk_wr_data_iosys;
+
+`ifdef TINYGBA_DESK_TEST
+// The test pattern drives its own nets rather than the ones above.  Sharing a
+// net with `iosys` puts two drivers on it -- caught by synthesis as a
+// driver-driver conflict on `desk_wr_tog`, resolved silently to a constant,
+// which would have produced a static picture with no error anywhere.
+wire        desk_wr_tog_test;
+wire [11:0] desk_wr_addr_test;
+wire [36:0] desk_wr_data_test;
+
+desk_test_pattern u_desk_test (
+    .clk(clk16), .resetn(resetn),
+    .wr_tog(desk_wr_tog_test), .wr_addr(desk_wr_addr_test),
+    .wr_data(desk_wr_data_test), .ready()
+);
+
+assign desk_on      = 1'b1;
+assign desk_wr_tog  = desk_wr_tog_test;
+assign desk_wr_addr = desk_wr_addr_test;
+assign desk_wr_data = desk_wr_data_test;
+`else
+assign desk_on      = desk_on_iosys;
+assign desk_wr_tog  = desk_wr_tog_iosys;
+assign desk_wr_addr = desk_wr_addr_iosys;
+assign desk_wr_data = desk_wr_data_iosys;
+`endif
+
 `ifdef DDR3_FRAMEBUFFER
 gba2hdmi_ddr3 video (       // DDR3-based framebuffer
 	.clk27(clk27), .resetn(resetn), .clk_pixel(hclk), 
@@ -2205,6 +2251,8 @@ gba2hdmi video (            // BRAM-based framebuffer
     .overlay(overlay), 
 `endif
     .overlay_x(overlay_x), .overlay_y(overlay_y), .overlay_color(overlay_color),
+    .desk_on(desk_on), .desk_wr_tog(desk_wr_tog),
+    .desk_wr_addr(desk_wr_addr), .desk_wr_data(desk_wr_data),
 	.tmds_clk_n(tmds_clk_n), .tmds_clk_p(tmds_clk_p), .tmds_d_n(tmds_d_n),
 	.tmds_d_p(tmds_d_p)
 );
@@ -2219,6 +2267,8 @@ iosys_bl616 #(.CORE_ID(3), .COLOR_LOGO(15'b01111_01100_10101), .FREQ(16_650_000)
     .resetn(resetn),
 
     .overlay(overlay_iosys), .overlay_x(overlay_x), .overlay_y(overlay_y), .overlay_color(overlay_color),
+    .desk_on(desk_on_iosys), .desk_wr_tog(desk_wr_tog_iosys),
+    .desk_wr_addr(desk_wr_addr_iosys), .desk_wr_data(desk_wr_data_iosys),
     .core_config(core_config),
     .joy1(joy_btns | joy_usb1 | joy_usb2), .joy2(12'b0),
     .hid1(hid1), .hid2(hid2),

@@ -32,6 +32,15 @@ module gba2hdmi (
     output [9:0] overlay_y,
     input [15:0] overlay_color,
 
+    // TinyDesk overlay.  The layer from TinySNES is vendored beside this file
+    // and draws TinyTang's 80x45 character grid over the whole 1280x720
+    // picture, which the legacy `overlay` window above cannot do: that one is a
+    // single 960x720 page of one fixed palette, sized for the old text menu.
+    input             desk_on,
+    input             desk_wr_tog,
+    input      [11:0] desk_wr_addr,
+    input      [36:0] desk_wr_data,
+
     // output [7:0] led,
 
 	// output signals
@@ -521,9 +530,31 @@ always @(posedge clk_pixel) begin
 
 end
 
+// TinyDesk overlay layer.  Clocked by the pixel clock and given the raw raster
+// position, so it tiles the whole 1280x720 frame; its `px` output arrives in
+// step with this module's own registered output (the layer runs four pixels
+// ahead and registers at each stage), which is why it can be used directly in
+// the block below rather than through a delay line of its own.
+wire        desk_px;
+wire [23:0] desk_rgb;
+
+desk_layer u_desk (
+    .clk    (clk_pixel),
+    .cx     (cx),
+    .cy     (cy),
+    .on     (desk_on),
+    .wr_tog (desk_wr_tog),
+    .wr_addr(desk_wr_addr),
+    .wr_data(desk_wr_data),
+    .px     (desk_px),
+    .rgb    (desk_rgb)
+);
+
 // calc rgb value to hdmi
 always @(posedge clk_pixel) begin
-    if (active) begin
+    if (desk_px) begin
+        rgb <= desk_rgb;            // the desk owns this pixel
+    end else if (active) begin
         if (overlay)
             rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
         else

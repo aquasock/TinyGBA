@@ -93,6 +93,25 @@ is in this tree, and no external checkout is involved in a build.
   and TinyTang's `fpga/desktop/desktop.cst`. `tools/fs_to_bin.py` is TinyNES's
   file, unmodified, via TinySNES.
 
+- **TinySNES, TinyDesk overlay layer** — `fpga/gba/src/desk_layer.v` is the
+  module `desk_layer` from TinySNES `fpga/snes/src/desk_layer.v` at commit
+  `768f6ff` (https://github.com/aquasock/TinySNES), GPL-3.0-only, which matches
+  this project's licence. The module body is carried byte-identical to upstream
+  and only a provenance header is added, so `diff` against the source still
+  works; everything below that header is upstream's, and the body's md5 is
+  `81de82010cb43d60dd3f8b364417b1a8` on both sides. Vendored rather than
+  rewritten because TinyTang's desktop draws the same 80x45 character grid into
+  whichever core is loaded, and TinyNES, TinyGBC and TinySNES all render it with
+  this layer; a second implementation of a solved problem would be worse than an
+  attributed copy.
+
+- **font8x8_basic, by Daniel Hepper** — `fpga/gba/src/desk_font.hex` is the
+  glyph ROM TinySNES ships at `fpga/snes/src/desk_font.hex`, fetched from
+  Daniel Hepper's `font8x8` project by TinySNES's `tools/fetch_font8x8.sh`. The
+  upstream work is released into the public domain, and the file's own first
+  line records that, so it carries no licence obligation beyond the note itself.
+  The desk layer reads it through `$readmemh`, so it is data rather than code.
+
 - **TinyNES, Wii Classic Controller master** —
   `fpga/gba/src/peripherals/wii_pad_master.sv` is the module `wii_pad_master`
   from TinyNES `fpga/ae350_soc/wii_pads.sv` at commit `7013393`
