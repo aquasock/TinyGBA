@@ -359,3 +359,32 @@ No work remains on the exit chord. Two optional items are left from it: a power 
 - User Test: PASS
 
 ---
+## 13 COMMIT Unreleased 2026-11-17T09:31:50-07:00
+
+#### Coming From:
+
+Unreleased b4b526d
+
+#### Purpose:
+
+Clear the test leftovers and superseded bitstreams that the save-path and desktop cycles left on the board's SD card.
+
+#### Outcome:
+
+Thirty-one files were deleted from the card with `rm` at the board's shell, with the desktop not running so the console reached the shell, and each directory was listed afterwards to confirm. From `/root/media/gba` went the twelve test leftovers entry 10 listed: `t_sma2.gba` and its save, `marker.bak`, `smw_pattern.bak`, the `saveprobe`, `saveprobe_iw`, `saveprobe_wrfix` and `saveprobe_zeros` cartridges with their saves, and `Pokemon - Emerald Version (USA, Europe).gba.sav.patterntest`; the probe sources that remain are rebuilt by `tools/make_probe_rom.py`. From `/root/cores/console138k` went fifteen diagnostic TinyGBA bitstreams, `tinygba_hw2`, `prod3`, `iw3`, `fb3`, `vr3`, `sdiag3`, `pad14`, `save14`, `diag3`, `nowfix`, `rs1`, `bsw7`, `deskbars`, `desk2` and `home`, each of which has a build directory of matching name and size on the host, along with `tinygba.fs.gz`, which the board never reads and which matched no identifiable build, leaving `tinygba.bin` from `build/exitkey` as the only TinyGBA core. TinyTang's two staging images in the card root were removed in the same pass and are recorded in that repository's entry 39. Every retail cartridge, its real save, `diagnostics/`, `bl616-firmware.bin`, `crash.log`, the `.ini` files and the other projects' cores were kept. The thirty-first file was `Mario Kart - Super Circuit (USA).gba.sav`, which had reappeared at 65,536 bytes after entry 10 deleted it and which the operator could not account for: fetched with `tangget`, it is power-up SDRAM rather than a save or the old pattern, with no erased runs, no structure and the per-bit bias of unwritten DRAM, and the likeliest writer is the library exit of BRD-122 dumping an uncleared save window for a game that had no save (BRD-123, a `LEAD` because which game was exited was not recorded). It was deleted at the operator's direction and kept at `/run/media/vash/GIT/tinytang-scratch/removed-2026-11-17/`. No repository source changed and nothing was built or deployed. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected and holds this entry and BRD-123 only, and this entry was validated as number 13 of 100 with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, only eligible paths in Files Modified and allowed Status values, with the reference store at 208 records and 208 unique ids.
+
+#### Next Steps:
+
+BRD-123 is the one actionable item this cycle produced: with save-on-exit, a cartridge that has never saved can be given a junk `.sav` the first time it is exited from the library, and either filling the flash and SRAM window with `0xFF` on reset, as the EEPROM store already does, or skipping the exit save when no `.sav` existed and the window was never written would close it, after a reproduction confirms the mechanism. The release remains deferred at the operator's direction.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
