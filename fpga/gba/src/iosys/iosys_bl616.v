@@ -540,14 +540,24 @@ reg [15:0] joy1_reg;
 // is driven only by a tap of HOME, which is exactly the arrangement TinySNES
 // uses on the same host.
 //
-// A tap is HOME pressed and released with nothing else held; HOME with SELECT
-// is the exit-and-save gesture on TinySNES and is deliberately not reused here,
-// because this core has no save-on-exit and a combined gesture that did nothing
-// would be worse than none.
+// A tap is HOME pressed and released with nothing else held.  HOME with
+// anything else held is not a tap: HOME with SELECT is the exit chord below,
+// reported on bit 15, and a chord must not also open the desktop.
 reg [7:0] home_tap = 8'd0;
 reg home_prev = 1'b0, home_alone = 1'b0;
-wire [11:0] joy1_report = (joy1 & 12'hFFF & ~12'h400)
-                        | (home_tap != 8'd0 ? 12'h400 : 12'h000);
+// The exit gesture, and the reason it is a level rather than a tap.  HOME with
+// SELECT is what TinyTang's SNES app watches for on bit 15 to end a game and put
+// the desktop core back, and on a Classic Controller the button labelled minus
+// is SELECT, so "minus + HOME" is this pair.  It is deliberately not a tap: the
+// app polls the pad, and a level held for as long as the two buttons are down
+// cannot be missed by a poll -- which also means SELECT being held keeps
+// `home_alone` from arming, so the desktop does not open at the moment the exit
+// is asked for.
+wire save_exit = home & joy1[2];            // joy1[2] is SELECT
+
+wire [15:0] joy1_report = {4'h0, (joy1 & 12'hFFF & ~12'h400)
+                        | (home_tap != 8'd0 ? 12'h400 : 12'h000)}
+                        | (save_exit ? 16'h8000 : 16'h0000);
 // A report is repeated every JOY_REFRESH_TICKS even when nothing changed: a
 // dropped UART frame would otherwise leave a button stuck low-side forever, and
 // a stuck bit 10 would hold the desktop over the game with no way back.
@@ -625,7 +635,7 @@ always @(posedge clk) begin
             SEND_IDLE: begin
                 send_idx <= 0;
                 if (joy_timer == 0 &&
-                    (joy1_report != joy1_reg[11:0] || joy2 != joy2_reg[11:0] ||
+                    (joy1_report != joy1_reg || joy2 != joy2_reg[11:0] ||
                      joy_refresh == JOY_REFRESH_TICKS - 1)) begin
                     joy1_reg <= joy1_report;
                     joy2_reg <= joy2;

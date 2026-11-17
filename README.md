@@ -432,8 +432,12 @@ the relay cuts power, and the pattern returns only because the `.sav` on the car
 was restored. Since no save type here is non-volatile, the card copy is the only
 thing that outlives the board. See BRD-110 and BRD-113.
 
-A save written by the game reaches the card only when `gbasave` runs; there is no
-save-on-exit.
+A save written by the game reaches the card only when something dumps it: `gbasave`
+from the shell, or the exit chord (minus + HOME) on a cartridge launched from
+TinyDesk's TinyGBA library, which saves and then puts the desktop back. The exit
+takes a second or two because the save is written to the card before the desktop
+core is reloaded. A cartridge started with `gbaload` at the shell has nothing
+watching the chord, so it has no save-on-exit. See BRD-122.
 
 **A controller only works on this path.** An image flashed over JTAG runs the core
 but configures no socket fabric, so nothing on the pad responds (TCL-054).
@@ -514,7 +518,9 @@ tangload /root/cores/console138k/tinygba.bin        # on the board's shell
 The mapping, from TinyNES's `pad_test` table as validated on this board: the
 D-pad, A, B, START, SELECT, L and R map one-to-one; **X also presses A** and **Y
 also presses B**, preserving the Classic Controller's physical face-button
-arrangement; **ZL and ZR also press L and R**; HOME is unmapped. The analogue
+arrangement; **ZL and ZR also press L and R**. HOME never reaches the GBA: a tap
+of HOME alone switches between TinyDesk and the game (BRD-120), and HOME held with
+minus (SELECT) is the exit chord, reported to the host on bit 15 (BRD-122). The analogue
 sticks and triggers are read and discarded, because the GBA has no analogue
 input.
 

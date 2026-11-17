@@ -2144,9 +2144,13 @@ end
 
 // The GBA has one face-button pair and one shoulder pair, so the Classic
 // Controller's second pair and its triggers alias onto them: X plays A and Y
-// plays B (the SNES arrangement), ZL and ZR play L and R.  HOME has nothing to
-// map to and is left out.  X and Y themselves stay clear because nothing
-// downstream reads those two bits.
+// plays B (the SNES arrangement), ZL and ZR play L and R.  X and Y themselves
+// stay clear because nothing downstream reads those two bits.
+//
+// HOME does not reach the GBA keypad, which has no such button, but it is not
+// unused: the machine's host reads it, alone as the TinyDesk toggle and with
+// SELECT as the exit-from-a-game chord, so it is declared here and passed to
+// `iosys_bl616` rather than dropped.
 // The HOME key, for the TinyDesk toggle.  Declared here rather than beside its
 // use because the pad exists only when USB1 is undefined, and `iosys` is
 // instantiated outside that guard -- a missing pad must mean "no HOME", not an

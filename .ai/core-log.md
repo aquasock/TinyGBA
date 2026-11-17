@@ -328,3 +328,34 @@ None.
 - User Test: FAIL
 
 ---
+## 12 COMMIT Unreleased 2026-11-17T07:02:41-07:00
+
+#### Coming From:
+
+Unreleased 0ede9d1
+
+#### Purpose:
+
+Measure the HOME-with-SELECT exit chord that entry 11 left unreliable and uncommitted, and commit it if the core's pad word proved correct.
+
+#### Outcome:
+
+The chord works and the RTL is committed; what entry 11 recorded as unreliable was two host-side effects, not a fault in this core (BRD-122). On `build/exitkey`, the bitstream the unlogged session built from these two files at 19:53 to 20:01 on 2026-11-16 and the one on the card at 5,063,660 bytes, `tangload` and a shell `gbaload` of Metroid Fusion were followed by TinyTang's `pad` command read from the host with timestamps. Idle read `0000` on every load, which rules out the floating DS2 port entry 11's plan named as the first suspect; minus alone gave `0004`; HOME alone gave the `0400` desk tap for 250 ms; and a dedicated run of twelve chords, pressed in both orders and released in both orders, gave `8004` every time with no stray `0400` and no bit 15 without SELECT. Three runs of minus, then HOME, then the chord all appeared to drop out of the game at the HOME step, and the operator confirmed it was not an exit: with the desk layer off after a shell launch, TinyTang's `desk_watch_toggle()` turns a tap into TinyDesk coming up, which shows the shell, while the game ran on underneath and came back on the next HOME. A shell-launched game cannot be exited at all, because only the library app's `play_task` reads bit 15. After a power-up the operator launched from the TinyDesk library and the chord ended the game and restored the desktop, taking one to two seconds because the save is written to the card before the desktop core is reloaded, which is what had been read as the chord not working; afterwards the console answered, `fpga` reported core 84, `crash` reported no record and no kept resets, and the SD was mounted. One run's apparent exit at the chord step was discounted by the operator as a mistake in pressing. The build's gates all pass with `hold 0` and `clk67` on `SPINE25/TOP1=good`, and `clk67` at 44.287 MHz passes only under the documented GBATang multicycle path, per TCL-056. Two documentation corrections are part of this commit: `iosys_bl616.v` still said HOME with SELECT was deliberately not reused, contradicting the `save_exit` beside it, and the comment now describes the chord, which changes no logic so the tested bitstream still corresponds to the committed source; and the README said there is no save-on-exit and that HOME is unmapped, both now corrected to cite BRD-120 and BRD-122. The TinyTang half of this work is committed in that repository with its own entry. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected and holds this entry and BRD-122 only, and this entry was validated as number 12 of 100 with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, only eligible paths in Files Modified and allowed Status values, with the reference store at 207 records and 207 unique ids.
+
+#### Next Steps:
+
+No work remains on the exit chord. Two optional items are left from it: a power cut straight after a library save-and-exit has not been run, which TinyTang entry 37 named as the sequence before the 2026-11-16 failure to start, and the operator has judged it unnecessary; and the exit gives no feedback during its one-to-two-second save, which is a TinyTang presentation choice rather than a defect here. The card still carries the test leftovers entry 10 listed, and the release question remains the operator's, with cartridges now launching, saving on exit and returning to the desktop.
+
+#### Files Modified:
+
+- README.md
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/iosys/iosys_bl616.v
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
