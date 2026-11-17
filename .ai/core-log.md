@@ -299,3 +299,32 @@ Decide the fate of the unlogged save-and-exit work before anything else touches 
 - User Test: N/A
 
 ---
+## 11 COMMIT Unreleased 2026-11-16T22:42:51-07:00
+
+#### Coming From:
+
+Unreleased 46b281a
+
+#### Purpose:
+
+Hand over the state of the save-and-exit work after a firmware-fault hunt in TinyTang found the exit chord this core reports unreliable on the board.
+
+#### Outcome:
+
+The exit chord does not work as designed, and that is this repository's half of a fault hunt recorded in full as TinyTang log entry 37. After entry 9 an unlogged session added a HOME-with-SELECT exit chord to this core -- `save_exit = home & joy1[2]` in `fpga/gba/src/iosys/iosys_bl616.v`, reported as bit 15 of a pad word widened from 12 to 16 bits, with `fpga/gba/src/gbatang_top.sv` passing the Classic Controller's HOME through as `home_key` -- built it as `build/exitkey` and put it on the card, where `/root/cores/console138k/tinygba.bin` is 5,063,660 bytes, the size of that build, while `tinygba_home.bin` beside it matches `build/home_toggle` at 4,873,196. That session's TinyTang firmware, which watches bit 15 to save the game and reload the desktop, is the image that stopped the board from starting TinyTang at 20:16; TinyTang entry 37 identifies it, clears the relay bench with seven clean cold starts on known-good firmware, and shows the same firmware rebuilt surviving four cold starts, so the failure is not a property of booting it and most likely followed from exercising the chord and its save. On the board tonight the operator launched games from the TinyGBA library with that core loaded and found the chord unreliable: minus with HOME does not reliably end the game, it behaves as HOME together with some other button, and which button differs from one launch to the next. Read on paper the path looks correct, which is why it needs measuring rather than more reading: the `joy_wii` vector is ordered (R L X A RT LT DN UP START SELECT Y B) from bit 11 down, so `joy1[2]` is SELECT, driven by `pad_held_s[4]`, the Classic's minus; `home_key` is `pad_held_s[3]`; and the transmit path sends `joy1_reg[15:8]` and `joy1_reg[7:0]` as two bytes, so bit 15 reaches the host. Two things on that path are worth suspecting first. `joy1` into `iosys` is the OR of `joy_btns`, `joy_usb1`, `joy_usb2` and `joy_wii`, so any of those sources asserting bit 2 completes the chord with HOME. And `pad_held_s` is a two-flop synchroniser applied to a multi-bit bus, which can deliver a mixed sample when several bits change together. A third possibility sits on the host side, in how TinyTang's `play_task` and desk task read the word. Neither `gbatang_top.sv` nor `iosys_bl616.v` was changed by this cycle; both remain uncommitted in the working tree exactly as the unlogged session left them, and nothing was built or deployed from this repository.
+
+#### Next Steps:
+
+Measure the chord before changing anything: with the exit-chord core loaded, run TinyTang's new `pad` command at the prompt -- it is in the firmware the board is running now, `fdebc90-dirty.c62e9ec` -- and press minus alone, HOME alone, then both, several launches apart, which shows directly which bits the core sets and whether bit 15 asserts only on the chord. If the word is right and the host misreads it, the fault is TinyTang's; if bit 2 or bit 15 is set by something other than minus, check the other `joy1` sources and the synchroniser on `pad_held` here. Only once the chord is reliable should the save it triggers be driven with the console attached and followed by a cold start, which is the sequence TinyTang entry 37 names as the most likely way the board stopped tonight. The two RTL files stay uncommitted until then, and the board is left on the suspect TinyTang firmware with known-good and suspect images kept at `/run/media/vash/GIT/tinytang-scratch/firmware-backup/2026-11-16/`. The card still carries the test leftovers entry 10 listed, and the release question is unchanged.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: FAIL
+
+---
