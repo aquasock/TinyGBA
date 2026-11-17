@@ -388,3 +388,37 @@ None.
 - User Test: N/A
 
 ---
+## 14 COMMIT Unreleased 2026-11-17T11:12:55-07:00
+
+#### Coming From:
+
+Unreleased 6190686
+
+#### Purpose:
+
+Make TinyGBA boot like TinySNES, with colour bars until a cartridge runs and black rather than grey bars beside the picture.
+
+#### Outcome:
+
+TinyGBA now shows TinySNES's boot screen and black side bars, accepted on the board by the operator (BRD-124). `gba2hdmi.sv` gained a `rom_loaded` input, wired from `gbaon` in `gbatang_top.sv`, and draws eight vertical colour bars across the full active raster while it is low, in TinySNES's order and levels and behind the TinyDesk layer, and draws black instead of `0x303030` outside the picture; the six diagnostic display builds keep the grey surround and no boot screen, because `tools/decode_fetchtrace.py` locates the picture by it. A new bench, `tools/video/run_bootscreen_tb.sh`, adapted from TinySNES's, compiles `gba2hdmi.sv` with an HDMI stub and the existing `DPX9B` model, checks eight bars of 160 pixels with no cartridge, none once loaded, bars again during a reload and a black surround, and was mutation-tested: restoring the grey gave 199 failing pixels and disabling the bars failed every bar check. `build/bootbars_s7` at seed 7 passed every gate with `hold 0` and no relaxation, `clk67` at 206.825 MHz on `SPINE25/TOP1=good`, `tinygba.bin` sha256 `ee14875b...`, and was produced by `tools/ship_core.py` and written to the card as `tinygba.bin` with a matching `tinygba.fs.gz`. Captures showed the eight bars in order during a reload and black columns at 3 to 18 of 255 beside a running Emerald. The bars were first hidden because TinyTang mirrors its console over the whole screen after a shell `tangload` and the desk layer is drawn above the boot screen, which is by design and does not affect library launches. After a power-up the operator launched Castlevania: Aria of Sorrow from the library, reported that it booted as TinySNES does with black bars, and that minus + HOME exited cleanly, after which `crash` showed no record, `fpga` core 84 and the SD mounted. Testing also exposed a TinyTang fault that this change does not cause: on a boot where TinyDesk has run, a shell `gbaload` prints its first line and stalls, for this build and for `build/exitkey` alike, with the console mirror on or off, while a library launch completes; ctrl-c returns the prompt, and loads interrupted that way may run a stale SDRAM image without the save restored. The README now describes the boot screen and the bench. A temporary `tinygba_exitkey.bin` used for that comparison was deleted from the card afterwards. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected and holds this entry and BRD-124 only, and this entry was validated as number 14 of 100 with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, only eligible paths in Files Modified and allowed Status values, with the reference store at 209 records and 209 unique ids.
+
+#### Next Steps:
+
+No work remains on the boot screen. The shell `gbaload` stall belongs to TinyTang and should be chased there, starting from the difference between `cmd_gbaload` and the library's call of the same `tang_gba_load()` on a boot where TinyDesk has run; until then cartridges should be launched from the library, and a shell load that stalls should not be trusted to have restored its save. BRD-123's junk `.sav` on exit remains open, and the release remains deferred at the operator's direction.
+
+#### Files Modified:
+
+- README.md
+- fpga/gba/src/gba2hdmi.sv
+- fpga/gba/src/gbatang_top.sv
+- tools/video/bootscreen_tb.sv
+- tools/video/hdmi_stub.sv
+- tools/video/run_bootscreen_tb.sh
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

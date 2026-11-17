@@ -352,6 +352,12 @@ board dump fail on the same byte for the same reason. `tb_save.sv` also models
 the EEPROM store's bit order and is mutation-tested against the byte-order fix, so
 that order cannot silently drift back. See TCL-060 and BRD-116.
 
+`tools/video/run_bootscreen_tb.sh` compiles `gba2hdmi.sv` alone with an HDMI
+stub and checks the boot screen in seconds: eight colour bars until a cartridge
+is running, none after, bars again during a reload, and black rather than grey
+either side of the picture. Restoring the grey surround or disabling the bars
+each makes it fail.
+
 ### Test cartridges
 
 `tools/make_probe_rom.py` assembles every probe in `tools/roms/` into a loadable
@@ -414,6 +420,15 @@ hardware before releasing it — `save hardware = flash1M` and so on — so a
 cartridge that needs a save window gets one without being told. Before it
 releases the core it looks for `<rom-path>.sav` and restores it. See BRD-089,
 BRD-110 and BRD-117.
+
+From `tangload` until the cartridge is running, the screen shows eight vertical
+colour bars across the full width, the same boot screen TinySNES, TinyNES and
+TinyGBC draw, and they come back for the length of any reload. The gate is
+`gbaon`, the loader's release of the machine. Once the game runs, the 3:2 picture
+sits between black side bars. Diagnostic display builds (`TINYGBA_SDRAM_TEST`,
+`CLKTEST`, `STATUS_TEST`, `FETCHTRACE`, `PIXTEST`, `VIDEO_TEST`) keep the old grey
+surround and no boot screen, because `tools/decode_fetchtrace.py` finds the
+picture by that grey.
 
 `gbasave` is the other direction: it dumps whatever is in the cartridge's save
 window to `<rom-path>.sav`, so a save can leave the board. SRAM, flash512K,

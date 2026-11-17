@@ -41,6 +41,12 @@ module gba2hdmi (
     input      [11:0] desk_wr_addr,
     input      [36:0] desk_wr_data,
 
+    // TinyGBA: high once a cartridge has been loaded and the machine released
+    // (`gbaon`).  Low from configuration until the first load finishes, and
+    // again for the length of every reload, which is when the boot screen below
+    // is drawn.  On the machine clock; synchronised here.
+    input             rom_loaded,
+
     // output [7:0] led,
 
 	// output signals
@@ -550,10 +556,81 @@ desk_layer u_desk (
     .rgb    (desk_rgb)
 );
 
+// A diagnostic display build replaces the GBA picture with an instrument of its
+// own, and those instruments are read back from captures that expect the
+// production surround of earlier builds: `tools/decode_fetchtrace.py` finds the
+// picture by the flat grey letterbox around it.  So every such build keeps the
+// grey surround and has no boot screen, which would otherwise cover the
+// instrument until a cartridge happened to load.
+`ifdef TINYGBA_SDRAM_TEST
+  `define TINYGBA_DIAG_DISPLAY
+`endif
+`ifdef TINYGBA_CLKTEST
+  `define TINYGBA_DIAG_DISPLAY
+`endif
+`ifdef TINYGBA_STATUS_TEST
+  `define TINYGBA_DIAG_DISPLAY
+`endif
+`ifdef TINYGBA_FETCHTRACE
+  `define TINYGBA_DIAG_DISPLAY
+`endif
+`ifdef TINYGBA_PIXTEST
+  `define TINYGBA_DIAG_DISPLAY
+`endif
+`ifdef TINYGBA_VIDEO_TEST
+  `define TINYGBA_DIAG_DISPLAY
+`endif
+
+`ifndef TINYGBA_DIAG_DISPLAY
+// ------------------------------------------------------------- boot screen
+//
+// TinyGBA: from configuration until a cartridge is running there is no GBA
+// picture to show -- the machine is held in reset while the loader streams the
+// image, and the frame buffer holds whatever it held last.  TinySNES draws eight
+// equal vertical colour bars in this state (its `snes2hdmi.v`, after TinyNES and
+// TinyGBC's `video.sv`), so this core draws the same thing with the same order
+// and levels, and the four consoles look alike while a game loads: white,
+// yellow, cyan, green, magenta, red, blue, black, each channel 0xC0 on and 0x10
+// off, across the whole 1280-column active raster so there is no surround.
+//
+// `cx` counts the full 1650-column raster, so the active-area test is explicit;
+// without it the bars would run on into blanking.
+localparam integer BOOT_BAR_W = FRAMEWIDTH / 8;
+
+// `rom_loaded` is `gbaon`, produced on the machine clock.  It changes once per
+// load, so two flops of latency cost nothing, and it is the one bit that swaps
+// the whole screen.
+reg [1:0] rom_loaded_sync = 2'b00;
+always @(posedge clk_pixel) rom_loaded_sync <= {rom_loaded_sync[0], rom_loaded};
+wire boot_screen = ~rom_loaded_sync[1];
+
+wire [2:0] boot_bar = cx < BOOT_BAR_W     ? 3'd0 :
+                      cx < BOOT_BAR_W * 2 ? 3'd1 :
+                      cx < BOOT_BAR_W * 3 ? 3'd2 :
+                      cx < BOOT_BAR_W * 4 ? 3'd3 :
+                      cx < BOOT_BAR_W * 5 ? 3'd4 :
+                      cx < BOOT_BAR_W * 6 ? 3'd5 :
+                      cx < BOOT_BAR_W * 7 ? 3'd6 : 3'd7;
+wire boot_r = boot_bar == 3'd0 || boot_bar == 3'd1 ||
+              boot_bar == 3'd4 || boot_bar == 3'd5;
+wire boot_g = boot_bar == 3'd0 || boot_bar == 3'd1 ||
+              boot_bar == 3'd2 || boot_bar == 3'd3;
+wire boot_b = boot_bar == 3'd0 || boot_bar == 3'd2 ||
+              boot_bar == 3'd4 || boot_bar == 3'd6;
+wire [23:0] boot_rgb = {boot_r ? 8'hC0 : 8'h10,
+                        boot_g ? 8'hC0 : 8'h10,
+                        boot_b ? 8'hC0 : 8'h10};
+wire boot_visible = boot_screen && cx < FRAMEWIDTH && cy < FRAMEHEIGHT;
+`endif
+
 // calc rgb value to hdmi
 always @(posedge clk_pixel) begin
     if (desk_px) begin
         rgb <= desk_rgb;            // the desk owns this pixel
+`ifndef TINYGBA_DIAG_DISPLAY
+    end else if (boot_visible) begin
+        rgb <= boot_rgb;            // no cartridge running yet
+`endif
     end else if (active) begin
         if (overlay)
             rgb <= {overlay_color[4:0],3'b0,overlay_color[9:5],3'b0,overlay_color[14:10],3'b0};       // BGR5 to RGB8
@@ -562,7 +639,11 @@ always @(posedge clk_pixel) begin
                     mem_portB_rdata[COLOR_BITS   +: COLOR_BITS], {(8-COLOR_BITS){1'b0}},
                     mem_portB_rdata[0            +: COLOR_BITS], {(8-COLOR_BITS){1'b0}}};    // RGB4 to RGB8
     end else
-        rgb <= 24'h303030;
+`ifdef TINYGBA_DIAG_DISPLAY
+        rgb <= 24'h303030;          // diagnostic: the surround the capture tools find
+`else
+        rgb <= 24'h000000;          // production: black either side, as TinySNES draws
+`endif
 end
 
 // HDMI output.

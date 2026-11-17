@@ -2265,6 +2265,10 @@ gba2hdmi video (            // BRAM-based framebuffer
     .overlay_x(overlay_x), .overlay_y(overlay_y), .overlay_color(overlay_color),
     .desk_on(desk_on), .desk_wr_tog(desk_wr_tog),
     .desk_wr_addr(desk_wr_addr), .desk_wr_data(desk_wr_data),
+    // The boot screen's gate: colour bars until a cartridge is running, as on
+    // TinySNES.  `gbaon` rather than `gbaon_mem`, so a TINYGBA_GBAON_ALWAYS
+    // build, whose machine is released unconditionally, shows no bars either.
+    .rom_loaded(gbaon),
 	.tmds_clk_n(tmds_clk_n), .tmds_clk_p(tmds_clk_p), .tmds_d_n(tmds_d_n),
 	.tmds_d_p(tmds_d_p)
 );
