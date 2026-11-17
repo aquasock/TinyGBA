@@ -422,3 +422,36 @@ No work remains on the boot screen. The shell `gbaload` stall belongs to TinyTan
 - User Test: PASS
 
 ---
+## 15 COMMIT Unreleased 2026-11-17T12:59:42-07:00
+
+#### Coming From:
+
+Unreleased 0b97d7f
+
+#### Purpose:
+
+Stop the library exit writing junk as a `.sav` by giving a cartridge with no save an erased save store in the core.
+
+#### Outcome:
+
+A cartridge loaded with no `.sav` now finds an erased store and a restored save is never touched (BRD-125, closing BRD-123). `gba_memory.sv` fills the 128 KB flash/SRAM store with `0xFFFFFFFF` at the release of any ROM load in which the save engine wrote nothing, holding the machine for about 8 ms until the last of 32,768 writes, and restarts the EEPROM's all-ones walk at the start of every ROM load; `gbatang_top.sv` feeds it `host_save_wr` from the RV bus. The fill runs at release rather than beside the ROM stream because the loader issues each byte inside a fixed three-cycle window that a concurrent request could take. The first image, `build/blankfill_s7`, failed on the board: after a relay power-up Mario Kart's window still held Metroid's old save, because `sdram_gba` takes every write to the window as a flash command when the type is flash, the mechanism of BRD-105, and the first bench's SDRAM model did not do that. `gba_memory` now presents NONE to all three controller instances through `sdram_backup_type` during the fill, and `tools/save/run_fill_tb.sh` models the interception and fails on the ungated design with five checks, on a fill that ignores a restore with three and on a release that does not wait with six, while passing the fix with every word of both banks filled, a restored store untouched, a reload abandoning a fill and a slow controller still served once per word. The seed-7 rebuild was refused by the clock-plane gate with `clk67` on general routing, a placement outcome; seeds 1, 3 and 5 all passed every gate and seed 5 was deployed as `build/blankfill2_s5`, `clk67` 213.630 MHz, `hold 0`, no relaxation. On it, after a relay power-up, Mario Kart with no `.sav` read `0xFF` across all 131,072 bytes over `fpgapipe`, and Metroid restored its `.sav` with 0 bytes differing. The operator created a new Minish Cap save, exited with minus + HOME, rebooted and found it, and the `.sav` the exit wrote is the game's own 8 KB EEPROM image; the board was healthy afterwards. Two side findings are recorded in BRD-125 rather than acted on: Metroid's card `.sav` was a constant `0x5A` pattern of unknown origin, which the operator chose to replace with a new save, kept with an SDRAM-recovered copy of the old save in `tinytang-scratch/recovered-2026-11-17/`; and a shell `gbaload` stalled on a boot where TinyDesk had not run but `fpgapipe` and `tangget` had, narrowing TinyTang entry 40. The console was found by USB identity throughout, as another agent drives an ESP32 on a neighbouring port, and the relay sequence reached TinyNode over UDP only. The README describes the blank store and its bench. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected and holds this entry, BRD-125 and the BRD-123 revision only, and this entry was validated as number 15 of 100 with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, only eligible paths in Files Modified and allowed Status values, with the reference store at 210 records and 210 unique ids.
+
+#### Next Steps:
+
+No work remains on the save store. The shell `gbaload` stall needs chasing in TinyTang with the corrected condition, and the `0x5A` Metroid file is worth watching for: if another game's `.sav` turns into a constant pattern, the writer is live and should be found. The release remains deferred at the operator's direction.
+
+#### Files Modified:
+
+- README.md
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/memory/gba_memory.sv
+- tools/save/run_fill_tb.sh
+- tools/save/tb_fill.sv
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---

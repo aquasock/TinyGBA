@@ -454,6 +454,19 @@ takes a second or two because the save is written to the card before the desktop
 core is reloaded. A cartridge started with `gbaload` at the shell has nothing
 watching the chord, so it has no save-on-exit. See BRD-122.
 
+A cartridge with no `.sav` starts with an erased save store, all ones, as a new
+cartridge or an emulator would. When a ROM load ends without the firmware
+restoring a save, the core fills both 64 KB banks of the flash/SRAM store with
+`0xFF` before it releases the machine, which takes about 8 ms, and it restarts
+the EEPROM's all-ones walk at the start of every ROM load. During the fill the
+SDRAM controller is told the save type is NONE. With a flash type it treats
+every write to the window as a flash command and discards it, which is what the
+first board image of this fix did. Before this, the store
+kept whatever it last held, either power-up SDRAM or the previous cartridge's
+save, and an exit wrote that back as the new cartridge's `.sav` (BRD-123).
+`tools/save/run_fill_tb.sh` checks this against the real `gba_memory`, including
+that a restored save is never overwritten.
+
 **A controller only works on this path.** An image flashed over JTAG runs the core
 but configures no socket fabric, so nothing on the pad responds (TCL-054).
 Two-wire is mandatory for play; one-wire is for bench work only.

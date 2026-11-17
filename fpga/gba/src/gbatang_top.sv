@@ -759,6 +759,8 @@ wire [15:0] tr_valid;
 // (BRD-101..104).  Declaring the width is the fix; the truncation is invisible
 // in simulation without -Wall and warns about nothing in synthesis.
 wire [2:0]  config_backup_type;
+// What the SDRAM controller is told: NONE during the blank save fill (gba_memory).
+wire [2:0]  sdram_backup_type;
 `ifdef TINYGBA_STALLTRACE
 // Stall-trace readout (layout v5), generated after the DMA block further down.
 wire [31:0] stl_word;
@@ -1374,6 +1376,11 @@ gba_memory mem (
     .loading(loading), .loader_data(loader_do), .loader_valid(loader_do_valid),
     .gbaon(gbaon_mem), .config_backup_type(config_backup_type),
     .cartram_dirty(cartram_dirty), .cartram_dirty_clear(cartram_dirty_clear),
+    // A save-engine write is the firmware restoring a `.sav`; a load that sees
+    // none gets a blank (all-ones) save store at its release.  `gba_save`
+    // drives a zero strobe on reads, so this is writes only.
+    .host_save_wr(rv_valid & (rv_wstrb != 4'b0000)),
+    .sdram_backup_type(sdram_backup_type),
 
     // Interface to GPU to access special memory like VRAM, OAMRAM, PALETTE
     .vram_lo_addr(vram_lo_addr), .vram_lo_din(vram_lo_din), .vram_lo_dout(vram_lo_dout), 
@@ -1409,7 +1416,7 @@ sdram_gba sdram (
 	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata), 
     .cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
     .cpu_ready(cpu_mem_ready_raw), .cpu_port(cpu_mem_port),
-    .config_backup_type(config_backup_type), .backup_written(backup_written),
+    .config_backup_type(sdram_backup_type), .backup_written(backup_written),
 	
     .rv_addr(rv_mem_addr), .rv_din(rv_mem_din), .rv_ds(rv_mem_ds), 
     .rv_dout(rv_mem_dout), .rv_req(rv_mem_req), .rv_req_ack(rv_mem_req_ack), 
@@ -1435,7 +1442,7 @@ gba_sdram_rtl sdram (
 	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata),
 	.cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
 	.cpu_ready(cpu_mem_ready_raw), .cpu_port(cpu_mem_port),
-	.config_backup_type(config_backup_type), .backup_written(backup_written),
+	.config_backup_type(sdram_backup_type), .backup_written(backup_written),
 	.rv_dout(), .rv_req_ack(), .total_refresh(), .busy(),
 `ifdef TINYGBA_SDRAM_DEBUG
 	.dbg_mem_state(mem_dbg_state), .dbg_loader_writes(mem_dbg_lw),
@@ -1450,7 +1457,7 @@ sdram_sim sdram (
 	.cpu_addr(cpu_mem_addr), .cpu_wdata(cpu_mem_wdata), .cpu_rdata(cpu_mem_rdata), 
     .cpu_rd(cpu_mem_rd), .cpu_wr(cpu_mem_wr), .cpu_be(cpu_mem_be),
     .cpu_ready(cpu_mem_ready_raw), .cpu_port(cpu_mem_port), 
-    .config_backup_type(config_backup_type)
+    .config_backup_type(sdram_backup_type)
 );
 `endif   // TINYGBA_SDRAM_RTL
 

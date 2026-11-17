@@ -174,6 +174,17 @@ module gba_memory (
     output reg          cartram_dirty,  // set to 1 whenever cartram is written to
     input               cartram_dirty_clear,    // clears cartram_dirty
 
+    // TinyGBA: a host write to the save window through the save engine (the
+    // firmware restoring a `.sav`), for the blank fill below.  clk domain.
+    input               host_save_wr,
+    // TinyGBA: the save type for the SDRAM controller.  `config_backup_type`
+    // except during the blank fill, when it reads NONE: with a flash type the
+    // controller takes every write to the cart-RAM window as a flash command and
+    // discards it (`sdram_gba.v`, `flash_cmd_en`; BRD-105), and it replaces the
+    // bank bit with its own flash bank, so the fill has to reach it as plain
+    // SDRAM.  Nothing else uses the window then: the machine is held.
+    output      [2:0]   sdram_backup_type,
+
     // GPU memory interface
     output     [13:0]   vram_lo_addr,
     output     [31:0]   vram_lo_din,
@@ -228,10 +239,46 @@ reg [7:0]   loader_buf[0:3];                        // byte-by-byte. bottleneck 
 reg [7:0]   loader_d;
 reg [27:0]  loader_addr;                            // region 8 and 9 for ROM, region E for cart RAM
 
+// TinyGBA: blank save store for a cartridge that has no save.
+//
+// The flash and SRAM store is 128 KB of SDRAM (two 64 KB banks at the cart-RAM
+// mapping) that nothing cleared between loads, and the EEPROM store is cleared
+// only by a core reset.  A cartridge loaded with no `.sav` therefore booted
+// against whatever the store held -- power-up SDRAM, or the previous cartridge's
+// save -- and the desk app's exit dumped that back to the card as the new
+// cartridge's `.sav` (BRD-123).  A real cartridge with no save reads as an
+// erased chip, all ones, and so does an emulator's, so the store is made to.
+//
+// When: at the release that ends a load which streamed a ROM (stage 1) and in
+// which the host did not write the save window.  The firmware restores a `.sav`
+// through the save engine after the configuration stage and before it drops
+// `loading` to 0, so "no host write before the release" is exactly "no `.sav`",
+// and the fill can never overwrite a restore.  Filling at release, rather than
+// alongside the ROM stream, also keeps it out of the loader's way: the loader
+// issues each byte inside a fixed three-cycle window and assumes the request
+// state machine is free to take it, which a concurrent fill could break.  The
+// machine stays held (`gbaon` low) until the fill has finished: 32,768 word
+// writes of 0xFFFFFFFF, a few milliseconds, during which the boot screen stays
+// up.  A load without stage 1 -- none exists today -- never fills.
+//
+// The EEPROM is in block RAM with its own all-ones INIT walk, which `rst` starts;
+// it is restarted at the start of every ROM load as well, about 4 ms against a
+// stream of 20 ms or more, so it has finished before any restore arrives.
+reg         fill_start;         // loader block -> FSM: begin a fill (one cycle)
+reg         fill_armed;         // this load streamed a ROM
+reg         fill_restored;      // the host wrote the save window during this load
+reg         fill_release;       // release the machine once the fill has finished
+reg         fill_active;        // FSM: fill in progress
+reg         fill_inflight;      // FSM: a fill write is waiting for sdram_ready
+reg [14:0]  fill_addr;          // word index: bit 14 is the bank, 32,768 words
+reg         eeprom_reinit;      // one-cycle restart of the EEPROM's INIT walk
+
 localparam BACKUP_NONE = 3'd0;
 localparam BACKUP_FLASH512K = 3'd1;
 localparam BACKUP_FLASH1M = 3'd2;
 localparam BACKUP_SRAM = 3'd3;
+
+assign sdram_backup_type = fill_active ? BACKUP_NONE : config_backup_type;
 localparam BACKUP_EEPROM = 3'd4;
 
 reg         config_eeprom_type = 1;                 // 1: 64kbit eeprom, 0: 4kbit
@@ -427,12 +474,32 @@ always @(posedge clk) begin
 
     if (~resetn) begin
         port = 0; addr = 0; wdata = 0; be = 0; wr = 0;
+        fill_active <= 0;
+        fill_inflight <= 0;
+        fill_addr <= 0;
     end else begin
         reg active_var, hi;
         hi = 0;
 
         // default values
         sdram_rd_buf <= 0; sdram_wr_buf <= 0;
+
+        // TinyGBA: blank fill bookkeeping (see the declarations).  A fill write
+        // completes on the same `REQ1_WAIT & sdram_ready` edge as any request 1;
+        // a new load abandons a fill, and a start (later in program order)
+        // wins over both.
+        if (state == REQ1_WAIT & sdram_ready & fill_inflight) begin
+            fill_inflight <= 0;
+            fill_addr <= fill_addr + 15'd1;
+            if (&fill_addr)
+                fill_active <= 0;
+        end
+        if (loading != 0)
+            fill_active <= 0;
+        if (fill_start) begin
+            fill_active <= 1;
+            fill_addr <= 0;
+        end
 
         // new rom value from bram needs to be saved as 2nd request may overwrite it
         if (state == REQ2_BRAM | state == REQ2_START)
@@ -552,6 +619,19 @@ always @(posedge clk) begin
                     // high in any wait state.  `cpu_en` for the loader needs no
                     // change because it is `sdram_ready` in both `REQ1_WAIT` and
                     // `REQ1_START`.  See core-log entry 14.
+                    state <= REQ1_WAIT;
+                end else if (fill_active & ~fill_inflight & loading == 0) begin
+                    // TinyGBA: one word of the blank fill.  Lowest priority, and
+                    // only between loads with the machine held, so nothing else
+                    // is asking.  The address is `tosdram` of the cart-RAM window
+                    // with bit 16 as the bank, which is where the loader's
+                    // bank-1 hack and the flash1M bank both put the second 64 KB.
+                    sdram_wr_buf <= 1;
+                    sdram_addr_buf <= {9'b1000_0001_0, fill_addr};
+                    sdram_wdata_buf <= 32'hFFFF_FFFF;
+                    sdram_be_buf <= 4'b1111;
+                    sdram_port_buf <= PORT_RAM;
+                    fill_inflight <= 1;
                     state <= REQ1_WAIT;
                 end
             end
@@ -705,7 +785,17 @@ always @(posedge clk) begin
         loader_buf_front <= 0;
         loader_buf_back <= 0;
         gbaon <= 0;
+        fill_start <= 0;
+        fill_armed <= 0;
+        fill_restored <= 0;
+        fill_release <= 0;
+        eeprom_reinit <= 0;
     end else begin
+        fill_start <= 0;
+        eeprom_reinit <= 0;
+        if (loading != 0 && host_save_wr)
+            fill_restored <= 1;
+
         case (loading)
         1, 2: begin                               // ROM or Cart RAM, write to SDRAM
             if (loader_valid) begin                     // push data into fifo
@@ -769,15 +859,38 @@ always @(posedge clk) begin
                 config_backup_type <= BACKUP_NONE;
                 config_eeprom_type <= 1;
                 // config_flash_backup <= 0;
+                // TinyGBA: a ROM load may need a blank store at its release,
+                // unless the host restores one first; the EEPROM restarts its
+                // all-ones walk now (see the fill declarations).
+                fill_armed <= 1;
+                fill_restored <= 0;
+                eeprom_reinit <= 1;
             end
         end
 
         // turning GBA on and off
-        if (loading && !loading_r) 
+        if (loading && !loading_r) begin
             gbaon <= 0;
+            fill_release <= 0;
+        end
 
-        if (!loading && loading_r) 
+        // TinyGBA: the release waits for the blank fill when this load streamed
+        // a ROM and restored nothing.  `fill_start` is seen by the state machine
+        // on the next edge, which sets `fill_active` on the one after, the same
+        // edge on which `fill_start` falls -- so the test below never sees both
+        // low before the fill has run.
+        if (!loading && loading_r) begin
+            fill_armed <= 0;
+            if (fill_armed & ~fill_restored) begin
+                fill_start <= 1;
+                fill_release <= 1;
+            end else
+                gbaon <= 1;
+        end
+        if (fill_release & ~fill_start & ~fill_active) begin
+            fill_release <= 0;
             gbaon <= 1;
+        end
 
     end
 end
@@ -924,7 +1037,9 @@ assign oamram_we = (bram_wr & sel_oam) ? bram_be16b : 4'b0;
 
 // EEPROM:      D:FFFF00 - D:FFFFFF.
 gba_eeprom eeprom (
-    .clk(clk), .rst(~resetn), .cs(sel_eeprom), .model(config_eeprom_type),
+    // TinyGBA: also restarted at the start of every ROM load, so a cartridge
+    // with no `.sav` finds an erased EEPROM rather than the last one's save.
+    .clk(clk), .rst(~resetn | eeprom_reinit), .cs(sel_eeprom), .model(config_eeprom_type),
     .valid(bram_valid), .write(bram_wr), .ready(),
     .din(bram_wdata[0]), .dout(rdata_eeprom),
     .dma_eepromcount(dma_eepromcount), .written(eeprom_written),
