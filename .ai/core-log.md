@@ -240,3 +240,32 @@ The launcher the operator actually asked for is now unblocked and is the next th
 - User Test: PASS
 
 ---
+## 9 COMMIT Unreleased 2026-11-16T19:31:10-07:00
+
+#### Coming From:
+
+Unreleased 73bae0b
+
+#### Purpose:
+
+Record that TinyGBA now boots cartridges from TinyTang's desktop, the launcher page that BRD-120's overlay toggle made possible.
+
+#### Outcome:
+
+TinyGBA appears in TinyTang's Start menu as a cartridge library and boots games from it, which closes the last operational gap between this core and the other four on the board -- TinyNES, TinyGBC and TinySNES were all drivable from the desktop and this one was not. The app itself lives in TinyTang's tree and is recorded there as that repository's log entry 35 and record GBA-003; what this entry records is that the core supports it and that the route was exercised. Selecting a cartridge programs `tinygba.bin` from the card, streams the image, and the game runs with the overlay hidden; a tap of HOME brings the desktop back over the running game and brings the game back again, the toggle BRD-120 measured. The operator confirmed the route on hardware and then loaded a second title from the same window without returning to a shell (BRD-121). On the firmware side the load was made shared rather than copied, which is the part that matters for maintenance: `tang_gba_load()` is the body of `cmd_gbaload` lifted into a callable function with the same contract as `tang_snes_load()`, so the shell command is now path resolution and the desk app takes the same path, and `gbaload` was re-tested on the new firmware afterwards rather than assumed -- `save hardware = SRAM`, `restoring 32768 bytes of SRAM`, `save restored`, `8388608 bytes in; the core is running`. Two corrections were made to my own work during the cycle. The app first called a window API this TinyDesk does not have, using `td_window` and `td_window_set_tick` where the working idiom is `td_win_create` with a `td_window_desc_t`; the compiler caught it, and a second pass caught a missing `AM_VOLUME_LABEL`. And `gba_save_restore` still printed through `tdsh_printf` with a `gbaload:` prefix after the extraction, so its seven messages were converted to the shared dual-output helper and the firmware rebuilt, reflashed and re-tested rather than committed unrun. One entry of the earlier round was also wrong and was fixed before commit: the TinyTang log entry was first written without the six canonical sections and with a `verification:` field inside the Outcome, which that repository's syntax does not allow, and it was rewritten in the canonical shape. The launcher is deliberately one page -- Library, with Launch, Up and Refresh -- because this core implements no frame for a pad map, a video shape or a volume, so the Input, Video and Audio pages TinySNES carries would be controls that do nothing; the Saves page was left out for time rather than for a missing mechanism, since the save path is proven for all four types and `gbasave` exists. The board reports firmware `tinytang 8abefad-dirty.032e2ad`; the TinyGBA bitstream at the launcher's own path `/root/cores/console138k/tinygba.bin` was replaced with `build/home_toggle/tinygba.bin`, so a rebuild now only needs that file copied for the desktop to pick it up. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 9 was validated as the ninth entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 9 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 206 records with 206 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 191 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`. TinyTang's own log was checked by the same script and found to hold 35 entries numbered 1 to 35 with no gaps, each with six sections and a trailing `---`.
+
+#### Next Steps:
+
+Build the Saves page, because it is the one remaining launcher page that needs nothing new in this core: all four save types are proven, `gbasave` exists, and a page listing the selected cartridge's save, its size against what the cartridge's own header implies, and a Restore action would be the first page beyond the library that does real work -- and it belongs in TinyTang's tree, with this repository only supplying the core. The Input, Video and Audio pages should wait until this core implements the frames behind them or they will be controls that do nothing. Two gaps are worth closing in this repository rather than that one. Per-chunk load progress reaches only the console, which is hidden while a game runs, so a 32 MiB cartridge's load is invisible from the desktop; the core reports no progress and the firmware's `gba_say()` already carries the lines, so the missing piece is a frame the desktop can read or a status the app can poll. And nothing here verifies the launcher end to end, so a future change to the desk commands or the pad report would be caught only by a person pressing buttons -- BRD-120 noted the same absence for the pad word. The desktop work is now ahead of the core in one respect worth deciding: TinySNES's pages depend on frames this core has not implemented, so whether TinyGBA grows those frames or stays a library-only launcher is a scope decision, not a defect.
+
+#### Files Modified:
+
+None.
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: PASS
+
+---
