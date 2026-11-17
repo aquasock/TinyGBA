@@ -2147,6 +2147,12 @@ end
 // plays B (the SNES arrangement), ZL and ZR play L and R.  HOME has nothing to
 // map to and is left out.  X and Y themselves stay clear because nothing
 // downstream reads those two bits.
+// The HOME key, for the TinyDesk toggle.  Declared here rather than beside its
+// use because the pad exists only when USB1 is undefined, and `iosys` is
+// instantiated outside that guard -- a missing pad must mean "no HOME", not an
+// undeclared wire.
+wire home_key;
+
 wire [11:0] joy_wii = {                  // (R L X A RT LT DN UP START SELECT Y B)
     pad_held_s[1]  | pad_held_s[10],     // R  <- R, ZR
     pad_held_s[5]  | pad_held_s[15],     // L  <- L, ZL
@@ -2161,8 +2167,10 @@ wire [11:0] joy_wii = {                  // (R L X A RT LT DN UP START SELECT Y 
     1'b0,                                // Y  (unused by the GBA)
     pad_held_s[14] | pad_held_s[13]      // B  <- B, Y
 };
+assign home_key = pad_held_s[3];         // Classic HOME, byte 4 bit 3
 `else
 wire [11:0] joy_wii = 12'b0;
+assign home_key = 1'b0;                  // no pad on this build, so no toggle
 `endif
 
 assign joy_btns_gba = overlay ? 0 : joy_btns | joy_usb1 | joy_usb2 | hid1 | hid2 | joy_wii;
@@ -2270,7 +2278,11 @@ iosys_bl616 #(.CORE_ID(3), .COLOR_LOGO(15'b01111_01100_10101), .FREQ(16_650_000)
     .desk_on(desk_on_iosys), .desk_wr_tog(desk_wr_tog_iosys),
     .desk_wr_addr(desk_wr_addr_iosys), .desk_wr_data(desk_wr_data_iosys),
     .core_config(core_config),
-    .joy1(joy_btns | joy_usb1 | joy_usb2), .joy2(12'b0),
+    // The same word the GBA keypad sees, plus the Wii pad: TinyTang drives the
+    // desktop pointer from this report, so leaving `joy_wii` out would leave a
+    // controller able to play the game but not to move the pointer.
+    .joy1(joy_btns | joy_usb1 | joy_usb2 | joy_wii), .joy2(12'b0),
+    .home(home_key),
     .hid1(hid1), .hid2(hid2),
 
 `ifdef TEST_LOADER

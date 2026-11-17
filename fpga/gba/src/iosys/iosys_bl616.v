@@ -34,6 +34,7 @@ module iosys_bl616 #(
     output reg [11:0] desk_wr_addr,
     output reg [36:0] desk_wr_data, // {char[6:0], fg[14:0], bg[14:0]}, colours {b,g,r}
     input [11:0] joy1,              // DS2/SNES joystick 1: (R L X A RT LT DN UP START SELECT Y B)
+    input        home,              // Wii Classic HOME, 1 = pressed (TinyDesk toggle)
     input [11:0] joy2,              // DS2/SNES joystick 2
     output reg [15:0] hid1,         // USB HID joystick 1
     output reg [15:0] hid2,         // USB HID joystick 2
@@ -516,9 +517,42 @@ reg [4:0] send_state, send_state_next;
 reg [7:0] send_idx;
 // Empty transmit slots tolerated inside one save data frame; see SEND_SAVE_DATA.
 reg [12:0] save_stall;
-localparam JOY_UPDATE_INTERVAL = 50_000_000 / 50; // 20ms interval for 50Hz
+// TinyGBA: this was `50_000_000 / 50`, which is 20 ms only if the block runs at
+// 50 MHz.  It runs on clk16, so the same constant gave a report every 59.7 ms --
+// three times slower than the comment claimed, and slower than the desktop's own
+// 40 ms poll, which made a pointer driven from this word feel laggy.  Deriving
+// it from CLK_FREQ (the FREQ parameter, 16.65 MHz here) makes the interval what
+// it says it is whatever clock the core is given.
+localparam JOY_UPDATE_INTERVAL = CLK_FREQ / 50; // 20 ms
+// A HOME tap is reported as a press of bit 10 for this many ticks: 13 x 20 ms =
+// 260 ms, the same duration TinyNES and TinySNES use, long enough that the host
+// cannot miss the edge and short enough not to look stuck.
+localparam [7:0] TAP_TICKS = 8'd13;
 reg [$clog2(JOY_UPDATE_INTERVAL+1)-1:0] joy_timer;
 reg [15:0] joy1_reg;
+
+// ---------------------------------------------------------------- HOME tap --
+//
+// TinyTang's desk task toggles the desktop on a rising edge of TANG_PAD_LB,
+// which is bit 10 of the pad word it receives (tang_pad.h).  This core's joy
+// word uses bit 10 for L, so L must NOT reach the host: leaving it in would make
+// the shoulder button open the desktop mid-game.  It is masked here and bit 10
+// is driven only by a tap of HOME, which is exactly the arrangement TinySNES
+// uses on the same host.
+//
+// A tap is HOME pressed and released with nothing else held; HOME with SELECT
+// is the exit-and-save gesture on TinySNES and is deliberately not reused here,
+// because this core has no save-on-exit and a combined gesture that did nothing
+// would be worse than none.
+reg [7:0] home_tap = 8'd0;
+reg home_prev = 1'b0, home_alone = 1'b0;
+wire [11:0] joy1_report = (joy1 & 12'hFFF & ~12'h400)
+                        | (home_tap != 8'd0 ? 12'h400 : 12'h000);
+// A report is repeated every JOY_REFRESH_TICKS even when nothing changed: a
+// dropped UART frame would otherwise leave a button stuck low-side forever, and
+// a stuck bit 10 would hold the desktop over the game with no way back.
+localparam [4:0] JOY_REFRESH_TICKS = 5'd25;   // 500 ms
+reg [4:0] joy_refresh = 5'd0;
 reg [15:0] joy2_reg;
 reg [15:0] resp_frame_len;
 
@@ -526,6 +560,10 @@ reg [15:0] resp_frame_len;
 always @(posedge clk) begin
     if (!resetn) begin
         joy_timer <= 0;
+        home_tap <= 8'd0;
+        home_prev <= 1'b0;
+        home_alone <= 1'b0;
+        joy_refresh <= 5'd0;
         send_state <= 0;
         save_stall <= 0;
         save_tx_pending <= 0;
@@ -560,16 +598,36 @@ always @(posedge clk) begin
             save_tx_pending <= 1'b1;
         end
         
-        // Joypad state transmission logic
-        joy_timer <= joy_timer == 0 ? 0 : joy_timer - 1;
+        // Joypad state transmission logic.  `joy_timer` free-runs rather than
+        // stopping at zero, so it is a real 20 ms tick: the tap has to age on the
+        // tick whether or not a report went out, and a timer that only restarted
+        // on a send would age the tap once per clock while idle.
+        joy_timer <= joy_timer == 0 ? JOY_UPDATE_INTERVAL : joy_timer - 1;
+
+        // Age the HOME tap and the refresh counter on each tick, and arm a tap
+        // on a clean release.  This sits outside the send decision so the tap
+        // runs down even if nothing else is moving.
+        if (joy_timer == 0) begin
+            if (home_tap != 8'd0)
+                home_tap <= home_tap - 8'd1;
+            joy_refresh <= joy_refresh == JOY_REFRESH_TICKS - 1 ? 5'd0 : joy_refresh + 5'd1;
+        end
+        home_prev <= home;
+        if (home && !home_prev)
+            home_alone <= joy1 == 12'd0;
+        else if (home && joy1 != 12'd0)
+            home_alone <= 1'b0;
+        if (!home && home_prev && home_alone)
+            home_tap <= TAP_TICKS;
 
         // UART transmission state machine
         case (send_state)
             SEND_IDLE: begin
                 send_idx <= 0;
-                if (joy_timer == 0 && (joy1 != joy1_reg || joy2 != joy2_reg)) begin
-                    joy_timer <= JOY_UPDATE_INTERVAL;
-                    joy1_reg <= joy1;
+                if (joy_timer == 0 &&
+                    (joy1_report != joy1_reg[11:0] || joy2 != joy2_reg[11:0] ||
+                     joy_refresh == JOY_REFRESH_TICKS - 1)) begin
+                    joy1_reg <= joy1_report;
                     joy2_reg <= joy2;
                     send_state_next <= SEND_JOYPAD;
                     send_state <= SEND_HEADER;

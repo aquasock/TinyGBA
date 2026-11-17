@@ -1354,6 +1354,9 @@
       "sound.igba_sound_dmaB.fifo": {
         "RAM16SDP4": 8
       },
+      "video.u_desk.cells": {
+        "DPB": 10
+      },
       "video.u_fb.bank_i[0].u_hi": {
         "DPX9B": 1
       },

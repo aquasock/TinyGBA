@@ -209,3 +209,34 @@ The RTL half of the launcher is done, so the next step is on the other side of t
 - User Test: NOT RUN
 
 ---
+## 8 COMMIT Unreleased 2026-11-16T18:47:17-07:00
+
+#### Coming From:
+
+Unreleased 312cede
+
+#### Purpose:
+
+Make the HOME button switch between TinyTang's desktop and a running game, as it does on TinySNES, so a cartridge can be booted from the desktop rather than from a shell.
+
+#### Outcome:
+
+HOME switches between the desktop and the game, in both directions, with the emulator running throughout. The mechanism turned out to be the host's rather than the core's: TinyTang's desk task toggles the overlay on a rising edge of `TANG_PAD_LB`, which is bit 10 of the pad word it receives, and that task is not gated on core identity, so any core that reports bit 10 gets the toggle. TinyGBA now reports bit 10 from a clean tap of HOME -- pressed and released with nothing else held -- held for 13 ticks of 20 ms, the same 260 ms TinyNES and TinySNES use so the host cannot miss the edge. Verified on `build/home_toggle` (`b6536413...`, seed 7, `clk67` 132.644 MHz, `hold 0`, no relaxation needed, census matching the updated baseline) with Metroid Fusion loaded: starting the desktop from the firmware drew its full UI -- icons, the Start menu, the window list -- and after `osd off` the same cartridge was still playing at 24 energy, 73 missiles and 16 power bombs with its map overlay up, so it had run continuously through the test rather than restarting. The operator confirmed that HOME switches both ways and that the shoulder button does not open the desktop (BRD-120). Two faults had to be fixed first and neither was in the layer being added. This core relays `joy1` unchanged in the DS2/SNES layout where bit 10 is L, while the host reads bit 10 as the toggle, so the moment a toggle existed every shoulder press would have opened the desktop over a running game; the report now masks bit 10 and drives it only from the HOME tap. And `JOY_UPDATE_INTERVAL` was `50_000_000 / 50`, which is 20 ms only at 50 MHz -- this block runs on `clk16`, so reports went out every 59.7 ms, three times slower than the comment claimed and slower than the desktop's own 40 ms poll, which would have made the pointer lag by design; it is now derived from `CLK_FREQ` (TCL-085). A third change was for completeness rather than for a defect: `joy_wii` was never part of the reported word, so a Wii pad could play the game but could not move the desktop pointer, and it is now included. The build also stopped once, correctly, at the memory-placement gate, because the desk's cell store appeared in the production census where it had not been before -- `video.u_desk.cells` at 10 block RAM -- and that gate refused to pass an undeclared memory change. The baseline was updated after checking the diff was exactly that one addition with nothing removed or altered, which is the discipline the gate exists to force rather than to bypass. This cycle also proves `iosys_bl616`'s three desk commands on hardware for the first time: the colour-bar image of BRD-119 drives the layer's write port directly and bypasses them entirely, so the full TinyDesk UI could not have drawn had the command handling been wrong. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected, entry 8 was validated as the eighth entry of the rolled-over log with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, an allowed Status triple and a trailing `---`, the active log was confirmed at 8 entries against the 100-entry limit with no gaps in its numbering, and the reference store was confirmed at 205 records with 205 unique ids, no duplicates, every record in canonical field order, and every status inside the three-value vocabulary, being 190 `VERIFIED`, 8 `MEASURED` and 7 `LEAD`.
+
+#### Next Steps:
+
+The launcher the operator actually asked for is now unblocked and is the next thing worth building, on the TinyTang side: select a cartridge from the desktop and have `gbaload` stream it with the overlay hidden, so booting a game stops being a shell sequence. The pieces are in place -- the desktop draws, the commands are proven, and the overlay toggles without disturbing a running game -- so what is missing is the desktop application itself, which lives in TinyTang's tree and not here. Two things are worth settling before that work starts. HOME toggles the overlay but does not start the desktop if it was never started, which is correct while the desktop is launched from the shell and may not be once it is the primary way in; that is a host-side decision. And nothing reads the pad word back for verification, because TinyTang exposes no command for it, so every claim about this core's report rests on the operator pressing buttons -- a `pad` shell command that prints the last word would make the next input change checkable without a human. Two smaller items remain as before: `tools/roms/saveprobe_iw.s` is still untracked and unvalidated with its defect closed, and the BSRAM tolerance on `video.u_desk.cells` (9 to 12 levels against a bound of 8) is a recorded risk rather than a settled one, which matters more now that the layer draws continuously during play rather than only under a test image.
+
+#### Files Modified:
+
+- fpga/gba/src/gbatang_top.sv
+- fpga/gba/src/iosys/iosys_bl616.v
+- tools/memory_baseline.json
+
+#### Status:
+
+- Build: PASS
+- Deployment: PASS
+- User Test: PASS
+
+---
