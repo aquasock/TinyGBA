@@ -71,9 +71,10 @@ verified fact.
   red, so the restore did the work and not leftover memory. Beyond patterns, all
   three types have now been saved **by a retail game** and accepted unchanged by
   mGBA: Metroid Fusion (SRAM), Super Mario Advance 2 (EEPROM) and Pokemon Emerald
-  (flash1M). See BRD-109, BRD-110, BRD-112 and BRD-116. What is *not* yet
-  established is a game's own save carried across a power cut with the game
-  continuing from it; see Known gaps.
+  (flash1M). And a game's own save has survived a real power cut: Pokemon
+  Emerald's in-game save, restored by `gbaload` after a relay cut, was read by the
+  cartridge as valid and offered `CONTINUE` with the saved player name, play time
+  and badge count on screen. See BRD-109, BRD-110, BRD-112, BRD-116 and BRD-117.
 
 ### The two defects that blocked it, both now fixed
 
@@ -135,7 +136,7 @@ CPU, the GPU or a cartridge.
   one upstream `gbatang.sdc` exists to express, so an image that needs it is
   correct rather than marginal, and any timing figure must say whether it needed
   the allowance.
-- **Save persistence is testable now, and passes for SRAM.** This section used to
+- **Save persistence is testable now, and passes.** This section used to
   say the opposite, on the strength of an EEPROM that appeared to keep its
   contents across two power cycles. That measurement never touched the EEPROM
   store: the accesses went to plain SDRAM because `config_backup_type` reached the
@@ -144,7 +145,9 @@ CPU, the GPU or a cartridge.
   an erased part, so the store clears rather than decays and a negative control is
   available — and it was used: a probe writes, `gbasave` takes the window, a relay
   cuts power, `gbaload` restores, the pattern returns, and an all-zeros control
-  comes back red. See BRD-110 and BRD-113. Two smaller notes survive from this
+  comes back red. A retail game's own save has since passed the same test: Pokemon
+  Emerald's flash1M save survived a relay power cut and the game offered to
+  continue from it. See BRD-110, BRD-113 and BRD-117. Two smaller notes survive from this
   passage and are still true: the running cartridge is not what disturbs a reading
   in general, two dumps fifteen seconds apart during play being identical (BRD-095)
   — though a cartridge that reformats its save on boot does write the window, which
@@ -345,7 +348,9 @@ case is absent rather than failing, because the harness cannot drive 135 bytes a
 file. `tools/save/sav_pattern.py` makes and checks a `.sav` whose every byte
 depends on its offset, so a dropped byte, a swapped lane or a 64 KB alias shows
 up as a named offset; `tb_save.sv` uses the same pattern, so the RTL bench and a
-board dump fail on the same byte for the same reason. See TCL-060 and BRD-092.
+board dump fail on the same byte for the same reason. `tb_save.sv` also models
+the EEPROM store's bit order and is mutation-tested against the byte-order fix, so
+that order cannot silently drift back. See TCL-060 and BRD-116.
 
 ### Test cartridges
 
@@ -407,8 +412,8 @@ larger than the 32 MiB a GBA cartridge can be. While it streams the image it
 searches each chunk for a save-type marker and configures the core's save
 hardware before releasing it — `save hardware = flash1M` and so on — so a
 cartridge that needs a save window gets one without being told. Before it
-releases the core it looks for `<rom-path>.sav` and restores it. See BRD-089
-and BRD-092.
+releases the core it looks for `<rom-path>.sav` and restores it. See BRD-089,
+BRD-110 and BRD-117.
 
 `gbasave` is the other direction: it dumps whatever is in the cartridge's save
 window to `<rom-path>.sav`, so a save can leave the board. SRAM, flash512K,

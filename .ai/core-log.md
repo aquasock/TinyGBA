@@ -269,3 +269,33 @@ None.
 - User Test: PASS
 
 ---
+## 10 COMMIT Unreleased 2026-11-16T22:09:22-07:00
+
+#### Coming From:
+
+Unreleased d2c8b3c
+
+#### Purpose:
+
+Clear the record and card debt the save-path cycles left behind -- two reference records still standing on retired conclusions, a README that understated what the save path has proven, two probe instruments for a closed defect, and a test pattern sitting where Mario Kart's save belongs.
+
+#### Outcome:
+
+The records now say what the later evidence established, and one item could not be done as planned. BRD-107 is retitled `REFUTED by BRD-108` and its consequence opens with a dated note: the two black seed-1 images carried the free BIOS, netlist signature `5953aaf13e0e7692`, against the retail `a599090b2107db6d` in both working images, and `build/head_retail_s1` at the same default seed 1 with the retail BIOS boots and runs the probe (BRD-109), so seed 1 is not unsafe and no seed-sensitivity reading should be taken from it; the record still said `MEASURED` with the seed explanation standing, which is the reading a future agent would have acted on. BRD-105 is marked closed by BRD-109 and its status raised from `MEASURED` to `VERIFIED` with a revision note, because both limits it stated were later retired -- the red square that made the width fix look insufficient was the simulation pin model's wired-OR (BRD-106), and the flash-type check it asked for was made by BRD-111's re-taken round trips. Both edits follow the store's own precedent from BRD-062, a prefixed title and a dated note at the head of the consequence with the original text left as settled history. The README's save section still said that a game's own save carried across a power cut was not established, which BRD-117 closed when Pokemon Emerald offered `CONTINUE` after a relay cut; that sentence and the Open section's "passes for SRAM" now record it, and two citations that used BRD-092 as evidence now cite BRD-116 for the save bench and BRD-110 and BRD-117 for the loader's restore, while the one remaining mention, which cites BRD-092 as the example of a wrong result, is correct and stays. `tools/roms/savewprobe.s`, marked NOT VALIDATED since entry 94 of the archived log, was removed with `git rm` and remains in history at `199ab1d`, with a dated note added to TCL-080, the record that describes it as committed. `tools/roms/saveprobe_iw.s` had never been tracked, so deleting it would have been unrecoverable; it was moved out of the repository to `/run/media/vash/GIT/tinytang-scratch/removed-2026-11-16/saveprobe_iw.s` at sha256 `844307392d93acb542bd5a680d5e1bf76f4380459c50e9b805204162feb31927`. `tools/make_probe_rom.py` lists probes by scanning the directory, so nothing else referred to either file. The planned restore of Mario Kart's save could not be done: `/tmp/card_mariokart_backup.sav`, which entry 6 named as the backup, matches the canonical pattern `(i*31+7) & 0xFF` in all 65,536 bytes, so it was taken after the card copy had already been overwritten, and no real Mario Kart save was found in the SD staging trees, the board backups, the scratch directories, mGBA's directories, the Desktop, Downloads or `/tmp`. At the operator's choice the pattern file `/root/media/gba/Mario Kart - Super Circuit (USA).gba.sav` was deleted on the card from the board's shell instead, so the game starts with no save rather than one it would reformat, and a listing afterwards shows the cartridge image still present. One operational trap is recorded because it nearly produced a false result: the first `rm` was sent while the board was showing TinyDesk, which held the console, so the command never reached the shell and a listing taken in the same state returned nothing usable; after the operator rebooted to the prompt the file was found still present and was deleted then. No RTL or firmware was changed, nothing was built or deployed, and the two uncommitted RTL files left by an unlogged session after entry 9 -- `fpga/gba/src/gbatang_top.sv` and `fpga/gba/src/iosys/iosys_bl616.v`, the HOME-with-SELECT exit chord built as `build/exitkey` -- are deliberately not part of this cycle. The core-syntax audit was run: `.ai/core.md` and `.ai/core-syntax.md` were re-read, `.ai/core.md` was confirmed unchanged at md5 `1145a377cae5b553567ab6946ed78c01`, the complete `.ai/` diff was inspected and holds this entry and the BRD-105, BRD-107 and TCL-080 revisions only, and this entry was validated as number 10 of 100 with six canonical sections in order, a one-sentence Purpose, prose in Outcome and Next Steps, only eligible paths in Files Modified and allowed Status values.
+
+#### Next Steps:
+
+Decide the fate of the unlogged save-and-exit work before anything else touches the board, because it is split across two repositories and one half of it is the leading suspect for the TinyTang firmware that would not start on 2026-11-16 (TinyTang log entry 36): this repository holds the RTL half uncommitted, and the recommendation is to park both halves together rather than commit or discard either, then find the firmware fault with the console attached and the crash recorder read straight after, and address `gbasave`'s SD-write wedge (TCL-064), which that design depends on, before it ships. The card still carries test leftovers in `/root/media/gba/` -- `t_sma2.gba` and its save, `marker.bak`, `smw_pattern.bak`, the `saveprobe*` cartridges and saves, and `Pokemon - Emerald Version (USA, Europe).gba.sav.patterntest` -- which can be cleared when the operator wants, from the shell prompt rather than with the desktop up. And the release question remains the operator's: `core.md` calls for a MINOR bump at a hardware-proven milestone, no tags exist, and twelve titles running, every save type persisting across power loss and cartridges launching from TinyDesk is that milestone.
+
+#### Files Modified:
+
+- README.md
+- tools/roms/savewprobe.s
+
+#### Status:
+
+- Build: N/A
+- Deployment: N/A
+- User Test: N/A
+
+---
